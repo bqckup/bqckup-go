@@ -1,0 +1,35 @@
+# Testing strategy
+
+All feature and bug-fix work uses red-green-refactor. Tests should prove observable behavior rather than private implementation details.
+
+## Layers
+
+- Unit: validation, error mapping, retention selection, key safety, interval and status decisions.
+- Contract: storage/exporter behavior that every adapter must satisfy.
+- Integration: temporary SQLite databases, real filesystem archives, permissions, locks, cancellation, and cleanup.
+- CLI: construct Cobra commands with in-memory stdout/stderr and parse JSON output.
+- End to end: disposable schema-v2 config, source tree, local destination, backup run, and history query.
+
+External database tools use fake process executors in unit tests. Verify executable, argument slice, environment key names, cancellation, exit handling, and redaction without contacting a production service. Adapter integration tests may use ephemeral containers only when the milestone explicitly documents them.
+
+## Required checks
+
+```bash
+make verify
+sh scripts/check-docs.sh
+```
+
+`make verify` checks formatting, runs `go vet`, executes the entire suite with the race detector, and builds the CLI. Tests must not need a network, fixed host path, real credential, production config, or a particular execution order.
+
+## Minimum cases for new adapters
+
+- valid success path and metadata;
+- invalid configuration and missing dependency;
+- context cancellation and process termination;
+- partial output cleanup;
+- redaction of secrets and provider responses;
+- multiple destinations/all-required behavior where applicable;
+- deterministic test names and temporary resources;
+- no change to previously successful backup sets after failure.
+
+Use `t.TempDir`, fixed injected clocks, and fakes only at external boundaries. A bug fix starts with a regression test that fails for the actual defect.
