@@ -14,7 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bqckup/bqckup-go/internal/backup"
 	"github.com/bqckup/bqckup-go/internal/storage"
 	"golang.org/x/sys/unix"
 )
@@ -40,7 +39,7 @@ func New(root string) (*Store, error) {
 	return &Store{root: absolute}, nil
 }
 
-func (s *Store) Put(ctx context.Context, artifact backup.Artifact, key string) (stored storage.StoredArtifact, err error) {
+func (s *Store) Put(ctx context.Context, artifact storage.Artifact, key string) (stored storage.StoredArtifact, err error) {
 	if err := ctx.Err(); err != nil {
 		return stored, err
 	}

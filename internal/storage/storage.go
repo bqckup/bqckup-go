@@ -3,8 +3,6 @@ package storage
 import (
 	"context"
 	"time"
-
-	"github.com/bqckup/bqckup-go/internal/backup"
 )
 
 // TimestampLayout is the portable UTC directory name used for backup sets.
@@ -16,13 +14,20 @@ type StoredArtifact struct {
 	SHA256 string
 }
 
+// Artifact is the verified local file handed to a storage adapter.
+type Artifact struct {
+	Path   string
+	Size   int64
+	SHA256 string
+}
+
 type BackupSet struct {
 	Key       string
 	CreatedAt time.Time
 }
 
 type Store interface {
-	Put(ctx context.Context, artifact backup.Artifact, key string) (StoredArtifact, error)
+	Put(ctx context.Context, artifact Artifact, key string) (StoredArtifact, error)
 	Delete(ctx context.Context, key string) error
 	ListBackupSets(ctx context.Context, sitePrefix string) ([]BackupSet, error)
 }

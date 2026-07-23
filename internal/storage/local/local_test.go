@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/bqckup/bqckup-go/internal/backup"
+	"github.com/bqckup/bqckup-go/internal/storage"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -109,12 +109,12 @@ func TestListBackupSetsRecognizesOnlyUTCApplicationTimestamps(t *testing.T) {
 	assert.Equal(t, "bqckup/site/2026-07-23T03-45-00Z", sets[1].Key)
 }
 
-func sourceArtifact(t *testing.T, contents []byte) backup.Artifact {
+func sourceArtifact(t *testing.T, contents []byte) storage.Artifact {
 	t.Helper()
 	filename := filepath.Join(t.TempDir(), "artifact.tar.gz")
 	require.NoError(t, os.WriteFile(filename, contents, 0o600))
 	sum := sha256.Sum256(contents)
-	return backup.Artifact{
+	return storage.Artifact{
 		Path:   filename,
 		Size:   int64(len(contents)),
 		SHA256: hex.EncodeToString(sum[:]),
