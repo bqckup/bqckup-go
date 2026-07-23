@@ -33,12 +33,12 @@ const (
 )
 
 type RunResult struct {
-	RunID      string
-	SiteName   string
-	Status     Status
-	SkipReason SkipReason
-	StartedAt  time.Time
-	FinishedAt time.Time
+	RunID      string     `json:"run_id,omitempty"`
+	SiteName   string     `json:"site_name"`
+	Status     Status     `json:"status"`
+	SkipReason SkipReason `json:"skip_reason,omitempty"`
+	StartedAt  time.Time  `json:"started_at,omitempty"`
+	FinishedAt time.Time  `json:"finished_at,omitempty"`
 }
 
 type Archiver interface {
