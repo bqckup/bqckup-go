@@ -1,0 +1,6 @@
+version: 2
+
+storages:
+  local-primary:
+    type: local
+    directory: /var/backups/bqckup
