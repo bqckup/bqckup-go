@@ -1,6 +1,6 @@
 # Bqckup Go
 
-CLI backup berbasis Go dengan Cobra, Viper, GORM, dan SQLite.
+A Go-based backup CLI built with Cobra, Viper, GORM, and SQLite.
 
 ## Build
 
