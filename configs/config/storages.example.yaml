@@ -1,0 +1,24 @@
+storages:
+  local-main:
+    type: local
+    directory: /var/backups/bqckup
+    primary: false
+
+  idrive-main:
+    type: s3
+    bucket: example-bucket
+    access_key_id: EXAMPLE_ACCESS_KEY
+    secret_access_key: EXAMPLE_SECRET_KEY
+    region: example-region
+    endpoint: https://account.region.example.invalid
+    prefix: company-backups
+    primary: true
+
+  cloudflare-archive:
+    type: r2
+    bucket: example-archive
+    access_key_id: EXAMPLE_R2_ACCESS_KEY
+    secret_access_key: EXAMPLE_R2_SECRET_KEY
+    endpoint: https://example-account.r2.cloudflarestorage.com
+    prefix: company-archive
+    primary: false
