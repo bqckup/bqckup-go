@@ -1,5 +1,11 @@
 package backup
 
+import (
+	"context"
+
+	"github.com/bqckup/bqckup-go/internal/config"
+)
+
 type FileSource struct {
 	Include        []string
 	Exclude        []string
@@ -12,4 +18,8 @@ type Artifact struct {
 	SHA256     string
 	SourceKind string
 	SourceName string
+}
+
+type Exporter interface {
+	Export(ctx context.Context, source config.DatabaseSource, destination string) (Artifact, error)
 }
