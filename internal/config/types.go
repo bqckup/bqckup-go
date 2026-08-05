@@ -56,14 +56,14 @@ type FileSource struct {
 }
 
 type DatabaseSource struct {
-	Name        string `mapstructure:"name" yaml:"name"`
-	Enabled     bool   `mapstructure:"enabled" yaml:"enabled"`
-	Engine      string `mapstructure:"engine" yaml:"engine"`
-	Host        string `mapstructure:"host" yaml:"host"`
-	Port        int    `mapstructure:"port" yaml:"port"`
-	Database    string `mapstructure:"database" yaml:"database"`
-	Username    string `mapstructure:"username" yaml:"username"`
-	PasswordEnv string `mapstructure:"password_env" yaml:"password_env"`
+	Name     string `mapstructure:"name" yaml:"name"`
+	Enabled  bool   `mapstructure:"enabled" yaml:"enabled"`
+	Engine   string `mapstructure:"engine" yaml:"engine"`
+	Host     string `mapstructure:"host" yaml:"host"`
+	Port     int    `mapstructure:"port" yaml:"port"`
+	Database string `mapstructure:"database" yaml:"database"`
+	Username string `mapstructure:"username" yaml:"username"`
+	Password string `mapstructure:"password" yaml:"password"`
 }
 
 type Destination struct {

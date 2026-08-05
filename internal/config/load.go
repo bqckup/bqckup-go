@@ -78,6 +78,9 @@ func Load(ctx context.Context, dir string) (Config, error) {
 		if err := decode(sitePath, &doc, nil); err != nil {
 			return Config{}, err
 		}
+		if err := validateDatabaseCredentialFile(sitePath, doc.Site); err != nil {
+			return Config{}, err
+		}
 		doc.Site.SchemaVersion = doc.Version
 		doc.Site.SourceFile = sitePath
 		if doc.Site.Policy.MinimumInterval == 0 {
@@ -119,6 +122,34 @@ func Load(ctx context.Context, dir string) (Config, error) {
 		return Config{}, err
 	}
 	return cfg, nil
+}
+
+func validateDatabaseCredentialFile(path string, site Site) error {
+	hasPassword := false
+	for _, database := range site.Sources.Databases {
+		if database.Password != "" {
+			hasPassword = true
+			break
+		}
+	}
+	if !hasPassword {
+		return nil
+	}
+
+	info, err := os.Lstat(path)
+	if err != nil {
+		return &Error{File: path, Kind: ErrorRead, Err: err}
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return validationError(path, "site.sources.databases", "password-bearing site file must not be a symlink")
+	}
+	if !info.Mode().IsRegular() {
+		return validationError(path, "site.sources.databases", "password-bearing site file must be a regular file")
+	}
+	if info.Mode().Perm() != 0o600 {
+		return validationError(path, "site.sources.databases", "password-bearing site file must have mode 0600")
+	}
+	return nil
 }
 
 func storagePath(dir string) (string, error) {
