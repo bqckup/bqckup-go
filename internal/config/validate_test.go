@@ -41,8 +41,7 @@ func validConfig(t *testing.T) Config {
 	t.Helper()
 	root := t.TempDir()
 	return Config{
-		Version:        2,
-		StorageVersion: 2,
+		Version: 2,
 		App: App{
 			StateDatabase:      filepath.Join(root, "state.db"),
 			TemporaryDirectory: filepath.Join(root, "tmp"),

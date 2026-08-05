@@ -2,7 +2,9 @@ package config
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 
@@ -15,7 +17,6 @@ type rootDocument struct {
 }
 
 type storageDocument struct {
-	Version  int                `mapstructure:"version"`
 	Storages map[string]Storage `mapstructure:"storages"`
 }
 
@@ -41,10 +42,19 @@ func Load(ctx context.Context, dir string) (Config, error) {
 		return Config{}, err
 	}
 
-	storagePath := filepath.Join(dir, "config", "storages.yaml")
+	storagePath, err := storagePath(dir)
+	if err != nil {
+		return Config{}, err
+	}
 	var stores storageDocument
 	if err := decode(storagePath, &stores, nil); err != nil {
 		return Config{}, err
+	}
+	for name, storage := range stores.Storages {
+		if storage.Type == "r2" && storage.Region == "" {
+			storage.Region = "auto"
+			stores.Storages[name] = storage
+		}
 	}
 
 	sitePaths, err := filepath.Glob(filepath.Join(dir, "sites", "*.yaml"))
@@ -87,16 +97,43 @@ func Load(ctx context.Context, dir string) (Config, error) {
 	}
 
 	cfg := Config{
-		Version:        root.Version,
-		StorageVersion: stores.Version,
-		App:            root.App,
-		Storages:       stores.Storages,
-		Sites:          sites,
+		Version:  root.Version,
+		App:      root.App,
+		Storages: stores.Storages,
+		Sites:    sites,
+	}
+	if primary, ok := cfg.PrimaryStorage(); ok {
+		for index := range cfg.Sites {
+			if cfg.Sites[index].Enabled && len(cfg.Sites[index].Destinations) == 0 {
+				cfg.Sites[index].Destinations = []Destination{{Storage: primary}}
+			}
+		}
 	}
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
 	}
 	return cfg, nil
+}
+
+func storagePath(dir string) (string, error) {
+	yamlPath := filepath.Join(dir, "config", "storages.yaml")
+	ymlPath := filepath.Join(dir, "config", "storages.yml")
+	_, yamlErr := os.Lstat(yamlPath)
+	_, ymlErr := os.Lstat(ymlPath)
+	if yamlErr == nil && ymlErr == nil {
+		return "", &Error{
+			File: filepath.Join(dir, "config"),
+			Kind: ErrorRead,
+			Err:  errors.New("both storages.yaml and storages.yml exist"),
+		}
+	}
+	if yamlErr == nil {
+		return yamlPath, nil
+	}
+	if ymlErr == nil {
+		return ymlPath, nil
+	}
+	return yamlPath, nil
 }
 
 func decode(path string, target any, configure func(*viper.Viper)) error {

@@ -19,9 +19,6 @@ func (c Config) Validate() error {
 	if c.Version != SchemaVersion {
 		return validationError("bqckup.yaml", "version", "must equal %d", SchemaVersion)
 	}
-	if c.StorageVersion != SchemaVersion {
-		return validationError("config/storages.yaml", "version", "must equal %d", SchemaVersion)
-	}
 	if c.App.StateDatabase == "" {
 		return validationError("bqckup.yaml", "app.state_database", "is required")
 	}
