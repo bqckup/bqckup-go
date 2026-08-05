@@ -26,9 +26,7 @@ func newInitCommand(opts *options) *cobra.Command {
 
 func initializeConfig(directory string) error {
 	files := map[string]string{
-		filepath.Join(directory, "bqckup.yaml"): `version: 2
-
-app:
+		filepath.Join(directory, "bqckup.yaml"): `app:
   state_database: /var/lib/bqckup/bqckup.db
   temporary_directory: /var/lib/bqckup/tmp
   lock_directory: /var/lib/bqckup/locks
@@ -40,9 +38,7 @@ app:
     directory: /var/backups/bqckup
     primary: true
 `,
-		filepath.Join(directory, "sites", "example.yaml"): `version: 2
-
-site:
+		filepath.Join(directory, "sites", "example.yaml"): `site:
   name: example
   enabled: false
   sources:

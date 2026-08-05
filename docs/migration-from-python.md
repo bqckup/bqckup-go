@@ -21,7 +21,7 @@ There was no separate, reliable `jobs.d` contract in the supplied configuration 
 ## Intentional changes
 
 - extensions become `.yaml`;
-- root and site documents declare `version: 2`; the storage document is unversioned;
+- root and site documents default to schema version 2; an explicit `version` is optional and must be `2`; the storage document is unversioned;
 - the site filename must equal the normalized site name;
 - mutable SQLite state, locks, and temporary files move outside the config tree;
 - intervals are durations rather than implicit scheduling behavior;

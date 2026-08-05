@@ -1,5 +1,3 @@
-version: 2
-
 site:
   name: example
   enabled: true

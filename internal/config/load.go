@@ -15,8 +15,8 @@ import (
 )
 
 type rootDocument struct {
-	Version int `mapstructure:"version"`
-	App     App `mapstructure:"app"`
+	Version *int `mapstructure:"version"`
+	App     App  `mapstructure:"app"`
 }
 
 type storageDocument struct {
@@ -24,7 +24,7 @@ type storageDocument struct {
 }
 
 type siteDocument struct {
-	Version int  `mapstructure:"version"`
+	Version *int `mapstructure:"version"`
 	Site    Site `mapstructure:"site"`
 }
 
@@ -81,7 +81,7 @@ func Load(ctx context.Context, dir string) (Config, error) {
 		if err := validateDatabaseCredentialFile(sitePath, doc.Site); err != nil {
 			return Config{}, err
 		}
-		doc.Site.SchemaVersion = doc.Version
+		doc.Site.SchemaVersion = versionOrDefault(doc.Version)
 		doc.Site.SourceFile = sitePath
 		if doc.Site.Policy.MinimumInterval == 0 {
 			doc.Site.Policy.MinimumInterval = defaultMinimumInterval
@@ -106,7 +106,7 @@ func Load(ctx context.Context, dir string) (Config, error) {
 	}
 
 	cfg := Config{
-		Version:  root.Version,
+		Version:  versionOrDefault(root.Version),
 		App:      root.App,
 		Storages: stores.Storages,
 		Sites:    sites,
@@ -122,6 +122,13 @@ func Load(ctx context.Context, dir string) (Config, error) {
 		return Config{}, err
 	}
 	return cfg, nil
+}
+
+func versionOrDefault(version *int) int {
+	if version == nil {
+		return SchemaVersion
+	}
+	return *version
 }
 
 func validateDatabaseCredentialFile(path string, site Site) error {

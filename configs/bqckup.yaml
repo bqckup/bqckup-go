@@ -1,5 +1,3 @@
-version: 2
-
 app:
   state_database: data/bqckup.db
   temporary_directory: tmp

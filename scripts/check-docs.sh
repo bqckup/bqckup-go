@@ -37,8 +37,8 @@ for milestone in M01 M02 M03 M04 M05 M06 M07 M08 M09 M10 M11; do
     fi
 done
 
-if ! grep -Rqs '^version: 2$' configs; then
-    echo "example configuration does not declare schema version 2" >&2
+if ! grep -qs '^app:' configs/bqckup.yaml || ! grep -qs '^site:' configs/sites/*.yaml; then
+    echo "example configuration is missing the root or site document" >&2
     failed=1
 fi
 

@@ -32,6 +32,20 @@ app:
 	assert.Equal(t, []Destination{{Storage: "local-primary"}}, cfg.Sites[0].Destinations)
 }
 
+func TestLoadDefaultsMissingSchemaVersionsToV2(t *testing.T) {
+	site := strings.TrimPrefix(validSiteYAML(t), "version: 2\n")
+	dir := writeConfigTree(t, `app:
+  state_database: data/bqckup.db
+  temporary_directory: tmp
+  lock_directory: locks
+`, localStorageYAML, site)
+
+	cfg, err := Load(context.Background(), dir)
+	require.NoError(t, err)
+	assert.Equal(t, SchemaVersion, cfg.Version)
+	assert.Equal(t, SchemaVersion, cfg.Sites[0].SchemaVersion)
+}
+
 func TestLoadAcceptsStorageYML(t *testing.T) {
 	dir := writeConfigTree(t, `version: 2
 app:

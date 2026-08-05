@@ -23,7 +23,7 @@ func TestInitCreatesSchemaV2TreeWithoutOverwriting(t *testing.T) {
 	rootFile := filepath.Join(dir, "bqckup.yaml")
 	original, err := os.ReadFile(rootFile)
 	require.NoError(t, err)
-	assert.Contains(t, string(original), "version: 2")
+	assert.NotContains(t, string(original), "version:")
 	storageContents, err := os.ReadFile(filepath.Join(dir, "config", "storages.yaml"))
 	require.NoError(t, err)
 	assert.NotContains(t, string(storageContents), "version:")
