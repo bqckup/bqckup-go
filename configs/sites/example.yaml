@@ -10,7 +10,13 @@ site:
       exclude:
         - /srv/example/data/cache
       follow_symlinks: false
-    databases: []
+    databases:
+      - name: mysql-example
+        enabled: false
+        engine: mysql
+      - name: postgres-example
+        enabled: false
+        engine: postgres
   destinations:
     - storage: local-primary
   policy:

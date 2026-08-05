@@ -56,6 +56,27 @@ chmod 600 /etc/bqckup/config/storages.yaml
 
 Never commit a runtime storage file containing real credentials. A site may name one or more destinations explicitly; when none are listed, the single primary storage is used.
 
+## Database export
+
+Enabled MySQL/MariaDB and PostgreSQL sources are exported with `mysqldump` and `pg_dump` into compressed artifacts such as `databases/application-mysql.sql.gz`. The required binaries must be installed on the backup host.
+
+Runtime site files may contain an inline database password only when the file is a regular, non-symlink file with mode `0600`:
+
+```yaml
+sources:
+  databases:
+    - name: application-mysql
+      enabled: true
+      engine: mysql
+      host: localhost
+      port: 3306
+      database: application
+      username: backup_user
+      password: <runtime-secret>
+```
+
+The password is passed only to the child exporter process through `MYSQL_PWD` or `PGPASSWORD`. Never commit a real password. SQLite export, database repair, and restore remain deferred.
+
 ## Development
 
 ```bash

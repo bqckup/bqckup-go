@@ -62,4 +62,16 @@ if ! grep -Fq 'Restic is not part of the foundation' docs/intern-backlog.md; the
     failed=1
 fi
 
+for database_contract in 'engine: mysql' 'engine: postgres' 'MYSQL_PWD' 'PGPASSWORD' 'databases/application-mysql.sql.gz'; do
+    if ! grep -Rqs "$database_contract" README.md docs; then
+        echo "database documentation is missing: $database_contract" >&2
+        failed=1
+    fi
+done
+
+if grep -RniE '^[[:space:]]*password:[[:space:]]*[^<[:space:]][^[:space:]]*' configs; then
+    echo "tracked configuration contains a non-placeholder database password" >&2
+    failed=1
+fi
+
 exit "$failed"

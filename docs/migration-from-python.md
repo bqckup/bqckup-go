@@ -26,17 +26,17 @@ There was no separate, reliable `jobs.d` contract in the supplied configuration 
 - mutable SQLite state, locks, and temporary files move outside the config tree;
 - intervals are durations rather than implicit scheduling behavior;
 - storage references are explicit lists;
-- secret values are replaced with environment-variable names;
+- secret values remain only in protected runtime files and are never copied into tracked output;
 - unsupported flags produce a migration report instead of a silent approximation.
 
-The inspected sites primarily use MySQL, S3-compatible storage, remote URL credentials, daily intervals, retention of seven, and in some cases Rustic incremental behavior. Those production configs cannot run on the foundation yet: only file-to-local backup is currently accepted.
+The inspected sites primarily use MySQL, S3-compatible storage, remote URL credentials, daily intervals, retention of seven, and in some cases Rustic incremental behavior. Those production configs still require a schema-v2 rewrite and binary/storage validation before production use.
 
 ## Safe migration sequence
 
 1. Inventory site names, enabled sources, destinations, interval, and retention without copying secret values into tickets or logs.
 2. Create a new schema-v2 tree in a separate directory.
-3. Move any inline database password to a named environment variable.
-4. Keep database and S3 entries disabled until their corresponding milestone is released.
+3. Keep any inline database password only in the runtime site file and protect it with mode `0600`.
+4. Keep unsupported database engines and providers disabled until their corresponding milestone is released.
 5. Map file includes/excludes to absolute paths and test them against a disposable local destination.
 6. Run `config validate`, then a forced test backup.
 7. Compare archive contents, checksum, history, and retention behavior.
