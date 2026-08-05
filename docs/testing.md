@@ -12,6 +12,14 @@ All feature and bug-fix work uses red-green-refactor. Tests should prove observa
 
 External database tools use fake process executors in unit tests. Verify executable, argument slice, environment key names, cancellation, exit handling, and redaction without contacting a production service. S3/R2 unit tests use adapter-owned fakes. Opt-in integration tests may use a disposable service or private runtime config; default checks never require network access or credentials.
 
+Run the live smoke test only with a private mode-`0600` config and non-secret selectors:
+
+```bash
+BQCKUP_S3_INTEGRATION_CONFIG=/private/config \
+BQCKUP_S3_INTEGRATION_STORAGE=testing \
+go test -tags=integration ./internal/storage/s3compat -run TestDisposableS3CompatibleStorage -count=1 -v
+```
+
 ## Required checks
 
 ```bash
