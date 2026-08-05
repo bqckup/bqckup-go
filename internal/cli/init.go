@@ -34,12 +34,11 @@ app:
   lock_directory: /var/lib/bqckup/locks
   log_level: info
 `,
-		filepath.Join(directory, "config", "storages.yaml"): `version: 2
-
-storages:
+		filepath.Join(directory, "config", "storages.yaml"): `storages:
   local-primary:
     type: local
     directory: /var/backups/bqckup
+    primary: true
 `,
 		filepath.Join(directory, "sites", "example.yaml"): `version: 2
 
