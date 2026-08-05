@@ -101,10 +101,16 @@ func (f *fakeUploader) UploadObject(_ context.Context, input *transfermanager.Up
 }
 
 type fakeClient struct {
-	headOutput  *s3.HeadObjectOutput
-	headErr     error
-	deleteInput *s3.DeleteObjectInput
-	deleteErr   error
+	headOutput          *s3.HeadObjectOutput
+	headErr             error
+	deleteInput         *s3.DeleteObjectInput
+	deleteErr           error
+	listOutputs         []*s3.ListObjectsV2Output
+	listErr             error
+	listInputs          []*s3.ListObjectsV2Input
+	deleteObjectsInputs []*s3.DeleteObjectsInput
+	deleteObjectsOutput *s3.DeleteObjectsOutput
+	deleteObjectsErr    error
 }
 
 func (f *fakeClient) HeadObject(_ context.Context, _ *s3.HeadObjectInput, _ ...func(*s3.Options)) (*s3.HeadObjectOutput, error) {
@@ -114,6 +120,27 @@ func (f *fakeClient) HeadObject(_ context.Context, _ *s3.HeadObjectInput, _ ...f
 func (f *fakeClient) DeleteObject(_ context.Context, input *s3.DeleteObjectInput, _ ...func(*s3.Options)) (*s3.DeleteObjectOutput, error) {
 	f.deleteInput = input
 	return &s3.DeleteObjectOutput{}, f.deleteErr
+}
+
+func (f *fakeClient) ListObjectsV2(_ context.Context, input *s3.ListObjectsV2Input, _ ...func(*s3.Options)) (*s3.ListObjectsV2Output, error) {
+	f.listInputs = append(f.listInputs, input)
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	if len(f.listOutputs) == 0 {
+		return &s3.ListObjectsV2Output{}, nil
+	}
+	output := f.listOutputs[0]
+	f.listOutputs = f.listOutputs[1:]
+	return output, nil
+}
+
+func (f *fakeClient) DeleteObjects(_ context.Context, input *s3.DeleteObjectsInput, _ ...func(*s3.Options)) (*s3.DeleteObjectsOutput, error) {
+	f.deleteObjectsInputs = append(f.deleteObjectsInputs, input)
+	if f.deleteObjectsOutput == nil {
+		return &s3.DeleteObjectsOutput{}, f.deleteObjectsErr
+	}
+	return f.deleteObjectsOutput, f.deleteObjectsErr
 }
 
 func sourceArtifact(t *testing.T, contents []byte) storage.Artifact {

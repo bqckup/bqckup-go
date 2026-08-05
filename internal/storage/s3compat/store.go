@@ -5,15 +5,19 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"io"
 	"os"
+	"path"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/feature/s3/transfermanager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/smithy-go"
 	"github.com/bqckup/bqckup-go/internal/storage"
 )
@@ -32,6 +36,8 @@ type uploaderAPI interface {
 type objectAPI interface {
 	HeadObject(context.Context, *s3.HeadObjectInput, ...func(*s3.Options)) (*s3.HeadObjectOutput, error)
 	DeleteObject(context.Context, *s3.DeleteObjectInput, ...func(*s3.Options)) (*s3.DeleteObjectOutput, error)
+	ListObjectsV2(context.Context, *s3.ListObjectsV2Input, ...func(*s3.Options)) (*s3.ListObjectsV2Output, error)
+	DeleteObjects(context.Context, *s3.DeleteObjectsInput, ...func(*s3.Options)) (*s3.DeleteObjectsOutput, error)
 }
 
 type Store struct {
@@ -201,10 +207,151 @@ func hiddenError(message string, cause error) error {
 
 var _ storage.Store = (*Store)(nil)
 
-func (s *Store) Delete(context.Context, string) error {
-	return fmt.Errorf("remote retention is not implemented")
+var safeSiteName = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
+
+func (s *Store) Delete(ctx context.Context, backupSetPrefix string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := validateBackupSetPrefix(backupSetPrefix); err != nil {
+		return err
+	}
+	finalPrefix, err := storage.JoinPrefix(s.prefix, backupSetPrefix)
+	if err != nil {
+		return err
+	}
+	requestPrefix := finalPrefix + "/"
+	var continuation *string
+	for {
+		output, listErr := s.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+			Bucket:            aws.String(s.bucket),
+			Prefix:            aws.String(requestPrefix),
+			ContinuationToken: continuation,
+		})
+		if listErr != nil {
+			return remoteOperationError("could not list remote backup objects", listErr)
+		}
+		if output == nil {
+			return errors.New("remote object listing returned no result")
+		}
+		identifiers := make([]types.ObjectIdentifier, 0, len(output.Contents))
+		for _, object := range output.Contents {
+			key := aws.ToString(object.Key)
+			if strings.HasPrefix(key, requestPrefix) {
+				identifiers = append(identifiers, types.ObjectIdentifier{Key: aws.String(key)})
+			}
+		}
+		for start := 0; start < len(identifiers); start += 1000 {
+			end := start + 1000
+			if end > len(identifiers) {
+				end = len(identifiers)
+			}
+			deleted, deleteErr := s.client.DeleteObjects(ctx, &s3.DeleteObjectsInput{
+				Bucket: aws.String(s.bucket),
+				Delete: &types.Delete{Objects: identifiers[start:end], Quiet: aws.Bool(true)},
+			})
+			if deleteErr != nil {
+				return remoteOperationError("could not delete remote backup objects", deleteErr)
+			}
+			if deleted == nil || len(deleted.Errors) != 0 {
+				return errors.New("remote backup deletion was incomplete")
+			}
+		}
+		if !aws.ToBool(output.IsTruncated) {
+			return nil
+		}
+		if output.NextContinuationToken == nil || aws.ToString(output.NextContinuationToken) == "" {
+			return errors.New("remote object listing omitted its continuation token")
+		}
+		continuation = output.NextContinuationToken
+	}
 }
 
-func (s *Store) ListBackupSets(context.Context, string) ([]storage.BackupSet, error) {
-	return nil, fmt.Errorf("remote retention is not implemented")
+func (s *Store) ListBackupSets(ctx context.Context, sitePrefix string) ([]storage.BackupSet, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := validateSitePrefix(sitePrefix); err != nil {
+		return nil, err
+	}
+	finalPrefix, err := storage.JoinPrefix(s.prefix, sitePrefix)
+	if err != nil {
+		return nil, err
+	}
+	requestPrefix := finalPrefix + "/"
+	setsByKey := make(map[string]storage.BackupSet)
+	var continuation *string
+	for {
+		output, listErr := s.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+			Bucket:            aws.String(s.bucket),
+			Prefix:            aws.String(requestPrefix),
+			ContinuationToken: continuation,
+		})
+		if listErr != nil {
+			return nil, remoteOperationError("could not list remote backup sets", listErr)
+		}
+		if output == nil {
+			return nil, errors.New("remote object listing returned no result")
+		}
+		for _, object := range output.Contents {
+			key := aws.ToString(object.Key)
+			if !strings.HasPrefix(key, requestPrefix) {
+				continue
+			}
+			remainder := strings.TrimPrefix(key, requestPrefix)
+			timestamp, _, _ := strings.Cut(remainder, "/")
+			createdAt, parseErr := time.Parse(storage.TimestampLayout, timestamp)
+			if parseErr != nil || createdAt.Location() != time.UTC {
+				continue
+			}
+			setKey := path.Join(sitePrefix, timestamp)
+			setsByKey[setKey] = storage.BackupSet{Key: setKey, CreatedAt: createdAt}
+		}
+		if !aws.ToBool(output.IsTruncated) {
+			break
+		}
+		if output.NextContinuationToken == nil || aws.ToString(output.NextContinuationToken) == "" {
+			return nil, errors.New("remote object listing omitted its continuation token")
+		}
+		continuation = output.NextContinuationToken
+	}
+	sets := make([]storage.BackupSet, 0, len(setsByKey))
+	for _, set := range setsByKey {
+		sets = append(sets, set)
+	}
+	sort.Slice(sets, func(left, right int) bool { return sets[left].CreatedAt.Before(sets[right].CreatedAt) })
+	return sets, nil
+}
+
+func validateSitePrefix(sitePrefix string) error {
+	if err := storage.ValidateKey(sitePrefix); err != nil {
+		return err
+	}
+	parts := strings.Split(sitePrefix, "/")
+	if len(parts) != 2 || parts[0] != "bqckup" || !safeSiteName.MatchString(parts[1]) {
+		return errors.New("invalid backup site prefix")
+	}
+	return nil
+}
+
+func validateBackupSetPrefix(prefix string) error {
+	if err := storage.ValidateKey(prefix); err != nil {
+		return err
+	}
+	parts := strings.Split(prefix, "/")
+	if len(parts) != 3 || parts[0] != "bqckup" || !safeSiteName.MatchString(parts[1]) {
+		return errors.New("invalid backup set prefix")
+	}
+	createdAt, err := time.Parse(storage.TimestampLayout, parts[2])
+	if err != nil || createdAt.Location() != time.UTC || createdAt.Format(storage.TimestampLayout) != parts[2] {
+		return errors.New("invalid backup set prefix")
+	}
+	return nil
+}
+
+func remoteOperationError(message string, err error) error {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
+	return hiddenError(message, err)
 }
