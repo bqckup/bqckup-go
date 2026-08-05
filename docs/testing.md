@@ -10,7 +10,7 @@ All feature and bug-fix work uses red-green-refactor. Tests should prove observa
 - CLI: construct Cobra commands with in-memory stdout/stderr and parse JSON output.
 - End to end: disposable schema-v2 config, source tree, local destination, backup run, and history query.
 
-External database tools use fake process executors in unit tests. Verify executable, argument slice, environment key names, cancellation, exit handling, and redaction without contacting a production service. Adapter integration tests may use ephemeral containers only when the milestone explicitly documents them.
+External database tools use fake process executors in unit tests. Verify executable, argument slice, environment key names, cancellation, exit handling, and redaction without contacting a production service. S3/R2 unit tests use adapter-owned fakes. Opt-in integration tests may use a disposable service or private runtime config; default checks never require network access or credentials.
 
 ## Required checks
 
