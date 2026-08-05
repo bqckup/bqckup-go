@@ -18,7 +18,14 @@ func TestPutRejectsUnsafeKeys(t *testing.T) {
 	require.NoError(t, err)
 	artifact := sourceArtifact(t, []byte("backup"))
 
-	for _, key := range []string{"../escape.tar.gz", "/absolute.tar.gz", "safe/../../escape.tar.gz", ""} {
+	for _, key := range []string{
+		"../escape.tar.gz",
+		"/absolute.tar.gz",
+		"safe/../../escape.tar.gz",
+		`safe\escape.tar.gz`,
+		"safe//empty.tar.gz",
+		"",
+	} {
 		t.Run(key, func(t *testing.T) {
 			_, putErr := store.Put(context.Background(), artifact, key)
 			require.Error(t, putErr)

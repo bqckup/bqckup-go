@@ -12,7 +12,7 @@ Do not add placeholder commands or config that merely return “not implemented.
 
 **In scope:** `internal/backup/database`, MySQL-specific validation, safe `mysqldump` invocation through `exec.CommandContext`, password environment handling, artifact naming, runner integration, examples and docs.
 
-**Out of scope:** PostgreSQL, remote storage, schema/data restore, shell commands, credentials in arguments or YAML.
+**Out of scope:** PostgreSQL, schema/data restore, shell commands, and database credentials in arguments or YAML.
 
 **Acceptance:** Multiple named MySQL sources can run; cancellation kills the child process; incomplete dumps are removed; every destination receives the artifact; failure marks the run failed without retention.
 
@@ -54,11 +54,13 @@ Do not add placeholder commands or config that merely return “not implemented.
 
 ## M04 — S3-compatible storage adapter
 
+**Status:** Delivered in the S3/R2 storage change; retain this section as its acceptance checklist.
+
 **Objective:** Store verified artifacts in an S3-compatible service using AWS SDK for Go v2.
 
-**Prerequisites:** Storage contract and local contract tests understood; credential provider interface agreed without implementing remote HTTP credentials.
+**Prerequisites:** Storage contract and local contract tests understood.
 
-**In scope:** S3 adapter, endpoint/region/bucket/prefix validation, context-aware upload, checksum metadata, object key safety, environment provider hook, contract tests.
+**In scope:** S3/R2 adapter, endpoint/region/bucket/prefix validation, protected inline runtime credentials, context-aware conditional upload, checksum metadata, object key safety, contract tests.
 
 **Out of scope:** Remote HTTP credential retrieval, S3 retention, restore, multipart tuning beyond measured need.
 
@@ -68,15 +70,15 @@ Do not add placeholder commands or config that merely return “not implemented.
 
 **Suggested commit:** `feat: add S3-compatible storage adapter`
 
-## M05 — Environment-backed S3 credentials
+## M05 — Environment-backed S3 credentials (deferred)
 
-**Objective:** Resolve S3 access credentials only from environment variable names declared in schema v2.
+**Objective:** Optional future design only. The approved current contract uses inline credentials in a non-symlink runtime storage file with mode `0600`.
 
-**Prerequisites:** M04 merged.
+**Prerequisites:** A separate design review and explicit approval to expand the credential model.
 
-**In scope:** `credentials.source: env`, validation of environment-variable names, runtime lookup at adapter construction, safe missing-variable errors.
+**In scope:** Not ready for implementation assignment.
 
-**Out of scope:** Inline keys, shared credentials files, remote URLs, printing resolved values.
+**Out of scope:** Changing or removing the current inline runtime credential contract without migration planning.
 
 **Acceptance:** Config contains only `access_key_env` and `secret_key_env`; missing variables return preflight exit code 3; values never appear in JSON, stderr, history, or tests.
 
@@ -101,6 +103,8 @@ Do not add placeholder commands or config that merely return “not implemented.
 **Suggested commit:** `feat: add remote S3 credential provider`
 
 ## M07 — S3 retention
+
+**Status:** Delivered with prefix-scoped pagination and bounded deletion; retain this section as its acceptance checklist.
 
 **Objective:** Reuse retention selection semantics for successful S3 backup sets.
 

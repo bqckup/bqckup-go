@@ -35,14 +35,14 @@ Use [architecture.md](references/architecture.md) for dependency decisions and [
 - Domain/use-case code must not import Cobra, Viper, GORM, AWS SDK clients, or concrete process implementations.
 - Pass `context.Context` through I/O; cancellation must stop subprocesses and remove incomplete output.
 - Use `exec.CommandContext` with explicit argument slices. Never build a shell command.
-- Store only environment-variable names in YAML. Never expose secret values, provider URLs, child environments, or response bodies in logs, CLI output, JSON, history, fixtures, or arguments.
+- Database secrets remain environment references. S3/R2 credentials are inline only in a runtime storage file that is a regular non-symlink file with mode `0600`; never commit them or expose keys, endpoints, signed requests, child environments, or provider bodies in output, logs, history, fixtures, or errors.
 - Multiple destinations are all-required. Never apply retention after a failed export or storage operation.
 - Preserve archive mode and SQLite migration ordering unless the selected milestone explicitly changes their contracts.
 
 ## Scope gates
 
 - Web UI, authentication, notifications, reporting, webhook, internal scheduling, and Rustic are out of scope.
-- S3, credential providers, exporters, doctor, migration, and packaging are separate milestones; do not combine them for convenience.
+- Remote credential providers, exporters, doctor, migration, and packaging are separate milestones; do not combine them for convenience.
 - Restic is design-only until a separate proposal is approved. Before any Restic work, read [restic-roadmap.md](references/restic-roadmap.md). Do not add a dependency, package, command, or config field during the design cycle.
 
 ## Review output

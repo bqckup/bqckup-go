@@ -47,6 +47,11 @@ if grep -RniE '^[[:space:]]*(password|access_key|secret_key):[[:space:]]*[^[:spa
     failed=1
 fi
 
+if grep -RniE '^[[:space:]]*(access_key_id|secret_access_key):[[:space:]]*[^[:space:]]' configs | grep -vE ':[[:space:]]*EXAMPLE_[A-Z0-9_]+[[:space:]]*$'; then
+    echo "storage examples may contain only EXAMPLE_ credential placeholders" >&2
+    failed=1
+fi
+
 if find internal cmd -name '*.go' -type f -exec grep -liE 'rustic|restic' {} + | grep -q .; then
     echo "Rustic or Restic implementation is outside the foundation scope" >&2
     failed=1

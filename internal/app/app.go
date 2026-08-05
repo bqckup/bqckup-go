@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/bqckup/bqckup-go/internal/retention"
 	"github.com/bqckup/bqckup-go/internal/storage"
 	localstorage "github.com/bqckup/bqckup-go/internal/storage/local"
+	"github.com/bqckup/bqckup-go/internal/storage/s3compat"
 )
 
 type App struct {
@@ -40,18 +42,10 @@ func Open(ctx context.Context, configDir string) (*App, error) {
 		return nil, apperror.Wrap(apperror.CategoryPersistence, "could not migrate the backup history database", err)
 	}
 
-	stores := make(map[string]storage.Store, len(configuration.Storages))
-	for name, storageConfig := range configuration.Storages {
-		if storageConfig.Type != "local" {
-			_ = closeDatabase()
-			return nil, apperror.Wrap(apperror.CategoryConfig, "the configured storage type is not supported", nil)
-		}
-		store, err := localstorage.New(storageConfig.Directory)
-		if err != nil {
-			_ = closeDatabase()
-			return nil, apperror.Wrap(apperror.CategoryPreflight, "could not prepare a local storage destination", err)
-		}
-		stores[name] = store
+	stores, err := buildStores(ctx, configuration.Storages)
+	if err != nil {
+		_ = closeDatabase()
+		return nil, err
 	}
 
 	repository := history.NewRepository(database)
@@ -70,6 +64,35 @@ func Open(ctx context.Context, configDir string) (*App, error) {
 		repository:    repository,
 		closeDatabase: closeDatabase,
 	}, nil
+}
+
+func buildStores(ctx context.Context, configured map[string]config.Storage) (map[string]storage.Store, error) {
+	stores := make(map[string]storage.Store, len(configured))
+	for name, value := range configured {
+		var store storage.Store
+		var err error
+		switch value.Type {
+		case "local":
+			store, err = localstorage.New(value.Directory)
+		case "s3", "r2":
+			store, err = s3compat.New(ctx, s3compat.Options{
+				Provider:        s3compat.Provider(value.Type),
+				Bucket:          value.Bucket,
+				Region:          value.Region,
+				Endpoint:        value.Endpoint,
+				Prefix:          value.Prefix,
+				AccessKeyID:     value.AccessKeyID,
+				SecretAccessKey: value.SecretAccessKey,
+			})
+		default:
+			err = errors.New("unsupported storage type")
+		}
+		if err != nil {
+			return nil, apperror.Wrap(apperror.CategoryPreflight, "could not prepare a storage destination", err)
+		}
+		stores[name] = store
+	}
+	return stores, nil
 }
 
 func (a *App) Configuration() config.Config { return a.configuration }

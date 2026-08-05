@@ -1,16 +1,18 @@
 package config
 
-import "time"
+import (
+	"sort"
+	"time"
+)
 
 const SchemaVersion = 2
 
 // Config is the immutable, fully loaded application configuration.
 type Config struct {
-	Version        int
-	StorageVersion int
-	App            App
-	Storages       map[string]Storage
-	Sites          []Site
+	Version  int
+	App      App
+	Storages map[string]Storage
+	Sites    []Site
 }
 
 type App struct {
@@ -21,20 +23,15 @@ type App struct {
 }
 
 type Storage struct {
-	Type        string           `mapstructure:"type" yaml:"type"`
-	Directory   string           `mapstructure:"directory" yaml:"directory"`
-	Bucket      string           `mapstructure:"bucket" yaml:"bucket"`
-	Region      string           `mapstructure:"region" yaml:"region"`
-	Endpoint    string           `mapstructure:"endpoint" yaml:"endpoint"`
-	Prefix      string           `mapstructure:"prefix" yaml:"prefix"`
-	Credentials CredentialConfig `mapstructure:"credentials" yaml:"credentials"`
-}
-
-type CredentialConfig struct {
-	Source       string `mapstructure:"source" yaml:"source"`
-	AccessKeyEnv string `mapstructure:"access_key_env" yaml:"access_key_env"`
-	SecretKeyEnv string `mapstructure:"secret_key_env" yaml:"secret_key_env"`
-	URLEnv       string `mapstructure:"url_env" yaml:"url_env"`
+	Type            string `mapstructure:"type" yaml:"type"`
+	Directory       string `mapstructure:"directory" yaml:"directory"`
+	Bucket          string `mapstructure:"bucket" yaml:"bucket"`
+	AccessKeyID     string `mapstructure:"access_key_id" yaml:"access_key_id"`
+	SecretAccessKey string `mapstructure:"secret_access_key" yaml:"secret_access_key"`
+	Region          string `mapstructure:"region" yaml:"region"`
+	Endpoint        string `mapstructure:"endpoint" yaml:"endpoint"`
+	Prefix          string `mapstructure:"prefix" yaml:"prefix"`
+	Primary         bool   `mapstructure:"primary" yaml:"primary"`
 }
 
 type Site struct {
@@ -85,4 +82,19 @@ func (c Config) Site(name string) (Site, bool) {
 		}
 	}
 	return Site{}, false
+}
+
+// PrimaryStorage returns the configured primary storage when exactly one exists.
+func (c Config) PrimaryStorage() (string, bool) {
+	names := make([]string, 0, len(c.Storages))
+	for name, storage := range c.Storages {
+		if storage.Primary {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	if len(names) != 1 {
+		return "", false
+	}
+	return names[0], true
 }

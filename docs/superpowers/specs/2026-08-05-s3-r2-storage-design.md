@@ -241,11 +241,13 @@ The supplied credential pair is considered exposed because it was pasted into a 
 
 The implementation pull request updates:
 
+- `README.md` with a concise storage guide, all supported types, a safe example, and the runtime permission warning;
 - `docs/configuration-v2.md` with the unversioned storage document and all type contracts;
 - `docs/architecture.md` with the S3-compatible adapter and remote retention flow;
 - `docs/testing.md` with the opt-in integration test;
 - `docs/intern-backlog.md` to mark the combined approved slice and preserve deferred work;
 - `configs/config/storages.yaml` with a secret-free local example;
+- `configs/config/storages.example.yaml` with non-functional examples for `local`, `s3`, and `r2`;
 - the `bqckup init` template with no real or functional credentials;
 - the repository development skill references so future agents follow the approved contract.
 

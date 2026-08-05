@@ -6,7 +6,7 @@ Schema v2 keeps the useful split from the Python application while making every 
 <config-dir>/
 ├── bqckup.yaml
 ├── config/
-│   └── storages.yaml
+│   └── storages.yaml (or storages.yml)
 └── sites/
     └── <site>.yaml
 ```
@@ -29,18 +29,17 @@ Environment overrides are `BQCKUP_STATE_DATABASE`, `BQCKUP_TEMPORARY_DIRECTORY`,
 
 ## Storage file
 
-The foundation accepts `type: local` only.
+The storage document is unversioned. Exactly one of `storages.yaml` or `storages.yml` may exist. Supported types are `local`, `s3`, and `r2`.
 
 ```yaml
-version: 2
-
 storages:
   local-primary:
     type: local
     directory: /var/backups/bqckup
+    primary: true
 ```
 
-Storage names use lowercase ASCII letters, digits, dots, dashes, and underscores. S3 fields exist in typed design contracts for later milestones but validation intentionally rejects S3 until its adapter and credential behavior are implemented.
+Storage names use lowercase ASCII letters, digits, dots, dashes, and underscores. At most one storage is primary. S3 requires a bucket, inline access keys, and region; R2 additionally requires an HTTPS endpoint and defaults its region to `auto`. Both support an optional safe relative prefix. Custom S3 endpoints require HTTPS except loopback HTTP for disposable tests.
 
 ## Site file
 
@@ -69,13 +68,13 @@ site:
 
 `minimum_interval` is a positive Go duration such as `30m`, `24h`, or `168h`. `keep_last` must be at least one. Exclusions are absolute paths and apply to the selected source tree. With `follow_symlinks: false`, the archive stores symlinks as symlinks; with `true`, their targets are traversed with cycle detection.
 
-Disabled sites may remain as incomplete placeholders and are not runnable. Enabled sites require at least one absolute file include and one known destination. Database entries are rejected when enabled until their exporter milestone is delivered.
+Disabled sites may remain as incomplete placeholders and are not runnable. Enabled sites require at least one absolute file include and either a known explicit destination or one primary storage. Database entries are rejected when enabled until their exporter milestone is delivered.
 
 ## Strictness and secrets
 
 Unknown keys, an unsupported version, a mismatched filename, relative paths, unknown destination names, or unsupported features fail validation. Errors identify the source file and field path.
 
-YAML contains environment-variable names, never secret values. Future database sources use `password_env`; future S3 providers use `access_key_env`, `secret_key_env`, or `url_env`. Static validation must not resolve or contact those providers.
+Database passwords remain environment references. S3/R2 access keys are inline runtime values, so a credential-bearing storage file must be a regular, non-symlink file with exact mode `0600`. Never commit real credentials. Errors, JSON, history, and logs must not expose keys, endpoints, signed requests, or provider response bodies.
 
 Validate without running a backup:
 

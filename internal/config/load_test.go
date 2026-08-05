@@ -4,14 +4,87 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-const localStorageYAML = `version: 2
+func TestLoadAcceptsUnversionedStorageYAMLAndResolvesPrimary(t *testing.T) {
+	site := strings.Replace(validSiteYAML(t), `  destinations:
+    - storage: local-primary
+`, "", 1)
+	dir := writeConfigTree(t, `version: 2
+app:
+  state_database: data/bqckup.db
+  temporary_directory: tmp
+  lock_directory: locks
+`, `storages:
+  local-primary:
+    type: local
+    directory: /var/backups/bqckup
+    primary: true
+`, site)
+
+	cfg, err := Load(context.Background(), dir)
+	require.NoError(t, err)
+	assert.Equal(t, []Destination{{Storage: "local-primary"}}, cfg.Sites[0].Destinations)
+}
+
+func TestLoadAcceptsStorageYML(t *testing.T) {
+	dir := writeConfigTree(t, `version: 2
+app:
+  state_database: data/bqckup.db
+  temporary_directory: tmp
+  lock_directory: locks
+`, `storages:
+  local-primary:
+    type: local
+    directory: /var/backups/bqckup
+`, validSiteYAML(t))
+	require.NoError(t, os.Rename(
+		filepath.Join(dir, "config", "storages.yaml"),
+		filepath.Join(dir, "config", "storages.yml"),
+	))
+
+	_, err := Load(context.Background(), dir)
+	require.NoError(t, err)
+}
+
+func TestLoadRejectsAmbiguousStorageExtensions(t *testing.T) {
+	dir := writeConfigTree(t, `version: 2
+app:
+  state_database: data/bqckup.db
+  temporary_directory: tmp
+  lock_directory: locks
+`, localStorageYAML, validSiteYAML(t))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config", "storages.yml"), []byte(localStorageYAML), 0o600))
+
+	_, err := Load(context.Background(), dir)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "both storages.yaml and storages.yml")
+}
+
+func TestLoadRejectsStorageDocumentVersion(t *testing.T) {
+	dir := writeConfigTree(t, `version: 2
+app:
+  state_database: data/bqckup.db
+  temporary_directory: tmp
+  lock_directory: locks
+`, `version: 2
 storages:
+  local-primary:
+    type: local
+    directory: /var/backups/bqckup
+`, validSiteYAML(t))
+
+	_, err := Load(context.Background(), dir)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "version")
+}
+
+const localStorageYAML = `storages:
   local-primary:
     type: local
     directory: /var/backups/bqckup

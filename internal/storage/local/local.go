@@ -162,13 +162,8 @@ func (s *Store) ListBackupSets(ctx context.Context, sitePrefix string) ([]storag
 }
 
 func (s *Store) resolve(key string) (string, error) {
-	if key == "" || strings.Contains(key, "\\") || path.IsAbs(key) || path.Clean(key) != key {
-		return "", fmt.Errorf("unsafe storage key %q", key)
-	}
-	for _, segment := range strings.Split(key, "/") {
-		if segment == "" || segment == "." || segment == ".." {
-			return "", fmt.Errorf("unsafe storage key %q", key)
-		}
+	if err := storage.ValidateKey(key); err != nil {
+		return "", err
 	}
 	resolved := filepath.Join(s.root, filepath.FromSlash(key))
 	relative, err := filepath.Rel(s.root, resolved)

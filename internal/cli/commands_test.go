@@ -24,6 +24,10 @@ func TestInitCreatesSchemaV2TreeWithoutOverwriting(t *testing.T) {
 	original, err := os.ReadFile(rootFile)
 	require.NoError(t, err)
 	assert.Contains(t, string(original), "version: 2")
+	storageContents, err := os.ReadFile(filepath.Join(dir, "config", "storages.yaml"))
+	require.NoError(t, err)
+	assert.NotContains(t, string(storageContents), "version:")
+	assert.Contains(t, string(storageContents), "primary: true")
 
 	require.NoError(t, os.WriteFile(rootFile, []byte("custom"), 0o600))
 	root, _, _ = commandForTest(t, "--config-dir", dir, "init")
@@ -104,8 +108,7 @@ app:
   lock_directory: locks
   log_level: info
 `), 0o600))
-	require.NoError(t, os.WriteFile(filepath.Join(configDir, "config", "storages.yaml"), []byte(fmt.Sprintf(`version: 2
-storages:
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, "config", "storages.yaml"), []byte(fmt.Sprintf(`storages:
   local-primary:
     type: local
     directory: %s

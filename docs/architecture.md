@@ -20,14 +20,14 @@ Dependencies point toward the use case. `backup.Runner` knows interfaces and dom
 
 ## Backup lifecycle
 
-1. Load and strictly validate all schema-v2 YAML.
-2. Resolve the requested site and concrete local destinations.
+1. Load schema-v2 root/site YAML plus the unversioned storage document.
+2. Resolve the requested site and concrete local, S3, or R2 destinations.
 3. Acquire a non-blocking cross-process lock for the site.
 4. Skip when the last success is inside `minimum_interval`, unless forced.
 5. Insert a `running` history record.
 6. Create an owner-only temporary workspace and `.tar.gz` file archive.
 7. Calculate SHA-256 and size.
-8. Copy to every destination through a same-filesystem staging file, verify it, and finalize without overwriting.
+8. Store to every destination without overwriting; local uses atomic staging, while S3/R2 uses conditional transfer and metadata verification.
 9. Record each stored artifact.
 10. Apply retention after every required destination succeeds.
 11. Mark the run `success`; failures and cancellation get a terminal status with a redacted message.
@@ -42,6 +42,7 @@ Multiple destinations have all-required semantics. A destination failure fails t
 - `internal/backup/files`: tar/gzip filesystem adapter with explicit symlink behavior.
 - `internal/storage`: adapter contract and portable object-key types.
 - `internal/storage/local`: path-safe, checksum-verified local writes and backup-set listing.
+- `internal/storage/s3compat`: shared S3/R2 verified uploads and prefix-scoped retention.
 - `internal/history`: GORM models, SQLite lifecycle, ordered recorded migrations, repository queries.
 - `internal/platform/lock`: Linux `flock` implementation.
 - `internal/cli`: command parsing, presentation, and the single exit-code mapper.
@@ -63,7 +64,7 @@ The timestamp layout is `2006-01-02T15-04-05Z`. Names come from validated config
 
 ## Security rules
 
-- Never put secret values in YAML, logs, history messages, command arguments, or test fixtures.
+- Never commit runtime credentials or expose them in logs, history, arguments, errors, or fixtures; credential-bearing storage YAML must be a non-symlink `0600` file.
 - Pass subprocess arguments as slices with `exec.CommandContext`; never invoke a shell.
 - Keep Viper and GORM at their boundaries.
 - Use restrictive file permissions and remove incomplete artifacts.
