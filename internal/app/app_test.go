@@ -2,16 +2,62 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/bqckup/bqckup-go/internal/apperror"
+	databaseexporter "github.com/bqckup/bqckup-go/internal/backup/database"
 	"github.com/bqckup/bqckup-go/internal/config"
 	"github.com/bqckup/bqckup-go/internal/storage/s3compat"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestBuildDatabaseExportersPreflightsEnabledEngines(t *testing.T) {
+	process := &fakeDatabaseProcessRunner{}
+	configuration := config.Config{Sites: []config.Site{{Enabled: true, Sources: config.Sources{Databases: []config.DatabaseSource{
+		{Enabled: true, Engine: "mysql", Name: "mysql-db"},
+		{Enabled: true, Engine: "postgres", Name: "postgres-db"},
+	}}}}}
+
+	exporters, err := buildDatabaseExporters(context.Background(), configuration, process)
+	require.NoError(t, err)
+	assert.IsType(t, &databaseexporter.ProcessExporter{}, exporters["mysql"])
+	assert.IsType(t, &databaseexporter.ProcessExporter{}, exporters["postgres"])
+	assert.ElementsMatch(t, []string{"mysqldump", "pg_dump"}, process.lookups)
+}
+
+func TestBuildDatabaseExportersReturnsPreflightError(t *testing.T) {
+	process := &fakeDatabaseProcessRunner{lookupErr: errors.New("binary not found")}
+	configuration := config.Config{Sites: []config.Site{{Enabled: true, Sources: config.Sources{Databases: []config.DatabaseSource{
+		{Enabled: true, Engine: "mysql", Name: "mysql-db"},
+	}}}}}
+
+	_, err := buildDatabaseExporters(context.Background(), configuration, process)
+	require.Error(t, err)
+	assert.Equal(t, apperror.CategoryPreflight, apperror.CategoryOf(err))
+	assert.NotContains(t, err.Error(), "binary not found")
+}
+
+type fakeDatabaseProcessRunner struct {
+	lookupErr error
+	lookups   []string
+}
+
+func (f *fakeDatabaseProcessRunner) LookPath(command string) (string, error) {
+	f.lookups = append(f.lookups, command)
+	if f.lookupErr != nil {
+		return "", f.lookupErr
+	}
+	return command, nil
+}
+
+func (*fakeDatabaseProcessRunner) Run(context.Context, databaseexporter.ProcessSpec) error {
+	return nil
+}
 
 func TestBuildStoresConstructsS3AndR2WithoutNetworkIO(t *testing.T) {
 	stores, err := buildStores(context.Background(), map[string]config.Storage{
