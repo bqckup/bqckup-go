@@ -20,7 +20,7 @@ sources:
       port: 3306
       database: application
       username: backup_user
-      password_env: BQCKUP_MYSQL_PASSWORD
+      password: <runtime-secret>
 
     - name: application-postgres
       enabled: true
@@ -29,10 +29,10 @@ sources:
       port: 5432
       database: application
       username: backup_user
-      password_env: BQCKUP_POSTGRES_PASSWORD
+      password: <runtime-secret>
 ```
 
-For enabled sources, `name`, `engine`, `host`, `port`, `database`, `username`, and `password_env` are required. `engine` accepts exactly `mysql` or `postgres`. Ports must be between 1 and 65535. `password_env` must be a valid environment-variable name. Database passwords are never accepted inline and are never stored in configuration, history, arguments, logs, or test fixtures.
+For enabled sources, `name`, `engine`, `host`, `port`, `database`, `username`, and `password` are required. `engine` accepts exactly `mysql` or `postgres`. Ports must be between 1 and 65535. Inline passwords are permitted only in a runtime site file protected as a regular, non-symlink file with exact mode `0600`. Password values are never stored in history, arguments, logs, errors, or test fixtures.
 
 Disabled database entries may be retained as incomplete planning records and do not require runtime connectivity. The existing site and destination validation remains unchanged.
 
@@ -53,7 +53,7 @@ Each adapter invokes its native tool with `exec.CommandContext` and explicit arg
 - MySQL uses `mysqldump` with host, port, username, `--single-transaction`, `--quick`, routines, and triggers.
 - PostgreSQL uses `pg_dump` with host, port, username, plain format, `--no-owner`, and `--no-privileges`.
 
-Passwords are supplied only to the child process as `MYSQL_PWD` or `PGPASSWORD`. Password values and complete child environments are never rendered or persisted.
+Passwords are copied only into the child process environment as `MYSQL_PWD` or `PGPASSWORD`. Password values and complete child environments are never rendered or persisted.
 
 ## Artifact flow
 
