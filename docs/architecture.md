@@ -26,8 +26,8 @@ Dependencies point toward the use case. `backup.Runner` knows interfaces and dom
 4. Skip when the last success is inside `minimum_interval`, unless forced.
 5. Insert a `running` history record.
 6. Create an owner-only temporary workspace and `.tar.gz` file archive.
-7. Calculate SHA-256 and size.
-8. Store to every destination without overwriting; local uses atomic staging, while S3/R2 uses conditional transfer and metadata verification.
+7. Calculate SHA-256 and size for the file archive and each enabled database export.
+8. Store every artifact to every destination without overwriting; local uses atomic staging, while S3/R2 uses conditional transfer and metadata verification.
 9. Record each stored artifact.
 10. Apply retention after every required destination succeeds.
 11. Mark the run `success`; failures and cancellation get a terminal status with a redacted message.
@@ -40,6 +40,7 @@ Multiple destinations have all-required semantics. A destination failure fails t
 - `internal/config`: one Viper instance per YAML file, exact typed unmarshalling, defaults, validation.
 - `internal/backup`: orchestration, file artifact domain types, status decisions.
 - `internal/backup/files`: tar/gzip filesystem adapter with explicit symlink behavior.
+- `internal/backup/database`: MySQL/PostgreSQL process exporters producing gzip-compressed, checksummed SQL artifacts.
 - `internal/storage`: adapter contract and portable object-key types.
 - `internal/storage/local`: path-safe, checksum-verified local writes and backup-set listing.
 - `internal/storage/s3compat`: shared S3/R2 verified uploads and prefix-scoped retention.

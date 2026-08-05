@@ -140,14 +140,55 @@ func TestRunnerReturnsPersistenceFailureWhenTerminalUpdateFails(t *testing.T) {
 	assert.Equal(t, 1, deps.repository.finishCalls)
 }
 
+func TestRunnerExportsEnabledDatabasesToEveryDestination(t *testing.T) {
+	deps := successfulDependencies(t)
+	store := deps.stores["local-primary"].(*fakeStore)
+	site := validSite()
+	site.Sources.Databases = []config.DatabaseSource{
+		{Name: "application-mysql", Enabled: true, Engine: "mysql"},
+		{Name: "application-postgres", Enabled: true, Engine: "postgres"},
+	}
+	deps.databaseExporters = map[string]Exporter{
+		"mysql":    &fakeExporter{sourceKind: "database"},
+		"postgres": &fakeExporter{sourceKind: "database"},
+	}
+
+	result, err := NewRunner(deps.dependencies()).Run(context.Background(), site, false)
+	require.NoError(t, err)
+	assert.Equal(t, StatusSuccess, result.Status)
+	assert.Len(t, store.keys, 3)
+	assert.Contains(t, store.keys, "bqckup/example/2026-07-23T03-45-00Z/databases/application-mysql.sql.gz")
+	assert.Contains(t, store.keys, "bqckup/example/2026-07-23T03-45-00Z/databases/application-postgres.sql.gz")
+	assert.Len(t, deps.repository.artifacts, 3)
+}
+
+func TestRunnerDatabaseExporterFailurePreventsRetention(t *testing.T) {
+	deps := successfulDependencies(t)
+	deps.databaseExporters = map[string]Exporter{
+		"mysql": &fakeExporter{err: errors.New("database-secret process output")},
+	}
+	site := validSite()
+	site.Sources.Databases = []config.DatabaseSource{{Name: "application-mysql", Enabled: true, Engine: "mysql"}}
+
+	result, err := NewRunner(deps.dependencies()).Run(context.Background(), site, false)
+	require.Error(t, err)
+	assert.Equal(t, StatusFailed, result.Status)
+	assert.Equal(t, 0, deps.retainer.calls)
+	assert.NotContains(t, deps.repository.errorMessage, "database-secret")
+	require.Len(t, deps.repository.artifacts, 2)
+	assert.Equal(t, history.ArtifactFailed, deps.repository.artifacts[1].Status)
+	assert.Equal(t, "database", deps.repository.artifacts[1].SourceKind)
+}
+
 type dependencyFakes struct {
-	repository *fakeRepository
-	archiver   *fakeArchiver
-	stores     map[string]storage.Store
-	retainer   *fakeRetainer
-	lock       *fakeLocker
-	clock      fakeClock
-	tempRoot   string
+	repository        *fakeRepository
+	archiver          *fakeArchiver
+	stores            map[string]storage.Store
+	retainer          *fakeRetainer
+	lock              *fakeLocker
+	clock             fakeClock
+	tempRoot          string
+	databaseExporters map[string]Exporter
 }
 
 func successfulDependencies(t *testing.T) *dependencyFakes {
@@ -172,6 +213,7 @@ func (d *dependencyFakes) dependencies() Dependencies {
 		Locker:             d.lock,
 		Clock:              d.clock,
 		TemporaryDirectory: d.tempRoot,
+		DatabaseExporters:  d.databaseExporters,
 	}
 }
 
@@ -252,14 +294,33 @@ func (f *fakeArchiver) Create(_ context.Context, _ FileSource, destination strin
 type fakeStore struct {
 	putCalls int
 	putErr   error
+	keys     []string
 }
 
 func (f *fakeStore) Put(_ context.Context, artifact storage.Artifact, key string) (storage.StoredArtifact, error) {
 	f.putCalls++
+	f.keys = append(f.keys, key)
 	if f.putErr != nil {
 		return storage.StoredArtifact{}, f.putErr
 	}
 	return storage.StoredArtifact{Key: key, Size: artifact.Size, SHA256: artifact.SHA256}, nil
+}
+
+type fakeExporter struct {
+	err        error
+	sourceKind string
+}
+
+func (f *fakeExporter) Export(_ context.Context, source config.DatabaseSource, destination string) (Artifact, error) {
+	if f.err != nil {
+		return Artifact{}, f.err
+	}
+	contents := []byte(source.Name)
+	if err := os.WriteFile(destination, contents, 0o600); err != nil {
+		return Artifact{}, err
+	}
+	sum := sha256.Sum256(contents)
+	return Artifact{Path: destination, Size: int64(len(contents)), SHA256: hex.EncodeToString(sum[:]), SourceKind: f.sourceKind, SourceName: source.Name}, nil
 }
 func (*fakeStore) Delete(context.Context, string) error { return nil }
 func (*fakeStore) ListBackupSets(context.Context, string) ([]storage.BackupSet, error) {

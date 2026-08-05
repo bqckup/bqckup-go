@@ -41,6 +41,33 @@ storages:
 
 Storage names use lowercase ASCII letters, digits, dots, dashes, and underscores. At most one storage is primary. S3 requires a bucket, inline access keys, and region; R2 additionally requires an HTTPS endpoint and defaults its region to `auto`. Both support an optional safe relative prefix. Custom S3 endpoints require HTTPS except loopback HTTP for disposable tests.
 
+## Database sources
+
+Enabled database sources support `mysql` and `postgres`:
+
+```yaml
+sources:
+  databases:
+    - name: application-mysql
+      enabled: true
+      engine: mysql
+      host: localhost
+      port: 3306
+      database: application
+      username: backup_user
+      password: <runtime-secret>
+    - name: application-postgres
+      enabled: true
+      engine: postgres
+      host: localhost
+      port: 5432
+      database: application
+      username: backup_user
+      password: <runtime-secret>
+```
+
+Enabled entries require all fields shown. The site file containing a password must be a regular, non-symlink file with exact mode `0600`. Passwords are passed only through `MYSQL_PWD` or `PGPASSWORD` to `mysqldump` or `pg_dump`; they are never rendered in errors, JSON, history, logs, or arguments. Disabled entries may be incomplete planning records. SQLite export, repair, and restore are deferred.
+
 ## Site file
 
 The filename must match `site.name`.
@@ -68,7 +95,7 @@ site:
 
 `minimum_interval` is a positive Go duration such as `30m`, `24h`, or `168h`. `keep_last` must be at least one. Exclusions are absolute paths and apply to the selected source tree. With `follow_symlinks: false`, the archive stores symlinks as symlinks; with `true`, their targets are traversed with cycle detection.
 
-Disabled sites may remain as incomplete placeholders and are not runnable. Enabled sites require at least one absolute file include and either a known explicit destination or one primary storage. Database entries are rejected when enabled until their exporter milestone is delivered.
+Disabled sites may remain as incomplete placeholders and are not runnable. Enabled sites require at least one absolute file include and either a known explicit destination or one primary storage. Enabled database entries require a supported engine and complete connection fields.
 
 ## Strictness and secrets
 

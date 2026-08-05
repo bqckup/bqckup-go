@@ -6,13 +6,15 @@ Do not add placeholder commands or config that merely return “not implemented.
 
 ## M01 — MySQL exporter
 
+**Status:** Delivered together with the PostgreSQL exporter; retain this section as its acceptance checklist.
+
 **Objective:** Export one enabled MySQL database into a compressed, checksummed artifact that the existing runner can send to every destination.
 
 **Prerequisites:** Foundation green; reviewer-approved exporter contract and process-executor boundary.
 
 **In scope:** `internal/backup/database`, MySQL-specific validation, safe `mysqldump` invocation through `exec.CommandContext`, password environment handling, artifact naming, runner integration, examples and docs.
 
-**Out of scope:** PostgreSQL, schema/data restore, shell commands, and database credentials in arguments or YAML.
+**Out of scope:** SQLite, schema/data restore, shell commands, and database credentials in arguments or tracked YAML.
 
 **Acceptance:** Multiple named MySQL sources can run; cancellation kills the child process; incomplete dumps are removed; every destination receives the artifact; failure marks the run failed without retention.
 
@@ -21,6 +23,8 @@ Do not add placeholder commands or config that merely return “not implemented.
 **Suggested commit:** `feat: add MySQL backup exporter`
 
 ## M02 — PostgreSQL exporter
+
+**Status:** Delivered together with the MySQL exporter; retain this section as its acceptance checklist.
 
 **Objective:** Add PostgreSQL dump artifacts using the same consumer-owned exporter contract.
 

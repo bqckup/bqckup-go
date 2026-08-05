@@ -63,6 +63,7 @@ type Locker interface {
 type Dependencies struct {
 	Repository         RunRepository
 	Archiver           Archiver
+	DatabaseExporters  map[string]Exporter
 	Stores             map[string]storage.Store
 	Retainer           Retainer
 	Locker             Locker
@@ -170,30 +171,34 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 	timestamp := now.Format(storage.TimestampLayout)
 	sitePrefix := path.Join("bqckup", site.Name)
 	objectKey := path.Join(sitePrefix, timestamp, "files.tar.gz")
-	for _, destination := range site.Destinations {
-		store, ok := r.dependencies.Stores[destination.Storage]
-		if !ok || store == nil {
-			return fail(apperror.Wrap(apperror.CategoryInternal, "a configured storage destination is unavailable", nil))
+	if err := r.storeArtifact(ctx, run.ID, archive, objectKey, site.Destinations); err != nil {
+		return fail(err)
+	}
+
+	for _, source := range site.Sources.Databases {
+		if !source.Enabled {
+			continue
 		}
-		stored, putErr := store.Put(ctx, storage.Artifact{Path: archive.Path, Size: archive.Size, SHA256: archive.SHA256}, objectKey)
-		if putErr != nil {
-			recordErr := r.dependencies.Repository.CreateArtifact(context.WithoutCancel(ctx), &history.Artifact{
-				RunID: run.ID, SourceKind: archive.SourceKind, SourceName: archive.SourceName,
-				Destination: destination.Storage, ObjectKey: objectKey, Size: archive.Size,
-				SHA256: archive.SHA256, Status: history.ArtifactFailed, ErrorMessage: "could not store backup artifact",
-			})
-			operationErr := apperror.Wrap(apperror.CategoryStorage, "could not store backup artifact", putErr)
+		exporter, ok := r.dependencies.DatabaseExporters[source.Engine]
+		if !ok || exporter == nil {
+			return fail(apperror.Wrap(apperror.CategoryInternal, "a configured database exporter is unavailable", nil))
+		}
+		destination := filepath.Join(workspace, "databases", source.Name+".sql.gz")
+		if err := os.MkdirAll(filepath.Dir(destination), 0o700); err != nil {
+			return fail(apperror.Wrap(apperror.CategoryExecution, "could not prepare database export workspace", err))
+		}
+		databaseArtifact, exportErr := exporter.Export(ctx, source, destination)
+		databaseKey := path.Join(sitePrefix, timestamp, "databases", source.Name+".sql.gz")
+		if exportErr != nil {
+			recordErr := r.recordFailedArtifact(ctx, run.ID, Artifact{SourceKind: "database", SourceName: source.Name}, databaseKey, site.Destinations, "could not export database")
+			operationErr := apperror.Wrap(apperror.CategoryExecution, "could not export database", exportErr)
 			if recordErr != nil {
-				operationErr = errors.Join(operationErr, apperror.Wrap(apperror.CategoryPersistence, "could not record failed backup artifact", recordErr))
+				operationErr = errors.Join(operationErr, recordErr)
 			}
 			return fail(operationErr)
 		}
-		if err := r.dependencies.Repository.CreateArtifact(ctx, &history.Artifact{
-			RunID: run.ID, SourceKind: archive.SourceKind, SourceName: archive.SourceName,
-			Destination: destination.Storage, ObjectKey: stored.Key, Size: stored.Size,
-			SHA256: stored.SHA256, Status: history.ArtifactStored,
-		}); err != nil {
-			return fail(apperror.Wrap(apperror.CategoryPersistence, "could not record stored backup artifact", err))
+		if err := r.storeArtifact(ctx, run.ID, databaseArtifact, databaseKey, site.Destinations); err != nil {
+			return fail(err)
 		}
 	}
 
@@ -213,6 +218,45 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 	result.Status = StatusSuccess
 	result.FinishedAt = finished
 	return result, nil
+}
+
+func (r *Runner) storeArtifact(ctx context.Context, runID string, artifact Artifact, objectKey string, destinations []config.Destination) error {
+	for _, destination := range destinations {
+		store, ok := r.dependencies.Stores[destination.Storage]
+		if !ok || store == nil {
+			return apperror.Wrap(apperror.CategoryInternal, "a configured storage destination is unavailable", nil)
+		}
+		stored, putErr := store.Put(ctx, storage.Artifact{Path: artifact.Path, Size: artifact.Size, SHA256: artifact.SHA256}, objectKey)
+		if putErr != nil {
+			recordErr := r.recordFailedArtifact(ctx, runID, artifact, objectKey, []config.Destination{destination}, "could not store backup artifact")
+			operationErr := apperror.Wrap(apperror.CategoryStorage, "could not store backup artifact", putErr)
+			if recordErr != nil {
+				operationErr = errors.Join(operationErr, recordErr)
+			}
+			return operationErr
+		}
+		if err := r.dependencies.Repository.CreateArtifact(ctx, &history.Artifact{
+			RunID: runID, SourceKind: artifact.SourceKind, SourceName: artifact.SourceName,
+			Destination: destination.Storage, ObjectKey: stored.Key, Size: stored.Size,
+			SHA256: stored.SHA256, Status: history.ArtifactStored,
+		}); err != nil {
+			return apperror.Wrap(apperror.CategoryPersistence, "could not record stored backup artifact", err)
+		}
+	}
+	return nil
+}
+
+func (r *Runner) recordFailedArtifact(ctx context.Context, runID string, artifact Artifact, objectKey string, destinations []config.Destination, message string) error {
+	for _, destination := range destinations {
+		if err := r.dependencies.Repository.CreateArtifact(context.WithoutCancel(ctx), &history.Artifact{
+			RunID: runID, SourceKind: artifact.SourceKind, SourceName: artifact.SourceName,
+			Destination: destination.Storage, ObjectKey: objectKey, Size: artifact.Size,
+			SHA256: artifact.SHA256, Status: history.ArtifactFailed, ErrorMessage: message,
+		}); err != nil {
+			return apperror.Wrap(apperror.CategoryPersistence, "could not record failed backup artifact", err)
+		}
+	}
+	return nil
 }
 
 func (r *Runner) validateDependencies() error {

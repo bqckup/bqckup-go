@@ -244,10 +244,19 @@ func (c Config) validateSite(site Site, seen map[string]struct{}) error {
 			return validationError(file, fmt.Sprintf("%s.sources.files.exclude[%d]", baseField, index), "must be an absolute path")
 		}
 	}
-	for _, database := range site.Sources.Databases {
-		if database.Enabled {
-			return validationError(file, baseField+".sources.databases", "database exporters are not available in this milestone")
+	databaseNames := make(map[string]struct{}, len(site.Sources.Databases))
+	for index, database := range site.Sources.Databases {
+		field := fmt.Sprintf("%s.sources.databases[%d]", baseField, index)
+		if !database.Enabled {
+			continue
 		}
+		if err := validateDatabaseSource(file, field, database); err != nil {
+			return err
+		}
+		if _, exists := databaseNames[database.Name]; exists {
+			return validationError(file, field+".name", "duplicate database source name")
+		}
+		databaseNames[database.Name] = struct{}{}
 	}
 	if len(site.Destinations) == 0 {
 		return validationError(file, baseField+".destinations", "at least one destination is required")
@@ -262,6 +271,31 @@ func (c Config) validateSite(site Site, seen map[string]struct{}) error {
 	}
 	if site.Policy.KeepLast < 1 {
 		return validationError(file, baseField+".policy.keep_last", "must be at least 1")
+	}
+	return nil
+}
+
+func validateDatabaseSource(file, field string, source DatabaseSource) error {
+	if !safeName.MatchString(source.Name) {
+		return validationError(file, field+".name", "must be a safe source name")
+	}
+	if source.Engine != "mysql" && source.Engine != "postgres" {
+		return validationError(file, field+".engine", "must be mysql or postgres")
+	}
+	if strings.TrimSpace(source.Host) == "" {
+		return validationError(file, field+".host", "is required")
+	}
+	if source.Port < 1 || source.Port > 65535 {
+		return validationError(file, field+".port", "must be between 1 and 65535")
+	}
+	if strings.TrimSpace(source.Database) == "" {
+		return validationError(file, field+".database", "is required")
+	}
+	if strings.TrimSpace(source.Username) == "" {
+		return validationError(file, field+".username", "is required")
+	}
+	if source.Password == "" {
+		return validationError(file, field+".password", "is required")
 	}
 	return nil
 }

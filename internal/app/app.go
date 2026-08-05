@@ -8,6 +8,7 @@ import (
 
 	"github.com/bqckup/bqckup-go/internal/apperror"
 	"github.com/bqckup/bqckup-go/internal/backup"
+	databaseexporter "github.com/bqckup/bqckup-go/internal/backup/database"
 	"github.com/bqckup/bqckup-go/internal/backup/files"
 	"github.com/bqckup/bqckup-go/internal/clock"
 	"github.com/bqckup/bqckup-go/internal/config"
@@ -47,11 +48,17 @@ func Open(ctx context.Context, configDir string) (*App, error) {
 		_ = closeDatabase()
 		return nil, err
 	}
+	databaseExporters, err := buildDatabaseExporters(ctx, configuration, databaseexporter.NewProcessRunner())
+	if err != nil {
+		_ = closeDatabase()
+		return nil, err
+	}
 
 	repository := history.NewRepository(database)
 	runner := backup.NewRunner(backup.Dependencies{
 		Repository:         repository,
 		Archiver:           files.New(),
+		DatabaseExporters:  databaseExporters,
 		Stores:             stores,
 		Retainer:           retentionAdapter{},
 		Locker:             lock.New(configuration.App.LockDirectory),
@@ -64,6 +71,40 @@ func Open(ctx context.Context, configDir string) (*App, error) {
 		repository:    repository,
 		closeDatabase: closeDatabase,
 	}, nil
+}
+
+func buildDatabaseExporters(ctx context.Context, configuration config.Config, process databaseexporter.ProcessRunner) (map[string]backup.Exporter, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	exporters := make(map[string]backup.Exporter)
+	for _, site := range configuration.Sites {
+		if !site.Enabled {
+			continue
+		}
+		for _, source := range site.Sources.Databases {
+			if !source.Enabled {
+				continue
+			}
+			if _, exists := exporters[source.Engine]; exists {
+				continue
+			}
+			var exporter *databaseexporter.ProcessExporter
+			switch source.Engine {
+			case "mysql":
+				exporter = databaseexporter.NewMySQL(process)
+			case "postgres":
+				exporter = databaseexporter.NewPostgres(process)
+			default:
+				return nil, apperror.Wrap(apperror.CategoryConfig, "unsupported database exporter", nil)
+			}
+			if err := exporter.Preflight(); err != nil {
+				return nil, apperror.Wrap(apperror.CategoryPreflight, "required database exporter is unavailable", err)
+			}
+			exporters[source.Engine] = exporter
+		}
+	}
+	return exporters, nil
 }
 
 func buildStores(ctx context.Context, configured map[string]config.Storage) (map[string]storage.Store, error) {

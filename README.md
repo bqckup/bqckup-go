@@ -1,6 +1,6 @@
 # Bqckup Go
 
-CLI-only backup tool for file sources. Backups can be stored locally or in S3-compatible storage, including Cloudflare R2. Run history is kept in SQLite.
+CLI-only backup tool for file and MySQL/PostgreSQL database sources. Backups can be stored locally or in S3-compatible storage, including Cloudflare R2. Run history is kept in SQLite.
 
 ## Quick start
 
@@ -91,6 +91,27 @@ bqckup version
 
 Use `--output json` for machine-readable output. Use `--config-dir` to select another configuration directory.
 
+## Database export
+
+Enabled MySQL/MariaDB and PostgreSQL sources are exported with `mysqldump` and `pg_dump` into compressed artifacts such as `databases/application-mysql.sql.gz`. The required binaries must be installed on the backup host.
+
+Runtime site files may contain an inline database password only when the file is a regular, non-symlink file with mode `0600`:
+
+```yaml
+sources:
+  databases:
+    - name: application-mysql
+      enabled: true
+      engine: mysql
+      host: localhost
+      port: 3306
+      database: application
+      username: backup_user
+      password: <runtime-secret>
+```
+
+The password is passed only to the child exporter process through `MYSQL_PWD` or `PGPASSWORD`. Never commit a real password. SQLite export, database repair, and restore remain deferred.
+
 ## Development
 
 ```bash
@@ -98,4 +119,4 @@ make verify
 sh scripts/check-docs.sh
 ```
 
-Database export, restore, Restic, and web UI are intentionally out of scope for the current CLI foundation.
+Restic, SQLite source export, repair, restore, and web UI are intentionally deferred.

@@ -18,18 +18,21 @@ func TestValidateRejectsRelativeSourcePath(t *testing.T) {
 	assert.Contains(t, err.Error(), "sites.example.sources.files.include[0]")
 }
 
-func TestValidateRejectsUnsupportedDatabaseMilestone(t *testing.T) {
+func TestValidateRequiresDatabasePassword(t *testing.T) {
 	cfg := validConfig(t)
 	cfg.Sites[0].Sources.Databases = []DatabaseSource{{
 		Name:     "application",
 		Enabled:  true,
 		Engine:   "mysql",
+		Host:     "localhost",
+		Port:     3306,
 		Database: "app",
+		Username: "backup-user",
 	}}
 
 	err := cfg.Validate()
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "database exporters are not available")
+	assert.Contains(t, err.Error(), "password")
 }
 
 func TestValidateAcceptsLocalFileBackup(t *testing.T) {
