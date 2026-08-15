@@ -2,8 +2,9 @@
 set -eu
 
 # Bqckup Installation & Bootstrap Script
-# Fast installation: leverages Makefile/Go cache, creates directories,
-# populates default templates with 0600 permissions, and validates setup.
+# Supports both:
+# 1. Standalone server installation via pre-built GitHub Release artifacts + SHA-256 verification
+# 2. Local source installation via Makefile/Go incremental build cache
 
 SKIP_BUILD=0
 for arg in "$@"; do
@@ -13,13 +14,15 @@ for arg in "$@"; do
             ;;
         --help|-h)
             echo "Usage: $0 [--skip-build]"
-            echo "Environment variables: BIN_DIR, CONFIG_DIR, DATA_DIR, BACKUP_DIR"
+            echo "Environment variables: GITHUB_REPO, BQCKUP_VERSION, BIN_DIR, CONFIG_DIR, DATA_DIR, BACKUP_DIR"
             exit 0
             ;;
     esac
 done
 
-# Configurable paths
+# Configurable paths & repository options
+GITHUB_REPO="${GITHUB_REPO:-bqckup/bqckup-go}"
+BQCKUP_VERSION="${BQCKUP_VERSION:-latest}"
 BIN_DIR="${BIN_DIR:-/usr/local/bin}"
 CONFIG_DIR="${CONFIG_DIR:-/etc/bqckup}"
 DATA_DIR="${DATA_DIR:-/var/lib/bqckup}"
@@ -60,39 +63,147 @@ error() {
     printf "${C_RED}${C_BOLD}[ERROR]${C_RESET} %s\n" "$1" >&2
 }
 
+# Check write permissions
+can_write() {
+    dir="$1"
+    target="$dir"
+    while [ ! -d "$target" ] && [ "$target" != "/" ]; do
+        target="$(dirname "$target")"
+    done
+    [ -w "$target" ]
+}
+
+if [ "$(id -u)" -ne 0 ]; then
+    if ! can_write "$BIN_DIR" || ! can_write "$CONFIG_DIR" || ! can_write "$DATA_DIR" || ! can_write "$BACKUP_DIR"; then
+        warn "You are not running as root and might lack write permissions to system directories."
+        warn "Run with sudo or provide writable custom directory paths, e.g.:"
+        warn "  sudo ./scripts/install.sh"
+    fi
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 info "Starting bqckup installation..."
 
-# 1. Build or locate binary
+# Cleanup trap for temporary downloads
+TMP_WORK_DIR=""
+cleanup() {
+    if [ -n "$TMP_WORK_DIR" ] && [ -d "$TMP_WORK_DIR" ]; then
+        rm -rf "$TMP_WORK_DIR"
+    fi
+}
+trap cleanup EXIT INT TERM
+
+# Detect OS and architecture
+detect_platform() {
+    OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
+    ARCH="$(uname -m)"
+
+    case "$ARCH" in
+        x86_64|amd64)
+            GOARCH="amd64"
+            ;;
+        aarch64|arm64)
+            GOARCH="arm64"
+            ;;
+        *)
+            error "Unsupported architecture: $ARCH (supported: amd64, arm64)"
+            exit 1
+            ;;
+    esac
+
+    if [ "$OS" != "linux" ]; then
+        warn "bqckup is designed for Linux servers. Detected OS: $OS"
+    fi
+}
+
+# 1. Acquire or build binary
 if [ "$SKIP_BUILD" -eq 1 ] && [ -x "${BIN_DIR}/bqckup" ]; then
     info "Using existing binary at ${BIN_DIR}/bqckup (--skip-build)"
 else
     BINARY_SOURCE=""
-    if [ -f "${REPO_ROOT}/go.mod" ]; then
+
+    # Strategy A: If running inside local git repository, build with Make / Go
+    if [ -f "${REPO_ROOT}/go.mod" ] && [ -d "${REPO_ROOT}/cmd/bqckup" ]; then
         if command -v make >/dev/null 2>&1 && [ -f "${REPO_ROOT}/Makefile" ]; then
-            info "Building bqckup via make build..."
+            info "Building bqckup from local source with make build..."
             make -C "${REPO_ROOT}" build
             BINARY_SOURCE="${REPO_ROOT}/bqckup"
         elif command -v go >/dev/null 2>&1; then
-            info "Building bqckup via go build..."
+            info "Building bqckup from local source with go build..."
             (cd "${REPO_ROOT}" && go build -o bqckup ./cmd/bqckup)
             BINARY_SOURCE="${REPO_ROOT}/bqckup"
         fi
     fi
 
+    # Strategy B: Download pre-built release artifact from GitHub Releases
     if [ -z "$BINARY_SOURCE" ] || [ ! -f "$BINARY_SOURCE" ]; then
-        if command -v bqckup >/dev/null 2>&1; then
-            BINARY_SOURCE="$(command -v bqckup)"
-            info "Found bqckup in PATH: ${BINARY_SOURCE}"
+        detect_platform
+        info "Downloading pre-built bqckup binary for linux/${GOARCH} from GitHub Releases..."
+        
+        TMP_WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/bqckup-install.XXXXXX")"
+        
+        # Resolve release tag
+        if [ "$BQCKUP_VERSION" = "latest" ]; then
+            RELEASE_URL="https://github.com/${GITHUB_REPO}/releases/latest/download"
         else
-            error "Could not build or locate bqckup binary. Ensure Go or Make is installed."
-            exit 1
+            RELEASE_URL="https://github.com/${GITHUB_REPO}/releases/download/${BQCKUP_VERSION}"
+        fi
+
+        # Download archive and checksums if curl/wget is available
+        ARCHIVE_FILE="${TMP_WORK_DIR}/bqckup.tar.gz"
+        CHECKSUM_FILE="${TMP_WORK_DIR}/checksums.txt"
+
+        download_file() {
+            url="$1"
+            dest="$2"
+            if command -v curl >/dev/null 2>&1; then
+                curl -sSfL "$url" -o "$dest"
+            elif command -v wget >/dev/null 2>&1; then
+                wget -q "$url" -O "$dest"
+            else
+                error "Neither curl nor wget is available for downloading releases."
+                exit 1
+            fi
+        }
+
+        # Attempt downloading release assets
+        DOWNLOAD_SUCCESS=0
+        if download_file "${RELEASE_URL}/checksums.txt" "${CHECKSUM_FILE}" 2>/dev/null; then
+            # Find matching tarball name in checksums.txt
+            ARCHIVE_NAME="$(grep -E "linux_${GOARCH}\.tar\.gz$" "${CHECKSUM_FILE}" | awk '{print $2}' | tr -d '\r' | head -n 1 || true)"
+            if [ -n "$ARCHIVE_NAME" ] && download_file "${RELEASE_URL}/${ARCHIVE_NAME}" "${ARCHIVE_FILE}" 2>/dev/null; then
+                info "Verifying SHA-256 checksum for ${ARCHIVE_NAME}..."
+                EXPECTED_SHA="$(grep -E "[[:space:]]${ARCHIVE_NAME}$" "${CHECKSUM_FILE}" | awk '{print $1}')"
+                ACTUAL_SHA="$(sha256sum "${ARCHIVE_FILE}" | awk '{print $1}')"
+                if [ "$EXPECTED_SHA" = "$ACTUAL_SHA" ]; then
+                    success "Checksum verified: ${ACTUAL_SHA}"
+                    tar -xzf "${ARCHIVE_FILE}" -C "${TMP_WORK_DIR}"
+                    if [ -f "${TMP_WORK_DIR}/bqckup" ]; then
+                        BINARY_SOURCE="${TMP_WORK_DIR}/bqckup"
+                        DOWNLOAD_SUCCESS=1
+                    fi
+                else
+                    error "Checksum verification failed! Expected: $EXPECTED_SHA, Got: $ACTUAL_SHA"
+                    exit 1
+                fi
+            fi
+        fi
+
+        if [ "$DOWNLOAD_SUCCESS" -ne 1 ]; then
+            if command -v bqckup >/dev/null 2>&1; then
+                BINARY_SOURCE="$(command -v bqckup)"
+                info "Using existing bqckup found in PATH: ${BINARY_SOURCE}"
+            else
+                error "Could not build from source or download release from https://github.com/${GITHUB_REPO}."
+                error "If this is a private repository, please clone the repo and run 'make setup'."
+                exit 1
+            fi
         fi
     fi
 
-    # Install binary if not already at destination
+    # Install binary
     if [ "${BINARY_SOURCE}" != "${BIN_DIR}/bqckup" ]; then
         info "Installing binary to ${BIN_DIR}/bqckup..."
         mkdir -p "${BIN_DIR}"
@@ -102,14 +213,14 @@ else
     fi
 fi
 
-# 2. Create directory tree in one pass
+# 2. Create system directory tree
 info "Creating system directories..."
 mkdir -p "${CONFIG_DIR}/config" "${CONFIG_DIR}/sites" "${DATA_DIR}/tmp" "${DATA_DIR}/locks" "${BACKUP_DIR}"
 chmod 0700 "${CONFIG_DIR}" "${CONFIG_DIR}/config" "${CONFIG_DIR}/sites" \
            "${DATA_DIR}" "${DATA_DIR}/tmp" "${DATA_DIR}/locks" "${BACKUP_DIR}" 2>/dev/null || true
 success "Directory tree created and secured (mode 0700)."
 
-# 3. Populate default configuration templates (fast write)
+# 3. Populate default configuration templates
 info "Configuring default templates in ${CONFIG_DIR}..."
 
 # App configuration: bqckup.yaml

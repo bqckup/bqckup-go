@@ -5,10 +5,18 @@ CLI backup tool for files and MySQL/PostgreSQL databases. Destinations can be lo
 ## Quick start
 
 ```bash
-go build -o bqckup ./cmd/bqckup
-./bqckup --config-dir /etc/bqckup init
-./bqckup --config-dir /etc/bqckup config validate
-./bqckup --config-dir /etc/bqckup backup run <site>
+# Automated setup (from repository clone)
+sudo make setup
+# or: sudo ./scripts/install.sh
+
+# Standalone setup (downloads pre-built release binary + verifies SHA-256)
+curl -fsSL https://raw.githubusercontent.com/bqckup/bqckup-go/main/scripts/install.sh | sudo bash
+
+# Or manual setup
+make build && sudo make install
+sudo bqckup init
+sudo bqckup config validate
+sudo bqckup backup run <site>
 ```
 
 Configuration files:
