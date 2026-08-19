@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bqckup/bqckup-go/internal/backup/restic"
 	"github.com/bqckup/bqckup-go/internal/config"
 	"github.com/bqckup/bqckup-go/internal/history"
 	"github.com/bqckup/bqckup-go/internal/storage"
@@ -184,35 +183,24 @@ func TestRunnerDatabaseExporterFailurePreventsRetention(t *testing.T) {
 type dependencyFakes struct {
 	repository        *fakeRepository
 	archiver          *fakeArchiver
-	incremental       *fakeIncrementalEngine
 	stores            map[string]storage.Store
-	storages          map[string]config.Storage
 	retainer          *fakeRetainer
 	lock              *fakeLocker
 	clock             fakeClock
 	tempRoot          string
 	databaseExporters map[string]Exporter
-	envLookup         func(string) (string, bool)
 }
 
 func successfulDependencies(t *testing.T) *dependencyFakes {
 	t.Helper()
 	return &dependencyFakes{
-		repository:  &fakeRepository{},
-		archiver:    &fakeArchiver{},
-		incremental: &fakeIncrementalEngine{summary: restic.SnapshotSummary{SnapshotID: "snap-001", DataAdded: 2048}},
-		stores:      map[string]storage.Store{"local-primary": &fakeStore{}},
-		storages:    map[string]config.Storage{"local-primary": {Type: "local", Directory: "/var/backups/bqckup"}},
-		retainer:    &fakeRetainer{},
-		lock:        &fakeLocker{acquired: true},
-		clock:       fakeClock{now: time.Date(2026, 7, 23, 3, 45, 0, 0, time.UTC)},
-		tempRoot:    t.TempDir(),
-		envLookup: func(key string) (string, bool) {
-			if key == "RESTIC_PASSWORD" {
-				return "test-secret-password", true
-			}
-			return "", false
-		},
+		repository: &fakeRepository{},
+		archiver:   &fakeArchiver{},
+		stores:     map[string]storage.Store{"local-primary": &fakeStore{}},
+		retainer:   &fakeRetainer{},
+		lock:       &fakeLocker{acquired: true},
+		clock:      fakeClock{now: time.Date(2026, 7, 23, 3, 45, 0, 0, time.UTC)},
+		tempRoot:   t.TempDir(),
 	}
 }
 
@@ -220,15 +208,12 @@ func (d *dependencyFakes) dependencies() Dependencies {
 	return Dependencies{
 		Repository:         d.repository,
 		Archiver:           d.archiver,
-		IncrementalEngine:  d.incremental,
 		Stores:             d.stores,
-		Storages:           d.storages,
 		Retainer:           d.retainer,
 		Locker:             d.lock,
 		Clock:              d.clock,
 		TemporaryDirectory: d.tempRoot,
 		DatabaseExporters:  d.databaseExporters,
-		EnvLookup:          d.envLookup,
 	}
 }
 
@@ -362,103 +347,3 @@ func (f *fakeLocker) TryLock(context.Context, string) (func() error, bool, error
 type fakeClock struct{ now time.Time }
 
 func (f fakeClock) Now() time.Time { return f.now }
-
-type fakeIncrementalEngine struct {
-	ensureCalls    int
-	ensureErr      error
-	backupCalls    int
-	backupErr      error
-	retentionCalls int
-	retentionErr   error
-	summary        restic.SnapshotSummary
-	lastSpec       restic.BackupSpec
-	lastRepo       restic.RepoConfig
-}
-
-func (f *fakeIncrementalEngine) EnsureRepository(_ context.Context, repo restic.RepoConfig) error {
-	f.ensureCalls++
-	f.lastRepo = repo
-	return f.ensureErr
-}
-
-func (f *fakeIncrementalEngine) BackupFiles(_ context.Context, repo restic.RepoConfig, spec restic.BackupSpec) (restic.SnapshotSummary, error) {
-	f.backupCalls++
-	f.lastRepo = repo
-	f.lastSpec = spec
-	if f.backupErr != nil {
-		return restic.SnapshotSummary{}, f.backupErr
-	}
-	return f.summary, nil
-}
-
-func (f *fakeIncrementalEngine) ApplyRetention(_ context.Context, repo restic.RepoConfig, _ int, _ string) error {
-	f.retentionCalls++
-	f.lastRepo = repo
-	return f.retentionErr
-}
-
-func (f *fakeIncrementalEngine) Unlock(_ context.Context, _ restic.RepoConfig) error {
-	return nil
-}
-
-func TestRunnerIncrementalBackupSuccess(t *testing.T) {
-	deps := successfulDependencies(t)
-	runner := NewRunner(deps.dependencies())
-
-	site := validSite()
-	site.BackupMode = "incremental"
-	site.Incremental = config.Incremental{
-		Engine:      "restic",
-		PasswordEnv: "RESTIC_PASSWORD",
-	}
-
-	result, err := runner.Run(context.Background(), site, false)
-	require.NoError(t, err)
-	assert.Equal(t, StatusSuccess, result.Status)
-	assert.Equal(t, 1, deps.incremental.ensureCalls)
-	assert.Equal(t, 1, deps.incremental.backupCalls)
-	assert.Equal(t, 1, deps.incremental.retentionCalls)
-	assert.Equal(t, 0, deps.archiver.calls) // classic archiver not called
-
-	require.Len(t, deps.repository.artifacts, 1)
-	assert.Equal(t, "snap-001", deps.repository.artifacts[0].ObjectKey)
-	assert.Equal(t, int64(2048), deps.repository.artifacts[0].Size)
-}
-
-func TestRunnerIncrementalBackupMissingPasswordEnv(t *testing.T) {
-	deps := successfulDependencies(t)
-	deps.envLookup = func(string) (string, bool) { return "", false }
-	runner := NewRunner(deps.dependencies())
-
-	site := validSite()
-	site.BackupMode = "incremental"
-	site.Incremental = config.Incremental{
-		Engine:      "restic",
-		PasswordEnv: "UNSET_VAR",
-	}
-
-	result, err := runner.Run(context.Background(), site, false)
-	require.Error(t, err)
-	assert.Equal(t, StatusFailed, result.Status)
-	assert.Equal(t, 0, deps.incremental.backupCalls)
-	assert.Equal(t, 0, deps.incremental.retentionCalls)
-}
-
-func TestRunnerIncrementalBackupFailureDoesNotRetain(t *testing.T) {
-	deps := successfulDependencies(t)
-	deps.incremental.backupErr = errors.New("restic failed to snapshot")
-	runner := NewRunner(deps.dependencies())
-
-	site := validSite()
-	site.BackupMode = "incremental"
-	site.Incremental = config.Incremental{
-		Engine:      "restic",
-		PasswordEnv: "RESTIC_PASSWORD",
-	}
-
-	result, err := runner.Run(context.Background(), site, false)
-	require.Error(t, err)
-	assert.Equal(t, StatusFailed, result.Status)
-	assert.Equal(t, 1, deps.incremental.backupCalls)
-	assert.Equal(t, 0, deps.incremental.retentionCalls) // retention must NOT run
-}
