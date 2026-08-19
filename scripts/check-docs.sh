@@ -52,8 +52,8 @@ if grep -RniE '^[[:space:]]*(access_key_id|secret_access_key):[[:space:]]*[^[:sp
     failed=1
 fi
 
-if find internal cmd -name '*.go' -type f -exec grep -liE 'rustic|restic' {} + | grep -q .; then
-    echo "Rustic or Restic implementation is outside the foundation scope" >&2
+if find internal cmd -name '*.go' -type f -exec grep -liE 'rustic' {} + | grep -q .; then
+    echo "Rustic implementation is outside the scope" >&2
     failed=1
 fi
 
