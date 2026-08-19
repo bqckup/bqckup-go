@@ -10,6 +10,7 @@ import (
 	"github.com/bqckup/bqckup-go/internal/backup"
 	databaseexporter "github.com/bqckup/bqckup-go/internal/backup/database"
 	"github.com/bqckup/bqckup-go/internal/backup/files"
+	"github.com/bqckup/bqckup-go/internal/backup/restic"
 	"github.com/bqckup/bqckup-go/internal/clock"
 	"github.com/bqckup/bqckup-go/internal/config"
 	"github.com/bqckup/bqckup-go/internal/history"
@@ -58,8 +59,10 @@ func Open(ctx context.Context, configDir string) (*App, error) {
 	runner := backup.NewRunner(backup.Dependencies{
 		Repository:         repository,
 		Archiver:           files.New(),
+		IncrementalEngine:  restic.NewAdapter(restic.NewProcessRunner()),
 		DatabaseExporters:  databaseExporters,
 		Stores:             stores,
+		Storages:           configuration.Storages,
 		Retainer:           retentionAdapter{},
 		Locker:             lock.New(configuration.App.LockDirectory),
 		Clock:              clock.System{},
