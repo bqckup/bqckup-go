@@ -4,10 +4,12 @@ import (
 	"context"
 	"crypto/rand"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/bqckup/bqckup-go/internal/engine/restic"
 	"github.com/bqckup/bqckup-go/internal/engine/restic/backend"
 	"github.com/bqckup/bqckup-go/internal/engine/restic/repository"
 )
@@ -132,7 +134,19 @@ func TestSecondBackupDedups(t *testing.T) {
 	}
 	// identical data: zero new data blobs (spec §9.4 dedup gate)
 	if secondSummary.DataAdded != 0 {
-		t.Fatalf("second backup added %d bytes, want 0", secondSummary.DataAdded)
+		detail := ""
+		for _, m := range secondSummary.Missed {
+			detail += fmt.Sprintf(" [type=%d size=%d]", m.Type, m.Size)
+		}
+		var idxFiles string
+		if err := local.List(ctx, restic.IndexFile, func(h restic.Handle, size int64) error {
+			idxFiles += fmt.Sprintf(" %s:%d", h.Name[:8], size)
+			return nil
+		}); err != nil {
+			idxFiles = " list-error:" + err.Error()
+		}
+		t.Fatalf("second backup added %d bytes, want 0; missed blobs:%s; index entries=%d; index files:%s",
+			secondSummary.DataAdded, detail, repo.MasterIndex().Len(), idxFiles)
 	}
 	snapshots, err := repo.ListSnapshots(ctx)
 	if err != nil {

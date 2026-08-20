@@ -52,6 +52,15 @@ type Summary struct {
 	TotalBytesProcessed int64
 	DataAdded           int64
 	TotalDuration       float64
+	// Missed reports each blob re-stored because its ID was not in the
+	// repository index (the dedup misses that make up DataAdded).
+	Missed []MissedBlob
+}
+
+// MissedBlob describes one blob that had to be stored again.
+type MissedBlob struct {
+	Type restic.BlobType
+	Size int
 }
 
 // Backup walks the paths, stores all data, and writes one snapshot.
@@ -110,6 +119,7 @@ func (a *Archiver) Backup(ctx context.Context, spec BackupSpec) (restic.ID, Summ
 		TotalFilesProcessed: state.filesNew + state.filesChanged + state.filesUnmodified,
 		TotalBytesProcessed: state.bytesProcessed,
 		DataAdded:           state.dataAdded,
+		Missed:              state.missed,
 		TotalDuration:       duration,
 	}
 	return snapID, summary, nil
@@ -125,6 +135,7 @@ type backupState struct {
 	filesUnmodified int
 	bytesProcessed  int64
 	dataAdded       int64
+	missed          []MissedBlob
 }
 
 // backupPath backs up one root path into a tree blob.
@@ -328,8 +339,10 @@ func (s *backupState) combineRoots(ctx context.Context) (*restic.ID, error) {
 // saveBlob stores a blob and counts new bytes for the summary.
 func (s *backupState) saveBlob(ctx context.Context, blobType restic.BlobType, data []byte) (restic.ID, error) {
 	id := restic.Hash(data)
-	if _, exists := s.archiver.repo.MasterIndex().Lookup(id); !exists {
+	_, exists := s.archiver.repo.MasterIndex().Lookup(id)
+	if !exists {
 		s.dataAdded += int64(len(data))
+		s.missed = append(s.missed, MissedBlob{Type: blobType, Size: len(data)})
 	}
 	return s.archiver.repo.SaveBlob(ctx, blobType, data)
 }
