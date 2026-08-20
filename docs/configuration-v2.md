@@ -73,6 +73,9 @@ site:
   # backup_mode accepts 'full' (default) or 'incremental'
   backup_mode: incremental
   incremental:
+    # engine: 'restic' uses the external restic binary (default);
+    # 'builtin' uses the in-process pure-Go engine (no binary needed,
+    # local storage destinations only)
     engine: restic
     password_env: RESTIC_PASSWORD
   sources:

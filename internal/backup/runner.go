@@ -65,6 +65,7 @@ type Dependencies struct {
 	Repository         RunRepository
 	Archiver           Archiver
 	IncrementalEngine  IncrementalEngine
+	BuiltinEngine      IncrementalEngine
 	DatabaseExporters  map[string]Exporter
 	Stores             map[string]storage.Store
 	Storages           map[string]config.Storage
@@ -168,7 +169,11 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 	sitePrefix := path.Join("bqckup", site.Name)
 
 	if site.BackupMode == "incremental" {
-		if r.dependencies.IncrementalEngine == nil {
+		engine := r.dependencies.IncrementalEngine
+		if site.Incremental.Engine == "builtin" {
+			engine = r.dependencies.BuiltinEngine
+		}
+		if engine == nil {
 			return fail(apperror.Wrap(apperror.CategoryInternal, "incremental backup engine is unavailable", nil))
 		}
 		password, ok := r.lookupEnv(site.Incremental.PasswordEnv)
@@ -191,7 +196,7 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 				SecretAccessKey: storageConfig.SecretAccessKey,
 				Region:          storageConfig.Region,
 			}
-			if err := r.dependencies.IncrementalEngine.EnsureRepository(ctx, repo); err != nil {
+			if err := engine.EnsureRepository(ctx, repo); err != nil {
 				return fail(apperror.Wrap(apperror.CategoryStorage, "could not ensure incremental repository", err))
 			}
 			spec := restic.BackupSpec{
@@ -200,7 +205,7 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 				Exclude:  site.Sources.Files.Exclude,
 				Tags:     []string{"bqckup", "site:" + site.Name},
 			}
-			summary, err := r.dependencies.IncrementalEngine.BackupFiles(ctx, repo, spec)
+			summary, err := engine.BackupFiles(ctx, repo, spec)
 			if err != nil {
 				return fail(apperror.Wrap(apperror.CategoryExecution, "could not create incremental file backup", err))
 			}
@@ -276,6 +281,10 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 
 	for _, destination := range site.Destinations {
 		if site.BackupMode == "incremental" {
+			engine := r.dependencies.IncrementalEngine
+			if site.Incremental.Engine == "builtin" {
+				engine = r.dependencies.BuiltinEngine
+			}
 			storageConfig, ok := r.dependencies.Storages[destination.Storage]
 			if !ok {
 				return fail(apperror.Wrap(apperror.CategoryInternal, fmt.Sprintf("storage configuration %q is unavailable", destination.Storage), nil))
@@ -292,7 +301,7 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 				SecretAccessKey: storageConfig.SecretAccessKey,
 				Region:          storageConfig.Region,
 			}
-			if err := r.dependencies.IncrementalEngine.ApplyRetention(ctx, repo, site.Policy.KeepLast, site.Name); err != nil {
+			if err := engine.ApplyRetention(ctx, repo, site.Policy.KeepLast, site.Name); err != nil {
 				return fail(apperror.Wrap(apperror.CategoryStorage, "backup completed but incremental retention could not be applied", err))
 			}
 		} else {

@@ -127,3 +127,61 @@ func writeConfigTree(t *testing.T, dir, rootYAML, storageYAML, siteYAML string) 
 	require.NoError(t, os.MkdirAll(sitesDir, 0o700))
 	require.NoError(t, os.WriteFile(filepath.Join(sitesDir, "test-site.yaml"), []byte(siteYAML), 0o600))
 }
+
+func TestDoctorBuiltinEngineNeedsNoResticBinary(t *testing.T) {
+	t.Setenv("TEST_RESTIC_PASS", "secret-value")
+	tempDir := t.TempDir()
+	sourceDir := filepath.Join(tempDir, "source")
+	backupDir := filepath.Join(tempDir, "backups")
+	require.NoError(t, os.MkdirAll(sourceDir, 0o700))
+	require.NoError(t, os.MkdirAll(backupDir, 0o700))
+
+	writeFile(t, filepath.Join(tempDir, "config", "bqckup.yaml"), fmt.Sprintf(`app:
+  state_database: %s
+  temporary_directory: %s
+  lock_directory: %s
+`, filepath.Join(tempDir, "state.db"), filepath.Join(tempDir, "tmp"), filepath.Join(tempDir, "locks")))
+	writeFile(t, filepath.Join(tempDir, "config", "config", "storages.yaml"), fmt.Sprintf(`storages:
+  local-primary:
+    type: local
+    directory: %s
+`, backupDir))
+	writeFile(t, filepath.Join(tempDir, "config", "sites", "test-site.yaml"), fmt.Sprintf(`version: 2
+site:
+  name: test-site
+  enabled: true
+  backup_mode: incremental
+  incremental:
+    engine: builtin
+    password_env: TEST_RESTIC_PASS
+  sources:
+    files:
+      include:
+        - %s
+  destinations:
+    - storage: local-primary
+  policy:
+    minimum_interval: 24h
+    keep_last: 7
+`, sourceDir))
+
+	var stdout bytes.Buffer
+	root := NewRoot(buildinfo.Info{})
+	root.SetOut(&stdout)
+	root.SetErr(&bytes.Buffer{})
+	root.SetArgs([]string{"doctor", "--config-dir", filepath.Join(tempDir, "config")})
+	require.NoError(t, root.Execute())
+	// no binary:restic check for the builtin engine; the engine check is ok
+	assert.NotContains(t, stdout.String(), `"name":"binary:restic"`)
+	assert.Contains(t, stdout.String(), "builtin engine")
+}
+
+func writeFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
