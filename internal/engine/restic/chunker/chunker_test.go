@@ -61,7 +61,8 @@ func TestChunkSizeBounds(t *testing.T) {
 	}
 	for i, size := range sizes {
 		isLast := i == len(sizes)-1
-		if size < MinSize {
+		// the final chunk may be short (whatever remains of the file)
+		if size < MinSize && !isLast {
 			t.Fatalf("chunk %d is %d bytes, below min %d", i, size, MinSize)
 		}
 		if size > MaxSize && !isLast {
