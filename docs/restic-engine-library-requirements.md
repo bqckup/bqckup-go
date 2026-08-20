@@ -1,5 +1,12 @@
 # Restic Engine Library: Requirements for the Other Team
 
+> **Superseded (2026-08-20).** This contract was written for an external team
+> building a separate `github.com/bqckup/restic-engine` module. That decision is
+> reversed: the engine is developed in-tree at `internal/engine/restic/`. See
+> [`superpowers/specs/2026-08-20-restic-engine-phase1-design.md`](superpowers/specs/2026-08-20-restic-engine-phase1-design.md).
+> Kept as a historical record only; no requirement below is binding for the
+> in-tree engine.
+
 ## Overview
 
 This document defines what Bqckup Go needs from the rewritten Restic engine library. It is intended to be shared with the other team as their implementation contract.
