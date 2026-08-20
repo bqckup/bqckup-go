@@ -1,5 +1,12 @@
 # Restic Engine Library: Integration Specification
 
+> **Superseded in part (2026-08-20).** The in-tree pure-Go engine replaces the
+> separate library this document integrates:
+> [`superpowers/specs/2026-08-20-restic-engine-phase1-design.md`](superpowers/specs/2026-08-20-restic-engine-phase1-design.md).
+> Still valid: §4 (the `Engine` interface as the process-adapter consumer
+> contract) and §7 (doctor diagnostics for the process adapter). The sections
+> about `library_adapter.go` and build-tag selection are superseded.
+
 ## 1. Purpose
 
 This document specifies how `bqckup-go` will integrate the rewritten Restic engine library developed by the other team. It defines the adapter boundary, wiring strategy, configuration contract, error handling, testing approach, and doctor diagnostics.

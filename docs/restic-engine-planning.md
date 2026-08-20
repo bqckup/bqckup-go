@@ -1,5 +1,12 @@
 # Restic Engine Integration: Planning & Roadmap
 
+> **Superseded (2026-08-20).** The "separate library by another team" decision in
+> this document is replaced by the in-tree pure-Go engine design:
+> [`superpowers/specs/2026-08-20-restic-engine-phase1-design.md`](superpowers/specs/2026-08-20-restic-engine-phase1-design.md).
+> Still true: the process adapter (`internal/backup/restic/adapter.go`) remains
+> the interim implementation with its consumer contract. Anything below that
+> contradicts the new spec loses.
+
 ## Context
 
 Bqckup Go currently supports two backup modes:
