@@ -38,8 +38,8 @@ type Node struct {
 	Type               string                     `json:"type"`
 	Mode               os.FileMode                `json:"mode,omitempty"`
 	ModTime            time.Time                  `json:"mtime"`
-	AccessTime         time.Time                  `json:"atime"`
-	ChangeTime         time.Time                  `json:"ctime"`
+	AccessTime         time.Time                  `json:"atime,omitempty"`
+	ChangeTime         time.Time                  `json:"ctime,omitempty"`
 	UID                uint32                     `json:"uid"`
 	GID                uint32                     `json:"gid"`
 	User               string                     `json:"user,omitempty"`

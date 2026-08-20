@@ -155,11 +155,13 @@ func (s *backupState) backupPath(ctx context.Context, path string) error {
 
 // nodeFor builds the tree node for one filesystem object.
 func (s *backupState) nodeFor(ctx context.Context, path string, info os.FileInfo) (*tree.Node, error) {
+	// atime is deliberately not recorded (restic default): reading a file
+	// during backup updates it on relatime filesystems, which would change
+	// every tree on the next run and break dedup.
 	node := &tree.Node{
 		Name:       info.Name(),
 		Mode:       info.Mode(),
 		ModTime:    info.ModTime(),
-		AccessTime: info.ModTime(),
 		ChangeTime: info.ModTime(),
 	}
 	if stat, ok := info.Sys().(*syscall.Stat_t); ok {
@@ -169,7 +171,6 @@ func (s *backupState) nodeFor(ctx context.Context, path string, info os.FileInfo
 		node.DeviceID = uint64(stat.Dev)
 		node.Links = uint64(stat.Nlink)
 		node.Size = uint64(stat.Size)
-		node.AccessTime = time.Unix(stat.Atim.Sec, stat.Atim.Nsec)
 		node.ChangeTime = time.Unix(stat.Ctim.Sec, stat.Ctim.Nsec)
 	}
 

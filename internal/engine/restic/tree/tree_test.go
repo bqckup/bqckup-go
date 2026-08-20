@@ -110,11 +110,24 @@ func TestFieldNamesMatchRestic(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, field := range []string{
-		`"name":"f"`, `"type":"file"`, `"mode":420`, `"mtime"`, `"atime"`, `"ctime"`,
+		`"name":"f"`, `"type":"file"`, `"mode":420`, `"mtime"`,
 		`"uid":1000`, `"gid":1000`, `"size":3`, `"content":`,
 	} {
 		if !bytes.Contains(doc, []byte(field)) {
 			t.Fatalf("serialized tree misses %s: %s", field, doc)
+		}
+	}
+	// like restic, atime/ctime are omitempty: absent unless the writer sets them
+	withTimes := fileNode("f", 3, restic.Hash([]byte("x")))
+	withTimes.AccessTime = withTimes.ModTime
+	withTimes.ChangeTime = withTimes.ModTime
+	withTimesDoc, err := (&Tree{Nodes: []*Node{withTimes}}).Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{`"atime"`, `"ctime"`} {
+		if !bytes.Contains(withTimesDoc, []byte(field)) {
+			t.Fatalf("serialized tree misses %s: %s", field, withTimesDoc)
 		}
 	}
 	// a restic-shaped node with xattrs must parse

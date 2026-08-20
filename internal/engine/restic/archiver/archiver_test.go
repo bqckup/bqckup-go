@@ -143,6 +143,28 @@ func TestSecondBackupDedups(t *testing.T) {
 	}
 }
 
+func TestNodeForDoesNotRecordAtime(t *testing.T) {
+	// atime changes when a backup reads the file (relatime filesystems), so
+	// recording it would make every tree differ on the next run and break
+	// dedup. The archiver must never store it.
+	ctx := context.Background()
+	arch, _, source := newArchiver(t, ctx)
+	path := filepath.Join(source, "f.txt")
+	writeFile(t, path, []byte("x"))
+	info, err := os.Lstat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := &backupState{archiver: arch, spec: BackupSpec{Paths: []string{source}}}
+	node, err := state.nodeFor(ctx, path, info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !node.AccessTime.IsZero() {
+		t.Fatalf("node records atime %v; atime must never be stored", node.AccessTime)
+	}
+}
+
 func TestOneByteChangeAddsOnlyAffectedChunks(t *testing.T) {
 	ctx := context.Background()
 	arch, local, source := newArchiver(t, ctx)
