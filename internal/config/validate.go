@@ -231,6 +231,23 @@ func (c Config) validateSite(site Site, seen map[string]struct{}) error {
 	if !site.Enabled {
 		return nil
 	}
+<<<<<<< HEAD
+=======
+	if site.BackupMode != "" && site.BackupMode != "full" && site.BackupMode != "incremental" {
+		return validationError(file, baseField+".backup_mode", "must be 'full' or 'incremental'")
+	}
+	if site.BackupMode == "incremental" {
+		if site.Incremental.Engine != "restic" && site.Incremental.Engine != "builtin" {
+			return validationError(file, baseField+".incremental.engine", "must be 'restic' or 'builtin'")
+		}
+		if site.Incremental.PasswordEnv == "" {
+			return validationError(file, baseField+".incremental.password_env", "is required")
+		}
+		if !validEnvName.MatchString(site.Incremental.PasswordEnv) {
+			return validationError(file, baseField+".incremental.password_env", "must be a valid environment variable name")
+		}
+	}
+>>>>>>> 5e98f45 (feat: wire builtin restic engine into the app (P1-T17))
 	if len(site.Sources.Files.Include) == 0 {
 		return validationError(file, baseField+".sources.files.include", "at least one path is required")
 	}

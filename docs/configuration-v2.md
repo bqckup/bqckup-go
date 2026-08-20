@@ -53,6 +53,10 @@ The filename must match `site.name`:
 site:
   name: example
   enabled: true
+  # backup_mode accepts 'full' (default) or 'incremental'
+  backup_mode: incremental
+  incremental:
+    password_env: RESTIC_PASSWORD
   sources:
     files:
       include:
