@@ -182,6 +182,8 @@ Do not add placeholder commands or config that merely return “not implemented.
 
 **Out of scope:** Implementation during the design PR, Rustic compatibility claims, silent replacement of archive mode, passwords in YAML, destructive restore defaults.
 
+**Current design artifacts (in review):** `docs/superpowers/specs/2026-08-20-restic-engine-phase1-design.md` (the design), format verification and decision notes in `docs/superpowers/notes/`, task breakdown in `tasks/plan.md`.
+
 **Acceptance:** Maintainer approves the design and splits implementation into independently testable follow-up milestones. Archive mode remains supported. Restore requires explicit destination and overwrite safeguards.
 
 **Required tests:** None for the design PR; each approved implementation milestone must define contract, integration, cancellation, redaction, and restore-safety tests before coding.
