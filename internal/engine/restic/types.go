@@ -67,6 +67,29 @@ func (t BlobType) String() string {
 	}
 }
 
+// MarshalJSON writes the restic index spelling ("data" or "tree");
+// compression is implied by a non-zero uncompressed_length.
+func (t BlobType) MarshalJSON() ([]byte, error) {
+	return json.Marshal(t.String())
+}
+
+// UnmarshalJSON accepts the restic index spelling.
+func (t *BlobType) UnmarshalJSON(data []byte) error {
+	var s string
+	if err := json.Unmarshal(data, &s); err != nil {
+		return err
+	}
+	switch s {
+	case "data":
+		*t = DataBlob
+	case "tree":
+		*t = TreeBlob
+	default:
+		return fmt.Errorf("invalid blob type %q", s)
+	}
+	return nil
+}
+
 // Blob is one stored unit of deduplication: a chunk of file data or a tree.
 type Blob struct {
 	BlobType           BlobType
