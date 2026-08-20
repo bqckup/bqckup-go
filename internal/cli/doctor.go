@@ -113,7 +113,24 @@ func runDoctorChecks(ctx context.Context, configDir, siteFilter string) DoctorRe
 			continue
 		}
 		if site.BackupMode == "incremental" {
-			needsRestic = true
+			if site.Incremental.Engine == "builtin" {
+				// the builtin engine needs no restic binary; its storage
+				// destinations must be local until L3 ships
+				localOnly := true
+				for _, destination := range site.Destinations {
+					storageConfig, ok := cfg.Storages[destination.Storage]
+					if !ok || storageConfig.Type != "local" {
+						localOnly = false
+						addCheck(fmt.Sprintf("engine:%s:destination:%s", site.Name, destination.Storage), "fail",
+							"incremental engine 'builtin' requires local storage destinations")
+					}
+				}
+				if localOnly {
+					addCheck(fmt.Sprintf("engine:%s", site.Name), "ok", "builtin engine (no restic binary required)")
+				}
+			} else {
+				needsRestic = true
+			}
 			if val, ok := os.LookupEnv(site.Incremental.PasswordEnv); !ok || val == "" {
 				addCheck(fmt.Sprintf("secret:%s:%s", site.Name, site.Incremental.PasswordEnv), "fail",
 					fmt.Sprintf("password environment variable %q is not set or empty", site.Incremental.PasswordEnv))

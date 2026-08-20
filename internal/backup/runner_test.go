@@ -185,6 +185,7 @@ type dependencyFakes struct {
 	repository        *fakeRepository
 	archiver          *fakeArchiver
 	incremental       *fakeIncrementalEngine
+	builtin           *fakeIncrementalEngine
 	stores            map[string]storage.Store
 	storages          map[string]config.Storage
 	retainer          *fakeRetainer
@@ -221,6 +222,7 @@ func (d *dependencyFakes) dependencies() Dependencies {
 		Repository:         d.repository,
 		Archiver:           d.archiver,
 		IncrementalEngine:  d.incremental,
+		BuiltinEngine:      d.builtin,
 		Stores:             d.stores,
 		Storages:           d.storages,
 		Retainer:           d.retainer,
@@ -399,6 +401,29 @@ func (f *fakeIncrementalEngine) ApplyRetention(_ context.Context, repo restic.Re
 
 func (f *fakeIncrementalEngine) Unlock(_ context.Context, _ restic.RepoConfig) error {
 	return nil
+}
+
+func TestRunnerSelectsBuiltinEngine(t *testing.T) {
+	deps := successfulDependencies(t)
+	builtin := &fakeIncrementalEngine{summary: restic.SnapshotSummary{SnapshotID: "builtin-001", DataAdded: 4096}}
+	deps.builtin = builtin
+	runner := NewRunner(deps.dependencies())
+
+	site := validSite()
+	site.BackupMode = "incremental"
+	site.Incremental = config.Incremental{
+		Engine:      "builtin",
+		PasswordEnv: "RESTIC_PASSWORD",
+	}
+
+	result, err := runner.Run(context.Background(), site, false)
+	require.NoError(t, err)
+	assert.Equal(t, StatusSuccess, result.Status)
+	assert.Equal(t, 1, builtin.ensureCalls)
+	assert.Equal(t, 1, builtin.backupCalls)
+	assert.Equal(t, 1, builtin.retentionCalls)
+	assert.Equal(t, 0, deps.incremental.ensureCalls) // process adapter untouched
+	assert.Equal(t, "builtin-001", deps.repository.artifacts[0].ObjectKey)
 }
 
 func TestRunnerIncrementalBackupSuccess(t *testing.T) {

@@ -49,7 +49,17 @@ func TestValidateIncrementalBackupMode(t *testing.T) {
 		err := cfg.Validate()
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "incremental.engine")
-		assert.Contains(t, err.Error(), "must be 'restic'")
+		assert.Contains(t, err.Error(), "must be 'restic' or 'builtin'")
+	})
+
+	t.Run("accepts the builtin engine", func(t *testing.T) {
+		cfg := validConfig(t)
+		cfg.Sites[0].BackupMode = "incremental"
+		cfg.Sites[0].Incremental = Incremental{
+			Engine:      "builtin",
+			PasswordEnv: "RESTIC_PASSWORD",
+		}
+		require.NoError(t, cfg.Validate())
 	})
 
 	t.Run("rejects incremental mode with missing password_env", func(t *testing.T) {

@@ -238,8 +238,8 @@ func (c Config) validateSite(site Site, seen map[string]struct{}) error {
 		return validationError(file, baseField+".backup_mode", "must be 'full' or 'incremental'")
 	}
 	if site.BackupMode == "incremental" {
-		if site.Incremental.Engine != "restic" {
-			return validationError(file, baseField+".incremental.engine", "must be 'restic'")
+		if site.Incremental.Engine != "restic" && site.Incremental.Engine != "builtin" {
+			return validationError(file, baseField+".incremental.engine", "must be 'restic' or 'builtin'")
 		}
 		if site.Incremental.PasswordEnv == "" {
 			return validationError(file, baseField+".incremental.password_env", "is required")

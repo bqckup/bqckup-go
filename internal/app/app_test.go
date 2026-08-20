@@ -135,3 +135,44 @@ site:
 `, source)), 0o600))
 	return configDir, backupRoot
 }
+
+func TestValidateBuiltinEngineStorages(t *testing.T) {
+	local := config.Storage{Type: "local", Directory: "/var/backups"}
+	s3 := config.Storage{Type: "s3", Bucket: "bucket"}
+
+	builtinSite := func(destinations []config.Destination) config.Site {
+		return config.Site{
+			Name: "site-a", Enabled: true, BackupMode: "incremental",
+			Incremental:  config.Incremental{Engine: "builtin", PasswordEnv: "PW"},
+			Destinations: destinations,
+		}
+	}
+
+	t.Run("builtin with local destinations is fine", func(t *testing.T) {
+		cfg := config.Config{
+			Storages: map[string]config.Storage{"local-primary": local},
+			Sites:    []config.Site{builtinSite([]config.Destination{{Storage: "local-primary"}})},
+		}
+		require.NoError(t, validateBuiltinEngineStorages(cfg))
+	})
+
+	t.Run("builtin with s3 destination is rejected", func(t *testing.T) {
+		cfg := config.Config{
+			Storages: map[string]config.Storage{"s3-primary": s3},
+			Sites:    []config.Site{builtinSite([]config.Destination{{Storage: "s3-primary"}})},
+		}
+		err := validateBuiltinEngineStorages(cfg)
+		require.Error(t, err)
+		assert.Equal(t, apperror.CategoryConfig, apperror.CategoryOf(err))
+	})
+
+	t.Run("process adapter sites are not restricted", func(t *testing.T) {
+		site := builtinSite([]config.Destination{{Storage: "s3-primary"}})
+		site.Incremental.Engine = "restic"
+		cfg := config.Config{
+			Storages: map[string]config.Storage{"s3-primary": s3},
+			Sites:    []config.Site{site},
+		}
+		require.NoError(t, validateBuiltinEngineStorages(cfg))
+	})
+}
