@@ -23,6 +23,9 @@ func NewLocal(dir string) *Local {
 	return &Local{layout: Layout{Dir: dir}}
 }
 
+// DirPath returns the repository directory (test convenience).
+func (b *Local) DirPath() string { return b.layout.Dir }
+
 // CreateLayout creates all repository directories (0700), including all
 // 256 data/<xx> subdirectories, like restic does at init.
 func (b *Local) CreateLayout() error {
@@ -188,11 +191,23 @@ func (b *Local) List(ctx context.Context, t restic.FileType, fn func(h restic.Ha
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	dir, err := b.layout.Dirname(restic.Handle{Type: t, Name: placeholder(t)})
-	if err != nil {
-		return err
+	var base string
+	switch t {
+	case restic.ConfigFile:
+		base = b.layout.Dir
+	case restic.DataFile:
+		base = filepath.Join(b.layout.Dir, "data")
+	case restic.KeyFileType:
+		base = filepath.Join(b.layout.Dir, "keys")
+	case restic.IndexFile:
+		base = filepath.Join(b.layout.Dir, "index")
+	case restic.SnapshotFile:
+		base = filepath.Join(b.layout.Dir, "snapshots")
+	case restic.LockFile:
+		base = filepath.Join(b.layout.Dir, "locks")
+	default:
+		return errors.New("backend: unknown file type")
 	}
-	base := filepath.Join(b.layout.Dir, dir)
 	if t == restic.DataFile {
 		for i := 0; i < 256; i++ {
 			if err := b.listDir(ctx, filepath.Join(base, fmt.Sprintf("%02x", i)), t, fn); err != nil {
@@ -202,14 +217,6 @@ func (b *Local) List(ctx context.Context, t restic.FileType, fn func(h restic.Ha
 		return nil
 	}
 	return b.listDir(ctx, base, t, fn)
-}
-
-// placeholder returns a valid name so Dirname works for every type.
-func placeholder(t restic.FileType) string {
-	if t == restic.DataFile {
-		return "0000000000000000000000000000000000000000000000000000000000000000"
-	}
-	return "x"
 }
 
 func (b *Local) listDir(ctx context.Context, dir string, t restic.FileType, fn func(h restic.Handle, size int64) error) error {
