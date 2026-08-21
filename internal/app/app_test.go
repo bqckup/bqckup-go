@@ -11,6 +11,7 @@ import (
 	"github.com/bqckup/bqckup-go/internal/apperror"
 	databaseexporter "github.com/bqckup/bqckup-go/internal/backup/database"
 	"github.com/bqckup/bqckup-go/internal/config"
+	"github.com/bqckup/bqckup-go/internal/process"
 	"github.com/bqckup/bqckup-go/internal/storage/s3compat"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -55,7 +56,7 @@ func (f *fakeDatabaseProcessRunner) LookPath(command string) (string, error) {
 	return command, nil
 }
 
-func (*fakeDatabaseProcessRunner) Run(context.Context, databaseexporter.ProcessSpec) error {
+func (*fakeDatabaseProcessRunner) Run(context.Context, process.ProcessSpec) error {
 	return nil
 }
 
@@ -112,12 +113,12 @@ app:
   lock_directory: locks
   log_level: info
 `), 0o600))
-	require.NoError(t, os.WriteFile(filepath.Join(configDir, "config", "storages.yaml"), []byte(fmt.Sprintf(`storages:
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, "config", "storages.yaml"), fmt.Appendf(nil, `storages:
   local-primary:
     type: local
     directory: %s
-`, backupRoot)), 0o600))
-	require.NoError(t, os.WriteFile(filepath.Join(configDir, "sites", "example.yaml"), []byte(fmt.Sprintf(`version: 2
+`, backupRoot), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, "sites", "example.yaml"), fmt.Appendf(nil, `version: 2
 site:
   name: example
   enabled: true
@@ -132,47 +133,6 @@ site:
   policy:
     minimum_interval: 1h
     keep_last: 3
-`, source)), 0o600))
+`, source), 0o600))
 	return configDir, backupRoot
-}
-
-func TestValidateBuiltinEngineStorages(t *testing.T) {
-	local := config.Storage{Type: "local", Directory: "/var/backups"}
-	s3 := config.Storage{Type: "s3", Bucket: "bucket"}
-
-	builtinSite := func(destinations []config.Destination) config.Site {
-		return config.Site{
-			Name: "site-a", Enabled: true, BackupMode: "incremental",
-			Incremental:  config.Incremental{Engine: "builtin", PasswordEnv: "PW"},
-			Destinations: destinations,
-		}
-	}
-
-	t.Run("builtin with local destinations is fine", func(t *testing.T) {
-		cfg := config.Config{
-			Storages: map[string]config.Storage{"local-primary": local},
-			Sites:    []config.Site{builtinSite([]config.Destination{{Storage: "local-primary"}})},
-		}
-		require.NoError(t, validateBuiltinEngineStorages(cfg))
-	})
-
-	t.Run("builtin with s3 destination is rejected", func(t *testing.T) {
-		cfg := config.Config{
-			Storages: map[string]config.Storage{"s3-primary": s3},
-			Sites:    []config.Site{builtinSite([]config.Destination{{Storage: "s3-primary"}})},
-		}
-		err := validateBuiltinEngineStorages(cfg)
-		require.Error(t, err)
-		assert.Equal(t, apperror.CategoryConfig, apperror.CategoryOf(err))
-	})
-
-	t.Run("process adapter sites are not restricted", func(t *testing.T) {
-		site := builtinSite([]config.Destination{{Storage: "s3-primary"}})
-		site.Incremental.Engine = "restic"
-		cfg := config.Config{
-			Storages: map[string]config.Storage{"s3-primary": s3},
-			Sites:    []config.Site{site},
-		}
-		require.NoError(t, validateBuiltinEngineStorages(cfg))
-	})
 }

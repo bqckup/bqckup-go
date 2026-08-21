@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/bqckup/bqckup-go/internal/ctxcopy"
 	"github.com/bqckup/bqckup-go/internal/engine/restic"
 )
 
@@ -97,7 +98,7 @@ func (b *Local) Save(ctx context.Context, h restic.Handle, rd io.Reader) error {
 		os.Remove(tmpPath)
 	}
 
-	if _, err := copyContext(ctx, tmp, rd); err != nil {
+	if _, err := ctxcopy.Copy(ctx, tmp, rd); err != nil {
 		cleanup()
 		return err
 	}
@@ -117,32 +118,6 @@ func (b *Local) Save(ctx context.Context, h restic.Handle, rd io.Reader) error {
 }
 
 // copyContext copies rd to w, checking ctx between chunks.
-func copyContext(ctx context.Context, w io.Writer, rd io.Reader) (int64, error) {
-	buffer := make([]byte, 128*1024)
-	var written int64
-	for {
-		if err := ctx.Err(); err != nil {
-			return written, err
-		}
-		read, readErr := rd.Read(buffer)
-		if read > 0 {
-			count, writeErr := w.Write(buffer[:read])
-			written += int64(count)
-			if writeErr != nil {
-				return written, fmt.Errorf("write staging file: %w", writeErr)
-			}
-			if count != read {
-				return written, io.ErrShortWrite
-			}
-		}
-		if errors.Is(readErr, io.EOF) {
-			return written, nil
-		}
-		if readErr != nil {
-			return written, readErr
-		}
-	}
-}
 
 func (b *Local) Load(ctx context.Context, h restic.Handle, length int, offset int64, fn func(rd io.Reader) error) error {
 	if err := ctx.Err(); err != nil {

@@ -14,6 +14,7 @@ import (
 
 	"github.com/bqckup/bqckup-go/internal/backup"
 	"github.com/bqckup/bqckup-go/internal/config"
+	"github.com/bqckup/bqckup-go/internal/process"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -102,7 +103,7 @@ func TestExporterRemovesArtifactOnCancellation(t *testing.T) {
 }
 
 type fakeProcessRunner struct {
-	spec          ProcessSpec
+	spec          process.ProcessSpec
 	output        string
 	stderr        string
 	err           error
@@ -111,7 +112,7 @@ type fakeProcessRunner struct {
 
 func (f *fakeProcessRunner) LookPath(command string) (string, error) { return command, nil }
 
-func (f *fakeProcessRunner) Run(ctx context.Context, spec ProcessSpec) error {
+func (f *fakeProcessRunner) Run(ctx context.Context, spec process.ProcessSpec) error {
 	f.spec = spec
 	if f.waitForCancel {
 		<-ctx.Done()

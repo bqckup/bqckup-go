@@ -15,6 +15,7 @@ import (
 	resticfacade "github.com/bqckup/bqckup-go/internal/engine/restic/facade"
 	"github.com/bqckup/bqckup-go/internal/history"
 	"github.com/bqckup/bqckup-go/internal/platform/lock"
+	"github.com/bqckup/bqckup-go/internal/process"
 	"github.com/bqckup/bqckup-go/internal/retention"
 	"github.com/bqckup/bqckup-go/internal/storage"
 	localstorage "github.com/bqckup/bqckup-go/internal/storage/local"
@@ -53,7 +54,7 @@ func Open(ctx context.Context, configDir string) (*App, error) {
 		_ = closeDatabase()
 		return nil, err
 	}
-	databaseExporters, err := buildDatabaseExporters(ctx, configuration, databaseexporter.NewProcessRunner())
+	databaseExporters, err := buildDatabaseExporters(ctx, configuration, process.NewProcessRunner())
 	if err != nil {
 		_ = closeDatabase()
 		return nil, err
@@ -96,7 +97,7 @@ func validateBuiltinEngineStorages(configuration config.Config) error {
 	return nil
 }
 
-func buildDatabaseExporters(ctx context.Context, configuration config.Config, process databaseexporter.ProcessRunner) (map[string]backup.Exporter, error) {
+func buildDatabaseExporters(ctx context.Context, configuration config.Config, process process.ProcessRunner) (map[string]backup.Exporter, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}

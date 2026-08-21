@@ -19,7 +19,6 @@ var ErrInvalidInput = errors.New("invalid command input")
 type options struct {
 	configDir string
 	output    string
-	verbose   bool
 }
 
 // NewRoot constructs the command tree without reading configuration or opening state.
@@ -43,7 +42,6 @@ func NewRoot(info buildinfo.Info) *cobra.Command {
 	}
 	root.PersistentFlags().StringVar(&opts.configDir, "config-dir", defaultConfigDir, "configuration directory")
 	root.PersistentFlags().StringVar(&opts.output, "output", "text", "output format: text or json")
-	root.PersistentFlags().BoolVar(&opts.verbose, "verbose", false, "enable verbose diagnostics")
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
 		return fmt.Errorf("%w: %v", ErrInvalidInput, err)
 	})

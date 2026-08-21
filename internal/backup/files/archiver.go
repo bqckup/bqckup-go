@@ -4,8 +4,6 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -74,7 +72,7 @@ func (a *Archiver) Create(ctx context.Context, source backup.FileSource, destina
 		return backup.Artifact{}, fmt.Errorf("close archive: %w", err)
 	}
 
-	checksum, size, err := checksumFile(destination)
+	checksum, size, err := backup.ChecksumFile(destination)
 	if err != nil {
 		return backup.Artifact{}, err
 	}
@@ -192,21 +190,4 @@ func (s archiveState) excluded(candidate string) bool {
 		}
 	}
 	return false
-}
-
-func checksumFile(filename string) (string, int64, error) {
-	file, err := os.Open(filename)
-	if err != nil {
-		return "", 0, fmt.Errorf("open completed archive: %w", err)
-	}
-	hash := sha256.New()
-	size, copyErr := io.Copy(hash, file)
-	closeErr := file.Close()
-	if copyErr != nil {
-		return "", 0, fmt.Errorf("checksum archive: %w", copyErr)
-	}
-	if closeErr != nil {
-		return "", 0, fmt.Errorf("close completed archive: %w", closeErr)
-	}
-	return hex.EncodeToString(hash.Sum(nil)), size, nil
 }
