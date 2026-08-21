@@ -41,20 +41,22 @@ Multiple destinations have all-required semantics. A destination failure fails t
 
 `backup_mode: incremental` selects its engine via `incremental.engine`:
 
-- **`restic`** (default): shells out to the system `restic` binary through
-  `internal/backup/restic` (the process adapter). Required for S3/R2
-  destinations and repositories in the old format v1 until the user
-  migrates.
+- **`restic`** (default): runs the system `restic` binary through
+  `internal/backup/restic` (the process adapter). Required for
+  repositories in the old format v1 until the user migrates.
 - **`builtin`**: the in-process pure-Go engine in `internal/engine/restic/`
   (facade in `internal/engine/restic/facade/`). No `restic` binary needed.
-  Local storage destinations only until the S3/R2 backend ships. Writes
+  Serves local and S3/R2 destinations (backend in
+  `internal/engine/restic/backend/`: `Local` and `S3`). Writes
   Restic repository format v2: repositories made by the builtin engine pass
   the official `restic check`/`snapshots`/`restore` (restic >= 0.17.0), and
   the engine opens and continues repositories created by the real restic
   binary in format v2.
 
-Retention in L1 deletes snapshot files beyond `keep_last` for the site tag;
-pack pruning is a later phase. Restore is a future phase with an explicit
+Retention (keep_last per site tag) forgets old snapshots and prunes
+unreachable pack data with a mark-and-sweep pass (no repack): the new
+index is written before any pack is deleted, so a crash at any point
+leaves `restic check` green. Restore is a future phase with an explicit
 destination and no silent overwrites.
 
 ## Boundaries
@@ -68,7 +70,13 @@ destination and no silent overwrites.
 - `internal/storage/local`: path-safe, checksum-verified local writes and backup-set listing.
 - `internal/storage/s3compat`: shared S3/R2 verified uploads and prefix-scoped retention.
 - `internal/history`: GORM models, SQLite lifecycle, ordered recorded migrations, repository queries.
-- `internal/platform/lock`: Linux `flock` implementation.
+- `internal/platform/lock`: Linux `flock` implementation (site-level
+  mutual exclusion).
+- Repository-level locking for the builtin engine lives in
+  `internal/engine/restic/lock` (restic-compatible lock files: encrypted
+  blobs in `locks/`, 30-minute staleness, exclusive for backup/retention,
+  refresh every 5 minutes during long operations). `bqckup backup unlock
+  <site>` removes stale locks.
 - `internal/cli`: command parsing, presentation, and the single exit-code mapper.
 - `internal/app`: the only normal place that constructs concrete dependencies.
 
@@ -84,7 +92,11 @@ Artifact keys use:
 bqckup/<site>/<UTC timestamp>/<artifact name>
 ```
 
-The timestamp layout is `2006-01-02T15-04-05Z`. Names come from validated configuration, not raw runtime input.
+The timestamp layout is `2006-01-02T15-04-05.000000000Z` (nanosecond
+resolution, so two runs in the same second — a forced rerun, cron and a
+manual run overlapping — never collide on the same object key; stores are
+write-once). Names come from validated configuration, not raw runtime
+input.
 
 ## Security rules
 
@@ -98,4 +110,4 @@ The timestamp layout is `2006-01-02T15-04-05Z`. Names come from validated config
 
 ## Deliberate exclusions
 
-The foundation has no web UI, auth, notifications, reporting, master API, webhook, restore, internal scheduler, or Rustic. Restic integration is delivered by two engines: the process adapter (`engine: restic`) and the in-tree pure-Go engine (`engine: builtin`, L1: local storage, retention without prune, no restore).
+The foundation has no web UI, auth, notifications, reporting, master API, webhook, restore, internal scheduler, or Rustic. Restic integration is delivered by two engines: the process adapter (`engine: restic`) and the in-tree pure-Go engine (`engine: builtin`, local + S3/R2 storage, retention without prune until L2, no restore).

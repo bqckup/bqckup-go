@@ -191,7 +191,7 @@ internal/
 #### 1.1 Data Structures & Algorithms
 Restic uses a two-level key hierarchy:
 1. **User Password & Key File:**
-   - The user provides a plaintext password (passed through environment variable `RESTIC_PASSWORD`).
+   - The user provides a plaintext password via the environment variable named by `incremental.password_env` (the process adapter forwards it to the restic subprocess as `RESTIC_PASSWORD`).
    - A `KeyFile` JSON document stored under `keys/<key_id>` contains the scrypt parameters used to derive the keys (`N`, `r`, `p`, 64-byte `salt`). The parameters live in the key file and the reader always uses what it reads. Official restic calibrates its own parameters on key creation; this engine writes the fixed, compatible values `N=65536, r=8, p=1`. Any valid parameters are accepted by restic.
    - Scrypt derives 64 bytes:
      - Bytes 0..31: AES-256 key for decrypting the master key.
@@ -250,7 +250,7 @@ To achieve deduplication across file shifts and edits, files are split into vari
 
 #### 2.2 Parameters
 - **Min Chunk Size:** $512\text{ KiB} = 524,288\text{ bytes}$
-- **Average Chunk Size:** $1\text{ MiB} = 1,048,576\text{ bytes}$
+- **Average Chunk Size:** $\approx 1.5\text{ MiB}$ (512 KiB minimum plus the expected 1 MiB mean from the split mask; verified in the chunker test, band [1 MiB, 2 MiB])
 - **Max Chunk Size:** $8\text{ MiB} = 8,388,608\text{ bytes}$
 - **Sliding Window Size:** $64\text{ bytes}$
 - **Average Target Mask:** $\text{0x0FFFFF}$ (20 bits matching average $2^{20} = 1\text{ MiB}$)

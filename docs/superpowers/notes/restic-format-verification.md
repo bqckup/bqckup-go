@@ -177,11 +177,42 @@ type Key struct {
 `chunker-src/chunker.go`:
 
 - `MinSize = 512 KiB`, `MaxSize = 8 MiB`, `splitmask = (1<<20)-1`
-  (~1 MiB average), window 64 bytes.
+  (~1 MiB mean split interval; chunk mean ≈ 1.5 MiB including MinSize), window 64 bytes.
 - `RandomPolynomial()`: random **degree-53** irreducible polynomial
   (`DerivePolynomial`: mask bits above 53, set bit 53 and bit 0, test
   irreducibility, retry).
 - The chunker panics if the polynomial degree exceeds 53.
+
+### 2.11 Locks (verified 2026-08-21, restic v0.16.4 and v0.19.1)
+
+`internal/restic/lock.go` + `internal/repository/repository.go`
+(`saveUnpacked`/`loadUnpacked`):
+
+- Lock JSON (identical in 0.16 and 0.19):
+
+```json
+{"time":"<RFC3339Nano>","exclusive":true,"hostname":"...","username":"...","pid":123,"uid":1000,"gid":1000}
+```
+
+  `uid`/`gid` have `omitempty`; the `time` field is a normal Go
+  `time.Time` (RFC3339Nano).
+- **Locks are NOT plaintext.** `saveUnpacked` compresses the JSON as
+  `0x02 || zstd(...)` (v2 repos only) and seals it with the repository
+  master key: `nonce (16) || ciphertext || MAC (16)` — the same envelope
+  as §2.3. The file name is the SHA-256 of the sealed blob (content
+  addressed), NOT a random ID: uniqueness comes from the random nonce and
+  timestamp, so concurrent writers never collide (no CAS needed on S3).
+  The plan's earlier "random-named files" description is an approximation;
+  the implementation follows the verified format.
+- Locking algorithm (0.19 `newLock`): check existing locks → create own
+  → wait 200 ms → check again → remove own on conflict. `Refresh` writes a
+  NEW lock file (new name) and removes the old one. Stale = `time.Since(Time)
+  > 30 min`; restic also treats a lock as stale when its hostname matches
+  the current host and the PID is no longer alive.
+- Lock semantics changed in restic >= 0.17: `backup` takes an **append
+  (non-exclusive)** lock so backups can run concurrently; `prune`/`forget`
+  take exclusive locks. bqckup deliberately keeps backup exclusive (plan
+  D5): strictly safer, and both directions still conflict correctly.
 
 ## 3. Required spec changes (from this verification)
 

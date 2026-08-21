@@ -44,7 +44,9 @@ This means:
    - the maintainer approves the design PR.
 3. The existing archive mode (`.tar.gz`) must keep working. We do not remove it.
 4. Never put passwords in YAML files, logs, or error messages. Passwords live
-   only in memory and in the environment variable `RESTIC_PASSWORD`.
+   only in memory and in the environment variable named by
+   `incremental.password_env` (forwarded to the restic subprocess as
+   `RESTIC_PASSWORD`).
 5. Restore (getting files back out of a repository) is a future phase.
    This plan does not build restore. When we later build restore, it must ask
    for an explicit destination and must never overwrite files silently.
@@ -112,7 +114,7 @@ These follow the spec. If you disagree with one, say so in the design review.
 | D1 | Engine lives in-tree at `internal/engine/restic/`, zero `github.com/restic/*` imports | Single binary, no external restic needed. Supersedes the old "separate library" plan. |
 | D2 | Repository format must be restic v2 compatible | The official `restic` binary must be able to check and restore our repositories. This is the acceptance gate. |
 | D3 | Crypto: AES-256-CTR + Poly1305-AES, key from scrypt (N=65536, r=8, p=1) | Same as restic. Any other choice breaks compatibility. |
-| D4 | Chunking: Rabin CDC, min 512 KiB, avg 1 MiB, max 8 MiB, 64-byte window | Same bounds as restic defaults. |
+| D4 | Chunking: Rabin CDC, min 512 KiB, avg ≈ 1.5 MiB (512 KiB min + 1 MiB split-mask mean), max 8 MiB, 64-byte window | Same bounds as restic defaults. |
 | D5 | Blob ID = SHA-256 of the PLAINTEXT bytes | This is how restic deduplicates. Must match exactly. |
 | D6 | All writes are atomic: write to `tmp/`, fsync, rename; dirs 0700, files 0600 | A crash must never leave a half-written pack or index. |
 | D7 | MasterIndex is an in-memory map guarded by `sync.RWMutex` | Fast dedup lookups; safe for concurrent chunk workers. |
@@ -471,7 +473,8 @@ spec §2.3 state machine. Min 512 KiB, split mask for ~1 MiB average, max
 - [ ] No chunk smaller than 512 KiB or bigger than 8 MiB (except the last
       chunk of a file).
 - [ ] Boundary distribution test: over many random buffers, average chunk
-      size is close to 1 MiB (tolerance defined in the test).
+      size is close to 1.5 MiB (theory: MinSize + 2^20; test band [1 MiB,
+      2 MiB]).
 - [ ] Inserting 1 byte in the middle of a file changes only a few chunks
       (this is the whole point of CDC — test it).
 

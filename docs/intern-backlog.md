@@ -78,17 +78,7 @@ Do not add placeholder commands or config that merely return “not implemented.
 
 **Objective:** Optional future design only. The approved current contract uses inline credentials in a non-symlink runtime storage file with mode `0600`.
 
-**Prerequisites:** A separate design review and explicit approval to expand the credential model.
-
-**In scope:** Not ready for implementation assignment.
-
-**Out of scope:** Changing or removing the current inline runtime credential contract without migration planning.
-
-**Acceptance:** Config contains only `access_key_env` and `secret_key_env`; missing variables return preflight exit code 3; values never appear in JSON, stderr, history, or tests.
-
-**Required tests:** Both values present, each missing case, invalid variable name, redaction through every output boundary.
-
-**Suggested commit:** `feat: add environment S3 credentials`
+**Status:** Not ready for implementation assignment. A separate design review and explicit approval to expand the credential model are required before scope, acceptance criteria, or tests are written.
 
 ## M06 — Remote HTTP credential provider
 
@@ -182,13 +172,83 @@ Do not add placeholder commands or config that merely return “not implemented.
 
 **Out of scope:** Implementation during the design PR, Rustic compatibility claims, silent replacement of archive mode, passwords in YAML, destructive restore defaults.
 
-**Current design artifacts (in review):** `docs/superpowers/specs/2026-08-20-restic-engine-phase1-design.md` (the design), format verification and decision notes in `docs/superpowers/notes/`, task breakdown in `tasks/plan.md`.
+**Current design artifacts (in review):** `docs/superpowers/specs/2026-08-20-restic-engine-phase1-design.md` (the design), format verification and decision notes in `docs/superpowers/notes/`, task breakdown in `tasks/plan.md`; L3/L4/L2 roadmap in `tasks/plan-l3-l4-l2.md`.
 
 **Acceptance:** Maintainer approves the design and splits implementation into independently testable follow-up milestones. Archive mode remains supported. Restore requires explicit destination and overwrite safeguards.
 
 **Required tests:** None for the design PR; each approved implementation milestone must define contract, integration, cancellation, redaction, and restore-safety tests before coding.
 
 **Suggested commit:** `docs: design optional Restic integration`
+
+## M12 — Builtin engine S3/R2 backend (L3)
+
+**Status:** Delivered; retain this section as its acceptance checklist. S3/R2
+backend shipped in `internal/engine/restic/backend/s3.go`; `engine: builtin`
+now validates for s3/r2 destinations; credentials flow in memory only.
+
+**Roadmap:** `tasks/plan-l3-l4-l2.md`.
+
+**Objective:** Implement the engine `Backend` interface over S3/R2 so `engine: builtin` serves cloud destinations too.
+
+**Prerequisites:** M11 engine green; L3 design note approved (default layout only, reuse s3compat patterns).
+
+**In scope:** `internal/engine/restic/backend/s3.go` (Handle-based Save/Load with offset+length/Stat/List/Remove), restic `default` layout as object key prefixes, AWS SDK v2 config + transfermanager upload pattern reused from `internal/storage/s3compat`, network-free fake-SDK tests, optional disposable MinIO integration, config validation change: `builtin` becomes valid for s3/r2 destinations, app wiring passes credentials in memory only.
+
+**Out of scope:** `s3legacy` layout, multipart tuning beyond the existing transfermanager usage, removing the process adapter (v1 repos keep `engine: restic`), changing the runtime credential file contract (0600 non-symlink), S3 lifecycle rules.
+
+**Acceptance:** `restic_compat` suite passes against a MinIO-backed repository (check/snapshots/restore); builtin backup to an S3 destination produces identical dedup to local; no credential appears in logs/history/output; cancellation aborts uploads.
+
+**Required tests:** Backend contract tests via fake SDK (save/load offset+length/list/remove/stat), layout key mapping, config validation, redaction, cancellation, optional MinIO integration.
+
+**Suggested commit:** `feat: add S3/R2 backend to the builtin restic engine`
+
+## M13 — Builtin engine lock management (L4)
+
+**Status:** Delivered; retain this section as its acceptance checklist.
+Restic-compatible locks shipped in `internal/engine/restic/lock`
+(encrypted lock blobs, 30-minute staleness, `bqckup backup unlock`),
+verified against the official restic 0.19.1 binary in both directions.
+
+**Roadmap:** `tasks/plan-l3-l4-l2.md`.
+
+**Objective:** Restic-compatible locks so concurrent backups and prune cannot corrupt the repository; locks respected in both directions with the official binary.
+
+**Prerequisites:** M12 merged (locks must work on local and S3 backends).
+
+**In scope:** Lock file format identical to restic (JSON: time, exclusive, hostname, username, pid, uid, gid), exclusive lock for backup and prune, non-exclusive for listing, auto-removal of stale non-exclusive locks older than 30 minutes, stale exclusive lock → clear error suggesting unlock, real `Unlock` implementation (replaces the current no-op), honoring locks created by the official restic binary.
+
+**Out of scope:** Distributed lock services, silently removing stale exclusive locks. (Lock refresh loop: restic renews ~every 5 minutes; whether bqckup matches this or accepts stale-exclusive risk on long runs is decided in the L4-D1 design review.)
+
+**Acceptance:** Two concurrent builtin backups: the second fails cleanly with a lock error; the official restic binary blocks on our exclusive lock and vice versa; stale non-exclusive locks auto-clean; `restic check` passes.
+
+**Required tests:** Lock format parse/serialize, staleness math, concurrent backup behavior, cross-tool lock respect (compat tag), unlock path, redaction.
+
+**Suggested commit:** `feat: add restic-compatible locking to the builtin engine`
+
+## M14 — Forget + prune (L2)
+
+**Status:** Delivered; retain this section as its acceptance checklist.
+`repository.ForgetAndPrune` ships mark-and-sweep prune (no repack): new
+index written before pack deletion, orphaned packs cleaned, reclaimed
+bytes reported in run output (`reclaimed_bytes` in JSON, `reclaimed …` in
+text). Verified against the official restic 0.19.1 binary: `restic check`
+green after prune.
+
+**Roadmap:** `tasks/plan-l3-l4-l2.md`.
+
+**Objective:** Deleting old snapshots actually reclaims pack space via mark-and-sweep prune (no repack).
+
+**Prerequisites:** M13 merged (prune runs under an exclusive lock); M11 retention semantics unchanged.
+
+**In scope:** Forget by site tag with `keep_last` (replacing snapshot-file-only deletion), prune mark/sweep (keep blobs referenced by kept snapshots, delete unreferenced packs, rewrite the index), `restic check` compatibility after prune, space-reclaimed reporting in run output.
+
+**Out of scope:** Repack (recorded as a future option with a size threshold), S3 lifecycle rules, re-encryption, data compression changes.
+
+**Acceptance:** After retention, total pack bytes shrink; `restic check` passes; an interrupted prune leaves the previous state valid (new index written before pack deletion); retention never runs after a failed export or storage operation (existing repo rule).
+
+**Required tests:** Blob reachability graph, unreferenced pack deletion, partially-referenced packs survive, index consistency, compat `restic check` after prune, cancellation.
+
+**Suggested commit:** `feat: reclaim space with mark-and-sweep prune`
 
 ## Mentor review checklist
 
