@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
 )
 
 // errNotOrdered mirrors restic's ErrTreeNotOrdered.
@@ -45,10 +44,4 @@ func Unmarshal(data []byte) (*Tree, error) {
 		}
 	}
 	return &t, nil
-}
-
-// SortNodes orders nodes by name in place (for input assembled in
-// arbitrary order before serialization).
-func SortNodes(nodes []*Node) {
-	sort.Slice(nodes, func(i, j int) bool { return nodes[i].Name < nodes[j].Name })
 }

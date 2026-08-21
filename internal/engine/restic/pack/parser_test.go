@@ -1,3 +1,5 @@
+// Test-only copy of the pack reader. Move back to production code when
+// restore (L2) actually reads pack files.
 package pack
 
 import (

@@ -15,7 +15,6 @@ import (
 type Entry struct {
 	ID                 restic.ID
 	PackID             restic.ID
-	Type               restic.BlobType
 	Offset             uint32
 	Length             uint32
 	UncompressedLength uint32
@@ -58,7 +57,6 @@ func (m *MasterIndex) AddIndex(idx Index) {
 			m.blobs[blob.ID] = Entry{
 				ID:                 blob.ID,
 				PackID:             pack.ID,
-				Type:               blob.Type,
 				Offset:             blob.Offset,
 				Length:             blob.Length,
 				UncompressedLength: blob.UncompressedLength,

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/bqckup/bqckup-go/internal/engine/restic"
@@ -255,6 +256,38 @@ func TestCancellationLeavesConsistentRepo(t *testing.T) {
 	// the repository must still open and accept a full backup afterwards
 	if _, _, err := New(repo).Backup(ctx, BackupSpec{Paths: []string{source}}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestBackupMultipleRootsWithSameBasename(t *testing.T) {
+	ctx := context.Background()
+	arch, local, _ := newArchiver(t, ctx)
+
+	dirA := t.TempDir()
+	dirB := t.TempDir()
+	writeFile(t, filepath.Join(dirA, "data", "a.txt"), []byte("a"))
+	writeFile(t, filepath.Join(dirB, "data", "b.txt"), []byte("b"))
+
+	snapID, _, err := arch.Backup(ctx, BackupSpec{
+		Paths: []string{filepath.Join(dirA, "data"), filepath.Join(dirB, "data")},
+	})
+	if err != nil {
+		t.Fatalf("two roots with the same basename must back up: %v", err)
+	}
+	if snapID.IsNull() {
+		t.Fatal("snapshot id is null")
+	}
+	_ = local
+}
+
+func TestBackupRejectsInvalidExcludePattern(t *testing.T) {
+	ctx := context.Background()
+	arch, _, source := newArchiver(t, ctx)
+	writeFile(t, filepath.Join(source, "keep.txt"), []byte("keep"))
+
+	_, _, err := arch.Backup(ctx, BackupSpec{Paths: []string{source}, Excludes: []string{"["}})
+	if err == nil || !strings.Contains(err.Error(), "invalid exclude pattern") {
+		t.Fatalf("want invalid-exclude-pattern error, got %v", err)
 	}
 }
 

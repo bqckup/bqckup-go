@@ -61,6 +61,11 @@ func newRepository(b backend.Backend, master *crypto.MasterKey, config Config) (
 // Config returns the loaded repository config.
 func (r *Repository) Config() Config { return r.config }
 
+// MasterKey returns the repository's master key. Lock files are stored
+// encrypted with it (restic's SaveUnpacked format), so lock operations
+// need it after the repository is opened.
+func (r *Repository) MasterKey() *crypto.MasterKey { return r.master }
+
 // MasterIndex exposes the in-memory dedup index.
 func (r *Repository) MasterIndex() *index.MasterIndex { return r.index }
 
@@ -120,7 +125,6 @@ func (r *Repository) SaveBlob(ctx context.Context, blobType restic.BlobType, dat
 	entry := index.Entry{
 		ID:                 id,
 		PackID:             restic.ID{}, // filled in when the pack is flushed
-		Type:               blobType,
 		Offset:             uint32(packer.Size() - len(sealed)),
 		Length:             uint32(len(sealed)),
 		UncompressedLength: uncompressedLength,
@@ -187,7 +191,7 @@ func (r *Repository) flushPacker(ctx context.Context, blobType restic.BlobType) 
 		r.index.Add(blobs[i])
 		docBlobs = append(docBlobs, index.Blob{
 			ID:                 blobs[i].ID,
-			Type:               blobs[i].Type,
+			Type:               blobType,
 			Offset:             blobs[i].Offset,
 			Length:             blobs[i].Length,
 			UncompressedLength: blobs[i].UncompressedLength,

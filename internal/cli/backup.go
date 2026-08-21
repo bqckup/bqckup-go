@@ -82,13 +82,45 @@ func newBackupCommand(opts *options) *cobra.Command {
 				} else {
 					_, err = fmt.Fprintf(cmd.OutOrStdout(), "%s: %s (run %s)\n", result.SiteName, result.Status, result.RunID)
 				}
+				if result.ReclaimedBytes > 0 {
+					_, err = fmt.Fprintf(cmd.OutOrStdout(), "%s: reclaimed %s\n", result.SiteName, humanBytes(result.ReclaimedBytes))
+				}
 				return err
 			})
 		},
 	}
 	run.Flags().BoolVar(&force, "force", false, "ignore the minimum backup interval")
 	command.AddCommand(run)
+	command.AddCommand(&cobra.Command{
+		Use:   "unlock <site>",
+		Short: "Remove stale repository locks for one site",
+		Args: func(_ *cobra.Command, args []string) error {
+			if len(args) != 1 {
+				return fmt.Errorf("%w: backup unlock requires exactly one site", ErrInvalidInput)
+			}
+			return nil
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return withApplication(cmd, opts.configDir, func(application *app.App) error {
+				return application.UnlockRepository(cmd.Context(), args[0])
+			})
+		},
+	})
 	return command
+}
+
+// humanBytes renders a byte count for run output.
+func humanBytes(value int64) string {
+	const unit = 1024
+	if value < unit {
+		return fmt.Sprintf("%d B", value)
+	}
+	div, exp := int64(unit), 0
+	for n := value / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %ciB", float64(value)/float64(div), "KMGTPE"[exp])
 }
 
 func withApplication(cmd *cobra.Command, configDir string, operation func(*app.App) error) error {

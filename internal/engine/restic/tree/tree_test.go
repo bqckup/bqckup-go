@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"os"
 	"reflect"
+	"sort"
 	"testing"
 	"time"
 
@@ -71,10 +72,13 @@ func TestCanonicalBytesAndStableHash(t *testing.T) {
 	// identical bytes and therefore identical blob IDs.
 	build := func(order []string) []byte {
 		tr := &Tree{}
-		for _, name := range order {
-			tr.Nodes = append(tr.Nodes, fileNode(name, 1))
+		sorted := append([]string(nil), order...)
+		sort.Strings(sorted)
+		for _, name := range sorted {
+			if err := tr.Add(fileNode(name, 1)); err != nil {
+				t.Fatal(err)
+			}
 		}
-		SortNodes(tr.Nodes)
 		doc, err := tr.Marshal()
 		if err != nil {
 			t.Fatal(err)

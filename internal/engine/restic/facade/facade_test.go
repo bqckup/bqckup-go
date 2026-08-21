@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	adaptertypes "github.com/bqckup/bqckup-go/internal/backup/restic"
+	"github.com/bqckup/bqckup-go/internal/engine/restic/backend"
+	"github.com/bqckup/bqckup-go/internal/engine/restic/repository"
 )
 
 const testPassword = "facade-test-password"
@@ -15,6 +17,20 @@ const testPassword = "facade-test-password"
 func testRepo(t *testing.T) adaptertypes.RepoConfig {
 	t.Helper()
 	return adaptertypes.RepoConfig{URL: t.TempDir(), Password: testPassword}
+}
+
+// listSnapshots opens the repository below the facade and lists snapshots.
+func listSnapshots(t *testing.T, repo adaptertypes.RepoConfig) []repository.SnapshotWithID {
+	t.Helper()
+	r, err := repository.Open(context.Background(), backend.NewLocal(repo.URL), repo.Password)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshots, err := r.ListSnapshots(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return snapshots
 }
 
 func TestEnsureAndBackupAndList(t *testing.T) {
@@ -46,10 +62,7 @@ func TestEnsureAndBackupAndList(t *testing.T) {
 		t.Fatalf("unexpected summary: %+v", summary)
 	}
 
-	snapshots, err := engine.ListSnapshots(ctx, repo)
-	if err != nil {
-		t.Fatal(err)
-	}
+	snapshots := listSnapshots(t, repo)
 	if len(snapshots) != 1 {
 		t.Fatalf("snapshot count = %d, want 1", len(snapshots))
 	}
@@ -99,13 +112,10 @@ func TestApplyRetentionKeepsNewest(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := engine.ApplyRetention(ctx, repo, 2, "testsite"); err != nil {
+	if _, err := engine.ApplyRetention(ctx, repo, 2, "testsite"); err != nil {
 		t.Fatal(err)
 	}
-	snapshots, err := engine.ListSnapshots(ctx, repo)
-	if err != nil {
-		t.Fatal(err)
-	}
+	snapshots := listSnapshots(t, repo)
 	if len(snapshots) != 2 {
 		t.Fatalf("after retention: %d snapshots, want 2", len(snapshots))
 	}
@@ -129,13 +139,10 @@ func TestApplyRetentionIgnoresOtherSites(t *testing.T) {
 		t.Fatal(err)
 	}
 	// retention for THIS site must not touch the foreign snapshot
-	if err := engine.ApplyRetention(ctx, repo, 1, "testsite"); err != nil {
+	if _, err := engine.ApplyRetention(ctx, repo, 1, "testsite"); err != nil {
 		t.Fatal(err)
 	}
-	snapshots, err := engine.ListSnapshots(ctx, repo)
-	if err != nil {
-		t.Fatal(err)
-	}
+	snapshots := listSnapshots(t, repo)
 	if len(snapshots) != 1 {
 		t.Fatalf("foreign snapshot was deleted: %d remain", len(snapshots))
 	}
@@ -143,20 +150,25 @@ func TestApplyRetentionIgnoresOtherSites(t *testing.T) {
 
 func TestRejectsRemoteURLs(t *testing.T) {
 	engine := NewEngine()
-	repo := adaptertypes.RepoConfig{URL: "s3:https://secret-key:secret@example.com/bucket/path", Password: "x"}
+	repo := adaptertypes.RepoConfig{URL: "rest:https://user:secret-key@example.com/repo", Password: "x"}
 	err := engine.EnsureRepository(context.Background(), repo)
 	if err == nil {
-		t.Fatal("want error for s3 URL")
+		t.Fatal("want error for rest URL")
 	}
 	if strings.Contains(err.Error(), "secret-key") {
 		t.Fatal("error leaks URL credentials")
 	}
 }
 
-func TestUnlockIsNoOp(t *testing.T) {
+func TestUnlockSucceedsOnCleanRepository(t *testing.T) {
+	ctx := context.Background()
 	engine := NewEngine()
-	if err := engine.Unlock(context.Background(), adaptertypes.RepoConfig{}); err != nil {
-		t.Fatalf("Unlock must be a no-op, got %v", err)
+	repo := testRepo(t)
+	if err := engine.EnsureRepository(ctx, repo); err != nil {
+		t.Fatal(err)
+	}
+	if err := engine.Unlock(ctx, repo); err != nil {
+		t.Fatalf("Unlock on a repository without locks must succeed, got %v", err)
 	}
 }
 
@@ -164,6 +176,6 @@ func TestUnlockIsNoOp(t *testing.T) {
 var _ interface {
 	EnsureRepository(context.Context, adaptertypes.RepoConfig) error
 	BackupFiles(context.Context, adaptertypes.RepoConfig, adaptertypes.BackupSpec) (adaptertypes.SnapshotSummary, error)
-	ApplyRetention(context.Context, adaptertypes.RepoConfig, int, string) error
+	ApplyRetention(context.Context, adaptertypes.RepoConfig, int, string) (int64, error)
 	Unlock(context.Context, adaptertypes.RepoConfig) error
 } = (*Engine)(nil)

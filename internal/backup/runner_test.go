@@ -26,7 +26,7 @@ func TestRunnerCompletesBackupLifecycle(t *testing.T) {
 	assert.Equal(t, StatusSuccess, result.Status)
 	assert.Equal(t, history.StatusSuccess, deps.repository.finishedStatus)
 	require.Len(t, deps.repository.artifacts, 1)
-	assert.Equal(t, "bqckup/example/2026-07-23T03-45-00Z/files.tar.gz", deps.repository.artifacts[0].ObjectKey)
+	assert.Equal(t, "bqckup/example/2026-07-23T03-45-00.000000000Z/files.tar.gz", deps.repository.artifacts[0].ObjectKey)
 	assert.Equal(t, 1, deps.retainer.calls)
 	assert.Equal(t, 1, deps.lock.unlockCalls)
 	_, statErr := os.Stat(deps.archiver.workspace)
@@ -157,8 +157,8 @@ func TestRunnerExportsEnabledDatabasesToEveryDestination(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, StatusSuccess, result.Status)
 	assert.Len(t, store.keys, 3)
-	assert.Contains(t, store.keys, "bqckup/example/2026-07-23T03-45-00Z/databases/application-mysql.sql.gz")
-	assert.Contains(t, store.keys, "bqckup/example/2026-07-23T03-45-00Z/databases/application-postgres.sql.gz")
+	assert.Contains(t, store.keys, "bqckup/example/2026-07-23T03-45-00.000000000Z/databases/application-mysql.sql.gz")
+	assert.Contains(t, store.keys, "bqckup/example/2026-07-23T03-45-00.000000000Z/databases/application-postgres.sql.gz")
 	assert.Len(t, deps.repository.artifacts, 3)
 }
 
@@ -234,6 +234,7 @@ type fakeRepository struct {
 	artifacts      []history.Artifact
 	lastSuccessful *history.BackupRun
 	finishedStatus history.RunStatus
+	finishCtxErr   error
 	errorCategory  string
 	errorMessage   string
 	createErr      error
@@ -251,9 +252,10 @@ func (f *fakeRepository) CreateRun(_ context.Context, run *history.BackupRun) er
 	return nil
 }
 
-func (f *fakeRepository) FinishRun(_ context.Context, _ string, status history.RunStatus, _ time.Time, category, message string) error {
+func (f *fakeRepository) FinishRun(ctx context.Context, _ string, status history.RunStatus, _ time.Time, category, message string) error {
 	f.finishCalls++
 	f.finishedStatus = status
+	f.finishCtxErr = ctx.Err()
 	f.errorCategory = category
 	f.errorMessage = message
 	return f.finishErr

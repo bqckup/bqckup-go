@@ -1,6 +1,6 @@
-// Package backend abstracts repository storage. L1 ships one
-// implementation: the local filesystem (local.go). S3/R2 arrive in L3
-// behind the same interface.
+// Package backend abstracts repository storage. Two implementations:
+// the local filesystem (local.go) and S3-compatible object storage
+// (s3.go, L3).
 package backend
 
 import (

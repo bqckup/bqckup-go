@@ -50,10 +50,6 @@ func Open(ctx context.Context, configDir string) (*App, error) {
 		_ = closeDatabase()
 		return nil, err
 	}
-	if err := validateBuiltinEngineStorages(configuration); err != nil {
-		_ = closeDatabase()
-		return nil, err
-	}
 	databaseExporters, err := buildDatabaseExporters(ctx, configuration, process.NewProcessRunner())
 	if err != nil {
 		_ = closeDatabase()
@@ -79,24 +75,8 @@ func Open(ctx context.Context, configDir string) (*App, error) {
 	}, nil
 }
 
-// validateBuiltinEngineStorages enforces the P0-T5 decision: the builtin
-// engine is local-only until the S3/R2 backend ships (L3).
-func validateBuiltinEngineStorages(configuration config.Config) error {
-	for _, site := range configuration.Sites {
-		if !site.Enabled || site.BackupMode != "incremental" || site.Incremental.Engine != "builtin" {
-			continue
-		}
-		for _, destination := range site.Destinations {
-			storageConfig, ok := configuration.Storages[destination.Storage]
-			if !ok || storageConfig.Type != "local" {
-				return apperror.Wrap(apperror.CategoryConfig,
-					fmt.Sprintf("site %q uses incremental.engine: builtin, which requires local storage destinations (s3/r2 arrive in L3)", site.Name), nil)
-			}
-		}
-	}
-	return nil
-}
-
+// buildDatabaseExporters constructs one exporter per configured database
+// engine that is enabled somewhere.
 func buildDatabaseExporters(ctx context.Context, configuration config.Config, process process.ProcessRunner) (map[string]backup.Exporter, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -175,6 +155,18 @@ func (a *App) RunBackup(ctx context.Context, siteName string, force bool) (backu
 
 func (a *App) LastSuccessful(ctx context.Context, siteName string) (*history.BackupRun, error) {
 	return a.repository.LastSuccessful(ctx, siteName)
+}
+
+// UnlockRepository removes stale repository locks for a site.
+func (a *App) UnlockRepository(ctx context.Context, siteName string) error {
+	site, ok := a.configuration.Site(siteName)
+	if !ok {
+		return apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q was not found", siteName), nil)
+	}
+	if !site.Enabled {
+		return apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q is disabled", siteName), nil)
+	}
+	return a.runner.Unlock(ctx, site)
 }
 
 func (a *App) ListRuns(ctx context.Context, siteName string, limit int) ([]history.BackupRun, error) {

@@ -136,7 +136,7 @@ func loadConfig(ctx context.Context, b backend.Backend, master *crypto.MasterKey
 // saveKeyFile writes the encrypted key file. The file name is the SHA-256
 // of the file bytes, exactly like restic (verification notes §2.4).
 func (r *Repository) saveKeyFile(ctx context.Context, password string) error {
-	username, hostname := currentIdentity()
+	username, hostname := CurrentIdentity()
 	keyFile, err := crypto.NewKeyFile(password, username, hostname, r.master, time.Now())
 	if err != nil {
 		return err
@@ -185,7 +185,9 @@ func unlockKeyFile(ctx context.Context, b backend.Backend, password string) (*cr
 	return nil, fmt.Errorf("%w: no key file matched the given password", restic.ErrInvalidPassword)
 }
 
-func currentIdentity() (username, hostname string) {
+// CurrentIdentity returns the OS user and host name, or "unknown" for
+// either when it cannot be determined.
+func CurrentIdentity() (username, hostname string) {
 	username = "unknown"
 	if current, err := user.Current(); err == nil && current.Username != "" {
 		username = current.Username

@@ -68,6 +68,17 @@ func (a *Archiver) Backup(ctx context.Context, spec BackupSpec) (restic.ID, Summ
 	if len(spec.Paths) == 0 {
 		return restic.ID{}, Summary{}, fmt.Errorf("archiver: at least one path is required")
 	}
+	// Fail loudly on malformed exclude patterns before any data is read
+	// (restic rejects invalid patterns at startup too): a pattern that
+	// never matches would silently back up files the user meant to exclude.
+	for _, pattern := range spec.Excludes {
+		if pattern == "" {
+			continue
+		}
+		if _, err := filepath.Match(pattern, ""); err != nil {
+			return restic.ID{}, Summary{}, fmt.Errorf("archiver: invalid exclude pattern %q: %w", pattern, err)
+		}
+	}
 	started := time.Now()
 	state := &backupState{
 		archiver: a,
@@ -319,10 +330,20 @@ func (s *backupState) combineRoots(ctx context.Context) (*restic.ID, error) {
 		return &id, nil
 	}
 	tr := &tree.Tree{}
+	used := make(map[string]bool)
 	for i, path := range s.spec.Paths {
 		subtree := s.rootTrees[i]
-		if err := tr.Add(&tree.Node{Name: filepath.Base(path), Type: tree.TypeDir, Subtree: &subtree}); err != nil {
-			return nil, err
+		name := filepath.Base(path)
+		base := name
+		// Two include paths can share a basename (/a/data and /b/data); the
+		// synthetic root tree needs unique names, so disambiguate like
+		// restic's tree builder: name, name-1, name-2, ...
+		for suffix := 1; used[name]; suffix++ {
+			name = fmt.Sprintf("%s-%d", base, suffix)
+		}
+		used[name] = true
+		if err := tr.Add(&tree.Node{Name: name, Type: tree.TypeDir, Subtree: &subtree}); err != nil {
+			return nil, fmt.Errorf("archiver: combine roots: %w", err)
 		}
 	}
 	doc, err := tr.Marshal()

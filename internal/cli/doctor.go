@@ -114,20 +114,9 @@ func runDoctorChecks(ctx context.Context, configDir, siteFilter string) DoctorRe
 		}
 		if site.BackupMode == "incremental" {
 			if site.Incremental.Engine == "builtin" {
-				// the builtin engine needs no restic binary; its storage
-				// destinations must be local until L3 ships
-				localOnly := true
-				for _, destination := range site.Destinations {
-					storageConfig, ok := cfg.Storages[destination.Storage]
-					if !ok || storageConfig.Type != "local" {
-						localOnly = false
-						addCheck(fmt.Sprintf("engine:%s:destination:%s", site.Name, destination.Storage), "fail",
-							"incremental engine 'builtin' requires local storage destinations")
-					}
-				}
-				if localOnly {
-					addCheck(fmt.Sprintf("engine:%s", site.Name), "ok", "builtin engine (no restic binary required)")
-				}
+				// the builtin engine needs no restic binary; it serves local
+				// and s3/r2 destinations (L3)
+				addCheck(fmt.Sprintf("engine:%s", site.Name), "ok", "builtin engine (no restic binary required)")
 			} else {
 				needsRestic = true
 			}

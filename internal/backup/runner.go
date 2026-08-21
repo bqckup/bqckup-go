@@ -39,6 +39,8 @@ type RunResult struct {
 	SkipReason SkipReason `json:"skip_reason,omitempty"`
 	StartedAt  time.Time  `json:"started_at,omitempty"`
 	FinishedAt time.Time  `json:"finished_at,omitempty"`
+	// ReclaimedBytes is the space freed by incremental retention (prune).
+	ReclaimedBytes int64 `json:"reclaimed_bytes,omitempty"`
 }
 
 type Archiver interface {
@@ -210,7 +212,7 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 	}
 
 	finished := r.dependencies.Clock.Now().UTC()
-	if err := r.dependencies.Repository.FinishRun(ctx, run.ID, history.StatusSuccess, finished, "", ""); err != nil {
+	if err := r.dependencies.Repository.FinishRun(context.WithoutCancel(ctx), run.ID, history.StatusSuccess, finished, "", ""); err != nil {
 		result.Status = StatusFailed
 		result.FinishedAt = finished
 		return result, apperror.Wrap(apperror.CategoryPersistence, "could not finalize backup history", err)
@@ -218,6 +220,32 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 	result.Status = StatusSuccess
 	result.FinishedAt = finished
 	return result, nil
+}
+
+// Unlock removes stale repository locks for every destination of a site
+// (restic unlock semantics: stale locks only).
+func (r *Runner) Unlock(ctx context.Context, site config.Site) error {
+	if site.BackupMode != "incremental" {
+		return apperror.Wrap(apperror.CategoryConfig, "unlock applies to incremental sites only", nil)
+	}
+	engine := r.engineFor(site)
+	if engine == nil {
+		return apperror.Wrap(apperror.CategoryInternal, "incremental backup engine is unavailable", nil)
+	}
+	for _, destination := range site.Destinations {
+		storageConfig, ok := r.dependencies.Storages[destination.Storage]
+		if !ok {
+			return apperror.Wrap(apperror.CategoryInternal, fmt.Sprintf("storage configuration %q is unavailable", destination.Storage), nil)
+		}
+		repo, err := r.buildRepo(site, storageConfig, true)
+		if err != nil {
+			return apperror.Wrap(apperror.CategoryPreflight, "could not build repository configuration", err)
+		}
+		if err := engine.Unlock(ctx, repo); err != nil {
+			return apperror.Wrap(apperror.CategoryStorage, "could not unlock the incremental repository: "+engineDetail(err), err)
+		}
+	}
+	return nil
 }
 
 func (r *Runner) storeArtifact(ctx context.Context, runID string, artifact Artifact, objectKey string, destinations []config.Destination) error {
