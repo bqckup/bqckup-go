@@ -17,10 +17,7 @@ const (
 	defaultKeepLast        = 7
 )
 
-var (
-	safeName     = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
-	validEnvName = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
-)
+var safeName = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
 
 func (c Config) Validate() error {
 	if c.Version != SchemaVersion {
@@ -233,20 +230,6 @@ func (c Config) validateSite(site Site, seen map[string]struct{}) error {
 	}
 	if !site.Enabled {
 		return nil
-	}
-	if site.BackupMode != "" && site.BackupMode != "full" && site.BackupMode != "incremental" {
-		return validationError(file, baseField+".backup_mode", "must be 'full' or 'incremental'")
-	}
-	if site.BackupMode == "incremental" {
-		if site.Incremental.Engine != "restic" {
-			return validationError(file, baseField+".incremental.engine", "must be 'restic'")
-		}
-		if site.Incremental.PasswordEnv == "" {
-			return validationError(file, baseField+".incremental.password_env", "is required")
-		}
-		if !validEnvName.MatchString(site.Incremental.PasswordEnv) {
-			return validationError(file, baseField+".incremental.password_env", "must be a valid environment variable name")
-		}
 	}
 	if len(site.Sources.Files.Include) == 0 {
 		return validationError(file, baseField+".sources.files.include", "at least one path is required")
