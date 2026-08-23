@@ -6,9 +6,8 @@ type RepoConfig struct {
 	AccessKeyID     string
 	SecretAccessKey string
 	Region          string
-	// Endpoint, Bucket and Prefix carry the S3-compatible connection for
-	// the builtin engine (in memory only). URL remains the canonical
-	// location string for the process adapter.
+	// Endpoint, Bucket and Prefix carry the S3-compatible connection in
+	// memory only. URL remains the canonical repository location.
 	Endpoint string
 	Bucket   string
 	Prefix   string // repository object-key prefix inside the bucket

@@ -228,7 +228,7 @@ func (r *Runner) Unlock(ctx context.Context, site config.Site) error {
 	if site.BackupMode != "incremental" {
 		return apperror.Wrap(apperror.CategoryConfig, "unlock applies to incremental sites only", nil)
 	}
-	engine := r.engineFor(site)
+	engine := r.dependencies.IncrementalEngine
 	if engine == nil {
 		return apperror.Wrap(apperror.CategoryInternal, "incremental backup engine is unavailable", nil)
 	}

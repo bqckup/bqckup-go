@@ -143,10 +143,10 @@ Bqckup mempertahankan dua mode backup berdampingan:
 
 - `backup_mode: full` — mode klasik yang menghasilkan arsip `.tar.gz`.
   Tidak berubah.
-- `backup_mode: incremental` — mode cepat dengan deduplikasi. Dengan
-  `incremental.engine: builtin`, mode ini kini memakai mesin bawaan bqckup
-  sendiri; dengan `incremental.engine: restic`, ia tetap memakai program
-  Restic eksternal (masih dibutuhkan untuk tujuan S3/R2 dan brankas lama).
+- `backup_mode: incremental` — mode cepat dengan deduplikasi yang selalu
+  memakai mesin pure-Go bawaan bqckup. Mesin ini melayani storage lokal dan
+  S3/R2 tanpa program Restic eksternal. Field `incremental.engine` sudah
+  dihapus karena tidak ada lagi engine runtime kedua.
 
 Setelah proses sukses, basis data riwayat bqckup mencatat satu entri per
 tujuan, sehingga runner, aturan retensi, dan laporan status bekerja persis
@@ -157,7 +157,7 @@ seperti sebelumnya. Tidak ada bagian lain dari bqckup yang perlu diubah.
 Rencana dibagi menjadi tahap-tahap agar setiap bagian bisa dibangun dan
 diuji sendiri-sendiri:
 
-**Selesai (tahap ini — "L1"):**
+**Selesai:**
 
 - Membuat dan membuka brankas lokal.
 - Menyusuri folder, memotong file, deduplikasi, enkripsi, kompresi,
@@ -166,22 +166,15 @@ diuji sendiri-sendiri:
 - Mendaftar snapshot.
 - Membaca brankas buatannya sendiri, sekaligus brankas yang dibuat oleh
   program Restic asli (versi 2), dan bisa melanjutkan keduanya.
-- Retensi minimal: simpan N snapshot terbaru dan hapus catatan snapshot
-  sisanya (ruang yang bebas belum direklamasi).
+- Retensi menyimpan N snapshot terbaru lalu melakukan mark-and-sweep prune
+  untuk mereklamasi pack yang tidak lagi dipakai.
+- Penyimpanan lokal dan S3/R2.
+- Lock kompatibel Restic untuk mencegah writer bersamaan dan command unlock
+  untuk membersihkan lock usang.
 - Memverifikasi semuanya terhadap binari Restic asli.
 
-**Tahap-tahap berikutnya:**
+**Tahap berikutnya:**
 
-- **L2 — Reklamasi ruang:** menghapus snapshot lama benar-benar menghemat
-  ruang disk dengan membuang peti yang tidak lagi dirujuk siapa pun
-  ("pruning").
-- **L3 — Penyimpanan jarak jauh:** mencadangkan langsung ke penyimpanan
-  awan S3/R2 tanpa program Restic eksternal. Sampai saat itu, tujuan awan
-  tetap memakai `engine: restic`.
-- **L4 — Kunci (lock):** mencegah dua backup menulis ke brankas yang sama
-  pada saat bersamaan, dan membersihkan kunci usang dari proses yang
-  terhenti. (Hari ini mesin tidak menulis kunci; kunci buatan Restic
-  diabaikan.)
 - **Masa depan — Pemulihan (restore):** mengembalikan file keluar dari
   brankas. Aturan yang sudah dikunci: pemulihan selalu butuh tujuan
   eksplisit dan tidak pernah menimpa file yang ada secara diam-diam.

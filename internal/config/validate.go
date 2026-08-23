@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/bqckup/bqckup-go/internal/fileexclude"
 )
 
 const (
@@ -240,9 +242,6 @@ func (c Config) validateSite(site Site, seen map[string]struct{}) error {
 		return validationError(file, baseField+".backup_mode", "must be 'full' or 'incremental'")
 	}
 	if site.BackupMode == "incremental" {
-		if site.Incremental.Engine != "restic" && site.Incremental.Engine != "builtin" {
-			return validationError(file, baseField+".incremental.engine", "must be 'restic' or 'builtin'")
-		}
 		if site.Incremental.PasswordEnv == "" {
 			return validationError(file, baseField+".incremental.password_env", "is required")
 		}
@@ -259,8 +258,8 @@ func (c Config) validateSite(site Site, seen map[string]struct{}) error {
 		}
 	}
 	for index, exclude := range site.Sources.Files.Exclude {
-		if !filepath.IsAbs(exclude) {
-			return validationError(file, fmt.Sprintf("%s.sources.files.exclude[%d]", baseField, index), "must be an absolute path")
+		if err := fileexclude.Validate(exclude); err != nil {
+			return validationError(file, fmt.Sprintf("%s.sources.files.exclude[%d]", baseField, index), "invalid pattern: %v", err)
 		}
 	}
 	databaseNames := make(map[string]struct{}, len(site.Sources.Databases))

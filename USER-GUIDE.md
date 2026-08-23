@@ -56,10 +56,6 @@ curl -fsSL https://raw.githubusercontent.com/bqckup/bqckup-go/main/scripts/insta
 
    Tanpa alat ini, semua command backup akan gagal di awal dengan exit code 3 (preflight).
 
-3. **Restic** (hanya untuk `backup_mode: incremental` dengan
-   `incremental.engine: restic`): binary `restic` di PATH (`apt install restic`).
-   Dengan `engine: builtin` binary restic tidak diperlukan.
-
 3. **Config dir:** bqckup membaca config dari `/etc/bqckup` secara default. Bisa diganti dengan flag `--config-dir <direktori>` di setiap command.
 
 ---
@@ -152,7 +148,8 @@ site:
       include:
         - /srv/web/uploads
       exclude:
-        - /srv/web/uploads/cache
+        - "*.tmp"
+        - "cache/**"
       follow_symlinks: false
     databases:
       - name: web-mysql
@@ -186,7 +183,7 @@ Penjelasan:
 | `backup_mode` | Mode backup: `full` (default, arsip `.tar.gz`) atau `incremental` (snapshot restic). |
 | `incremental.password_env` | Nama environment variable password enkripsi repositori restic (wajib jika `backup_mode: incremental`). |
 | `sources.files.include` | Daftar path file/dir yang dibackup. Wajib **absolute**, minimal 1 jika site `enabled`. |
-| `sources.files.exclude` | Path yang dilewati (opsional). |
+| `sources.files.exclude` | Path absolute atau pola glob relatif terhadap setiap `include`. `*.tmp` berlaku pada semua kedalaman; `cache/**` melewati direktori secara rekursif. Semantiknya sama untuk mode full dan incremental. |
 | `sources.files.follow_symlinks` | Ikuti symlink saat membungkus arsip (default `false`). |
 | `sources.databases` | Daftar database. Boleh kosong (`[]`) jika hanya backup file. |
 | `destinations` | Storage tujuan. Kosong = ikut `primary`. |
@@ -195,10 +192,10 @@ Penjelasan:
 
 Tips database & incremental:
 
-- **Incremental:** Cocok untuk direktori file besar (mis. WordPress uploads). Menyimpan hanya blok data yang berubah (deduplikasi forever-incremental). Dengan `incremental.engine: builtin` tidak perlu binary `restic` (hanya storage lokal); dengan `engine: restic` (default) binary `restic` wajib di PATH. Password enkripsi diambil dari environment variable yang direferensikan pada `password_env` (mis. `export RESTIC_PASSWORD="..."`).
+- **Incremental:** Cocok untuk direktori file besar (mis. WordPress uploads). Mesin pure-Go bawaan menyimpan hanya blok data yang berubah (deduplikasi forever-incremental) ke storage lokal atau S3/R2. Tidak perlu binary Restic. Password enkripsi diambil dari environment variable yang direferensikan pada `password_env` (mis. `export RESTIC_PASSWORD="..."`). Field lama `incremental.engine` harus dihapus dari config.
 - **MySQL:** gunakan `127.0.0.1`, bukan `localhost` — `localhost` memakai Unix socket dan bisa gagal untuk MySQL di Docker. bqckup otomatis pakai `--single-transaction --quick --routines --triggers`. Untuk MySQL 8, user backup perlu grant rutin (lihat §8).
 - **PostgreSQL:** `--username` di config **wajib** (default pg_dump adalah user OS). bqckup otomatis pakai `--no-owner --no-privileges`.
-- Password **tidak pernah** muncul di argumen proses — bqckup memakai env `MYSQL_PWD` / `PGPASSWORD` / `RESTIC_PASSWORD`.
+- Password database **tidak pernah** muncul di argumen proses — exporter memakai env `MYSQL_PWD` / `PGPASSWORD`. Password repository incremental dibaca langsung dari environment variable yang ditunjuk `password_env` dan diteruskan ke engine hanya di memori.
 - File site yang berisi `password:` **wajib mode `0600`**, regular file, bukan symlink.
 
 ---
@@ -208,7 +205,7 @@ Tips database & incremental:
 Semua command memakai config dir yang sama:
 
 ```bash
-# cek kesehatan sistem, permission, dan kelengkapan binary tool (mysqldump, pg_dump, restic)
+# cek kesehatan sistem, permission, dan binary exporter database (mysqldump, pg_dump)
 bqckup doctor
 
 # lihat semua site, status, dan last successful

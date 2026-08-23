@@ -61,6 +61,9 @@ site:
     files:
       include:
         - /srv/example/data
+      exclude:
+        - "*.tmp"
+        - "cache/**"
       follow_symlinks: false
     databases:
       - name: application-mysql

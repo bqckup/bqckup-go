@@ -2,7 +2,9 @@
 
 Each milestone is an independently assignable pull request. The assignee must read `architecture.md`, `configuration-v2.md`, `development.md`, and `testing.md` before editing. Use red-green-refactor, keep secrets out of fixtures and output, update public docs with public contracts, and finish with `make verify` plus `sh scripts/check-docs.sh`.
 
-Do not add placeholder commands or config that merely return “not implemented.” Restic is not part of the foundation; M11 begins with a separate design review and is not ready for implementation assignment.
+Do not add placeholder commands or config that merely return “not implemented.”
+The incremental engine work is delivered in M11–M14; the official Restic
+binary remains an opt-in compatibility-test oracle, not a runtime adapter.
 
 ## M01 — MySQL exporter
 
@@ -164,6 +166,10 @@ Do not add placeholder commands or config that merely return “not implemented.
 
 ## M11 — Restic design cycle (later)
 
+**Status:** Delivered. The final runtime decision is one in-tree pure-Go
+engine; the transitional process adapter and `incremental.engine` selector
+were removed after M12–M14 completed.
+
 **Objective:** Produce an approved design before any Restic dependency, command, package, or config is added.
 
 **Prerequisites:** Product decision on backup and restore semantics; current Restic documentation reviewed; threat model for repository passwords and remote credentials.
@@ -172,7 +178,7 @@ Do not add placeholder commands or config that merely return “not implemented.
 
 **Out of scope:** Implementation during the design PR, Rustic compatibility claims, silent replacement of archive mode, passwords in YAML, destructive restore defaults.
 
-**Current design artifacts (in review):** `docs/superpowers/specs/2026-08-20-restic-engine-phase1-design.md` (the design), format verification and decision notes in `docs/superpowers/notes/`, task breakdown in `tasks/plan.md`; L3/L4/L2 roadmap in `tasks/plan-l3-l4-l2.md`.
+**Design artifacts:** `docs/superpowers/specs/2026-08-20-restic-engine-phase1-design.md` (historical design), format verification and decision notes in `docs/superpowers/notes/`, and the final runtime decision in `docs/restic-engine-planning.md`.
 
 **Acceptance:** Maintainer approves the design and splits implementation into independently testable follow-up milestones. Archive mode remains supported. Restore requires explicit destination and overwrite safeguards.
 
@@ -183,18 +189,18 @@ Do not add placeholder commands or config that merely return “not implemented.
 ## M12 — Builtin engine S3/R2 backend (L3)
 
 **Status:** Delivered; retain this section as its acceptance checklist. S3/R2
-backend shipped in `internal/engine/restic/backend/s3.go`; `engine: builtin`
-now validates for s3/r2 destinations; credentials flow in memory only.
+backend shipped in `internal/engine/restic/backend/s3.go`; incremental mode
+serves s3/r2 destinations directly; credentials flow in memory only.
 
 **Roadmap:** `tasks/plan-l3-l4-l2.md`.
 
-**Objective:** Implement the engine `Backend` interface over S3/R2 so `engine: builtin` serves cloud destinations too.
+**Objective:** Implement the engine `Backend` interface over S3/R2 so the built-in incremental engine serves cloud destinations too.
 
 **Prerequisites:** M11 engine green; L3 design note approved (default layout only, reuse s3compat patterns).
 
 **In scope:** `internal/engine/restic/backend/s3.go` (Handle-based Save/Load with offset+length/Stat/List/Remove), restic `default` layout as object key prefixes, AWS SDK v2 config + transfermanager upload pattern reused from `internal/storage/s3compat`, network-free fake-SDK tests, optional disposable MinIO integration, config validation change: `builtin` becomes valid for s3/r2 destinations, app wiring passes credentials in memory only.
 
-**Out of scope:** `s3legacy` layout, multipart tuning beyond the existing transfermanager usage, removing the process adapter (v1 repos keep `engine: restic`), changing the runtime credential file contract (0600 non-symlink), S3 lifecycle rules.
+**Out of scope:** `s3legacy` layout, multipart tuning beyond the existing transfermanager usage, automatic migration of format-v1 repositories, changing the runtime credential file contract (0600 non-symlink), S3 lifecycle rules.
 
 **Acceptance:** `restic_compat` suite passes against a MinIO-backed repository (check/snapshots/restore); builtin backup to an S3 destination produces identical dedup to local; no credential appears in logs/history/output; cancellation aborts uploads.
 

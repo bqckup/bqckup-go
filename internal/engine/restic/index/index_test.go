@@ -125,7 +125,7 @@ func TestMasterIndexLookup10k(t *testing.T) {
 	entries := make(map[restic.ID]Entry, count)
 	for i := 0; i < count; i++ {
 		id := restic.Hash([]byte{byte(i), byte(i >> 8)})
-		entry := Entry{ID: id, PackID: restic.Hash([]byte("pack")), Offset: uint32(i), Length: 100}
+		entry := Entry{Type: restic.DataBlob, ID: id, PackID: restic.Hash([]byte("pack")), Offset: uint32(i), Length: 100}
 		entries[id] = entry
 		masterIndex.Add(entry)
 	}
@@ -133,12 +133,12 @@ func TestMasterIndexLookup10k(t *testing.T) {
 		t.Fatalf("len = %d, want %d", masterIndex.Len(), count)
 	}
 	for id, want := range entries {
-		got, ok := masterIndex.Lookup(id)
+		got, ok := masterIndex.Lookup(restic.DataBlob, id)
 		if !ok || got != want {
 			t.Fatalf("lookup %s = %+v, want %+v", id, got, want)
 		}
 	}
-	if _, ok := masterIndex.Lookup(restic.Hash([]byte("missing"))); ok {
+	if _, ok := masterIndex.Lookup(restic.DataBlob, restic.Hash([]byte("missing"))); ok {
 		t.Fatal("found a blob that was never added")
 	}
 }
@@ -146,9 +146,9 @@ func TestMasterIndexLookup10k(t *testing.T) {
 func TestMasterIndexDuplicateLastWriteWins(t *testing.T) {
 	masterIndex := NewMasterIndex()
 	id := restic.Hash([]byte("dup"))
-	masterIndex.Add(Entry{ID: id, PackID: restic.Hash([]byte("pack-a")), Offset: 1})
-	masterIndex.Add(Entry{ID: id, PackID: restic.Hash([]byte("pack-b")), Offset: 2})
-	got, ok := masterIndex.Lookup(id)
+	masterIndex.Add(Entry{Type: restic.DataBlob, ID: id, PackID: restic.Hash([]byte("pack-a")), Offset: 1})
+	masterIndex.Add(Entry{Type: restic.DataBlob, ID: id, PackID: restic.Hash([]byte("pack-b")), Offset: 2})
+	got, ok := masterIndex.Lookup(restic.DataBlob, id)
 	if !ok {
 		t.Fatal("entry missing")
 	}
@@ -169,7 +169,7 @@ func TestMasterIndexGoroutineStorm(t *testing.T) {
 			defer wg.Done()
 			for i := 0; i < perWriter; i++ {
 				id := restic.Hash([]byte{byte(w), byte(i), byte(i >> 8)})
-				masterIndex.Add(Entry{ID: id, PackID: restic.Hash([]byte("pack")), Offset: uint32(i)})
+				masterIndex.Add(Entry{Type: restic.DataBlob, ID: id, PackID: restic.Hash([]byte("pack")), Offset: uint32(i)})
 			}
 		}(w)
 	}
@@ -178,7 +178,7 @@ func TestMasterIndexGoroutineStorm(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for i := 0; i < writers*perWriter; i++ {
-				masterIndex.Lookup(restic.Hash([]byte{byte(i)}))
+				masterIndex.Lookup(restic.DataBlob, restic.Hash([]byte{byte(i)}))
 				masterIndex.Len()
 			}
 		}()
@@ -227,15 +227,16 @@ func TestLoadAllFromBackend(t *testing.T) {
 	}
 	for _, want := range []struct {
 		id     string
+		typeID restic.BlobType
 		pack   string
 		offset uint32
 	}{
-		{"blob-a", "pack-one", 0},
-		{"blob-b", "pack-one", 524320},
-		{"blob-c", "pack-one", 614320},
-		{"blob-d", "pack-two", 0},
+		{"blob-a", restic.DataBlob, "pack-one", 0},
+		{"blob-b", restic.DataBlob, "pack-one", 524320},
+		{"blob-c", restic.TreeBlob, "pack-one", 614320},
+		{"blob-d", restic.TreeBlob, "pack-two", 0},
 	} {
-		entry, ok := masterIndex.Lookup(restic.Hash([]byte(want.id)))
+		entry, ok := masterIndex.Lookup(want.typeID, restic.Hash([]byte(want.id)))
 		if !ok {
 			t.Fatalf("blob %s not found after LoadAll", want.id)
 		}

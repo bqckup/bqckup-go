@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -48,12 +49,31 @@ func Init(ctx context.Context, b backend.Backend, password string) (*Repository,
 	}
 	repo, err := newRepository(b, master, config)
 	if err != nil {
-		return nil, err
+		return nil, rollbackInit(ctx, b, restic.Handle{}, err)
 	}
-	if err := repo.saveKeyFile(ctx, password); err != nil {
-		return nil, err
+	keyHandle, err := repo.saveKeyFile(ctx, password)
+	if err != nil {
+		return nil, rollbackInit(ctx, b, keyHandle, err)
 	}
 	return repo, nil
+}
+
+// rollbackInit removes artifacts from an initialization that did not reach a
+// usable config+key pair. Without this rollback, a transient key write failure
+// leaves a config that makes every retry try (and fail) to open the repository.
+func rollbackInit(ctx context.Context, b backend.Backend, key restic.Handle, initErr error) error {
+	cleanupCtx := context.WithoutCancel(ctx)
+	var cleanupErr error
+	if key.Name != "" {
+		if err := b.Remove(cleanupCtx, key); err != nil && !b.IsNotExist(err) {
+			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("remove partial key: %w", err))
+		}
+	}
+	config := restic.Handle{Type: restic.ConfigFile}
+	if err := b.Remove(cleanupCtx, config); err != nil && !b.IsNotExist(err) {
+		cleanupErr = errors.Join(cleanupErr, fmt.Errorf("remove partial config: %w", err))
+	}
+	return errors.Join(initErr, cleanupErr)
 }
 
 // Open loads an existing repository: unlocks a key file with the password,
@@ -135,18 +155,19 @@ func loadConfig(ctx context.Context, b backend.Backend, master *crypto.MasterKey
 
 // saveKeyFile writes the encrypted key file. The file name is the SHA-256
 // of the file bytes, exactly like restic (verification notes §2.4).
-func (r *Repository) saveKeyFile(ctx context.Context, password string) error {
+func (r *Repository) saveKeyFile(ctx context.Context, password string) (restic.Handle, error) {
 	username, hostname := CurrentIdentity()
 	keyFile, err := crypto.NewKeyFile(password, username, hostname, r.master, time.Now())
 	if err != nil {
-		return err
+		return restic.Handle{}, err
 	}
 	doc, err := json.Marshal(keyFile)
 	if err != nil {
-		return fmt.Errorf("repository: marshal key file: %w", err)
+		return restic.Handle{}, fmt.Errorf("repository: marshal key file: %w", err)
 	}
 	name := restic.Hash(doc).String()
-	return r.backend.Save(ctx, restic.Handle{Type: restic.KeyFileType, Name: name}, bytes.NewReader(doc))
+	handle := restic.Handle{Type: restic.KeyFileType, Name: name}
+	return handle, r.backend.Save(ctx, handle, bytes.NewReader(doc))
 }
 
 // unlockKeyFile tries every key file in the repository with the password.

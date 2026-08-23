@@ -81,14 +81,14 @@ func (r *Repository) SaveBlob(ctx context.Context, blobType restic.BlobType, dat
 		return restic.ID{}, fmt.Errorf("repository: invalid blob type %d", blobType)
 	}
 	id := restic.Hash(data)
-	if _, exists := r.index.Lookup(id); exists {
+	if _, exists := r.index.Lookup(blobType, id); exists {
 		return id, nil // dedup: already stored
 	}
 
 	r.saveMu.Lock()
 	defer r.saveMu.Unlock()
 	// re-check under the lock: another worker may have stored it meanwhile
-	if _, exists := r.index.Lookup(id); exists {
+	if _, exists := r.index.Lookup(blobType, id); exists {
 		return id, nil
 	}
 
@@ -123,6 +123,7 @@ func (r *Repository) SaveBlob(ctx context.Context, blobType restic.BlobType, dat
 	}
 	packer.Add(entryType, id, sealed, uncompressedLength)
 	entry := index.Entry{
+		Type:               blobType,
 		ID:                 id,
 		PackID:             restic.ID{}, // filled in when the pack is flushed
 		Offset:             uint32(packer.Size() - len(sealed)),

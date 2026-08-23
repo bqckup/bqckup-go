@@ -13,6 +13,7 @@ import (
 
 // Entry locates one blob: in which pack, at which offset.
 type Entry struct {
+	Type               restic.BlobType
 	ID                 restic.ID
 	PackID             restic.ID
 	Offset             uint32
@@ -20,24 +21,32 @@ type Entry struct {
 	UncompressedLength uint32
 }
 
+// BlobHandle is the full identity of a blob in a restic repository. Data
+// and tree blobs live in separate namespaces even when their plaintext hash
+// is identical.
+type BlobHandle struct {
+	Type restic.BlobType
+	ID   restic.ID
+}
+
 // MasterIndex is the in-memory map of every known blob, guarded by an
-// RWMutex for concurrent chunk workers. Duplicate blob IDs across packs
-// follow restic semantics: the last write wins (dedup only needs one
-// working location; duplicates are cleaned up by prune in L2).
+// RWMutex for concurrent chunk workers. Identity is (blob type, blob ID),
+// matching restic's separate data/tree namespaces. Duplicate handles across
+// packs use last-write-wins (dedup only needs one working location).
 type MasterIndex struct {
 	mu    sync.RWMutex
-	blobs map[restic.ID]Entry
+	blobs map[BlobHandle]Entry
 }
 
 func NewMasterIndex() *MasterIndex {
-	return &MasterIndex{blobs: make(map[restic.ID]Entry)}
+	return &MasterIndex{blobs: make(map[BlobHandle]Entry)}
 }
 
 // Lookup returns the storage location of a blob.
-func (m *MasterIndex) Lookup(id restic.ID) (Entry, bool) {
+func (m *MasterIndex) Lookup(blobType restic.BlobType, id restic.ID) (Entry, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	entry, ok := m.blobs[id]
+	entry, ok := m.blobs[BlobHandle{Type: blobType, ID: id}]
 	return entry, ok
 }
 
@@ -45,7 +54,7 @@ func (m *MasterIndex) Lookup(id restic.ID) (Entry, bool) {
 func (m *MasterIndex) Add(entry Entry) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.blobs[entry.ID] = entry
+	m.blobs[BlobHandle{Type: entry.Type, ID: entry.ID}] = entry
 }
 
 // AddIndex inserts every blob of an index file.
@@ -54,13 +63,15 @@ func (m *MasterIndex) AddIndex(idx Index) {
 	defer m.mu.Unlock()
 	for _, pack := range idx.Packs {
 		for _, blob := range pack.Blobs {
-			m.blobs[blob.ID] = Entry{
+			entry := Entry{
+				Type:               blob.Type,
 				ID:                 blob.ID,
 				PackID:             pack.ID,
 				Offset:             blob.Offset,
 				Length:             blob.Length,
 				UncompressedLength: blob.UncompressedLength,
 			}
+			m.blobs[BlobHandle{Type: entry.Type, ID: entry.ID}] = entry
 		}
 	}
 }

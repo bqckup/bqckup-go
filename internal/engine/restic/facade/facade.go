@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	adaptertypes "github.com/bqckup/bqckup-go/internal/backup/restic"
+	backuprestic "github.com/bqckup/bqckup-go/internal/backup/restic"
 	"github.com/bqckup/bqckup-go/internal/engine/restic"
 	"github.com/bqckup/bqckup-go/internal/engine/restic/archiver"
 	"github.com/bqckup/bqckup-go/internal/engine/restic/backend"
@@ -28,7 +28,7 @@ func NewEngine() *Engine { return &Engine{} }
 
 // EnsureRepository initializes a repository (idempotent), local or
 // S3-compatible depending on the URL.
-func (e *Engine) EnsureRepository(ctx context.Context, repo adaptertypes.RepoConfig) error {
+func (e *Engine) EnsureRepository(ctx context.Context, repo backuprestic.RepoConfig) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -46,29 +46,29 @@ func (e *Engine) EnsureRepository(ctx context.Context, repo adaptertypes.RepoCon
 }
 
 // BackupFiles walks the include paths and writes one snapshot.
-func (e *Engine) BackupFiles(ctx context.Context, repo adaptertypes.RepoConfig, spec adaptertypes.BackupSpec) (adaptertypes.SnapshotSummary, error) {
+func (e *Engine) BackupFiles(ctx context.Context, repo backuprestic.RepoConfig, spec backuprestic.BackupSpec) (backuprestic.SnapshotSummary, error) {
 	if err := ctx.Err(); err != nil {
-		return adaptertypes.SnapshotSummary{}, err
+		return backuprestic.SnapshotSummary{}, err
 	}
 	if len(spec.Include) == 0 {
-		return adaptertypes.SnapshotSummary{}, errors.New("at least one include path is required for backup")
+		return backuprestic.SnapshotSummary{}, errors.New("at least one include path is required for backup")
 	}
 	if err := e.rejectUnsupportedURL(repo.URL); err != nil {
-		return adaptertypes.SnapshotSummary{}, err
+		return backuprestic.SnapshotSummary{}, err
 	}
 	b, err := e.openBackend(ctx, repo)
 	if err != nil {
-		return adaptertypes.SnapshotSummary{}, err
+		return backuprestic.SnapshotSummary{}, err
 	}
 	r, err := repository.Open(ctx, b, repo.Password)
 	if err != nil {
-		return adaptertypes.SnapshotSummary{}, &restic.RedactedError{Category: "repository", Message: "could not open the repository", Err: err}
+		return backuprestic.SnapshotSummary{}, &restic.RedactedError{Category: "repository", Message: "could not open the repository", Err: err}
 	}
 	// Exclusive lock; lock errors are returned unwrapped: their message
 	// (hostname/pid, never secrets) must reach the user.
 	_, release, err := acquireExclusiveLock(ctx, b, r.MasterKey())
 	if err != nil {
-		return adaptertypes.SnapshotSummary{}, err
+		return backuprestic.SnapshotSummary{}, err
 	}
 	defer release()
 	username, hostname := repository.CurrentIdentity()
@@ -80,9 +80,9 @@ func (e *Engine) BackupFiles(ctx context.Context, repo adaptertypes.RepoConfig, 
 		Username: username,
 	})
 	if err != nil {
-		return adaptertypes.SnapshotSummary{}, &restic.RedactedError{Category: "repository", Message: "could not create the incremental backup", Err: err}
+		return backuprestic.SnapshotSummary{}, &restic.RedactedError{Category: "repository", Message: "could not create the incremental backup", Err: err}
 	}
-	return adaptertypes.SnapshotSummary{
+	return backuprestic.SnapshotSummary{
 		SnapshotID:          snapID.String(),
 		MessageType:         "summary",
 		FilesNew:            summary.FilesNew,
@@ -99,7 +99,7 @@ func (e *Engine) BackupFiles(ctx context.Context, repo adaptertypes.RepoConfig, 
 // the snapshot files of the rest, and prunes unreachable pack data. It
 // returns the number of bytes reclaimed. Never silently skips a configured
 // policy.
-func (e *Engine) ApplyRetention(ctx context.Context, repo adaptertypes.RepoConfig, keepLast int, siteName string) (int64, error) {
+func (e *Engine) ApplyRetention(ctx context.Context, repo backuprestic.RepoConfig, keepLast int, siteName string) (int64, error) {
 	if err := ctx.Err(); err != nil {
 		return 0, err
 	}
@@ -132,7 +132,7 @@ func (e *Engine) ApplyRetention(ctx context.Context, repo adaptertypes.RepoConfi
 // Unlock removes stale repository locks (restic unlock semantics: stale
 // locks only, never a live one). Locks are encrypted with the repository
 // key, so the repository must be opened first.
-func (e *Engine) Unlock(ctx context.Context, repo adaptertypes.RepoConfig) error {
+func (e *Engine) Unlock(ctx context.Context, repo backuprestic.RepoConfig) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -203,7 +203,7 @@ func (e *Engine) rejectUnsupportedURL(url string) error {
 // openBackend picks the storage backend for a repository. s3: URLs (which
 // also cover r2, as RepositoryURL always prefixes s3:) use the S3 backend;
 // everything else is a local path.
-func (e *Engine) openBackend(ctx context.Context, repo adaptertypes.RepoConfig) (backend.Backend, error) {
+func (e *Engine) openBackend(ctx context.Context, repo backuprestic.RepoConfig) (backend.Backend, error) {
 	if strings.HasPrefix(repo.URL, "s3:") {
 		if repo.Bucket == "" || repo.Prefix == "" {
 			return nil, errors.New("s3 repositories require a bucket and object prefix")

@@ -36,6 +36,27 @@ func TestCreateExcludesConfiguredSubtree(t *testing.T) {
 	assert.Positive(t, artifact.Size)
 }
 
+func TestCreateSupportsRelativeExcludePatterns(t *testing.T) {
+	ctx := context.Background()
+	source := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(source, "keep.txt"), []byte("keep"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(source, "skip.tmp"), []byte("skip"), 0o600))
+	require.NoError(t, os.MkdirAll(filepath.Join(source, "cache", "deep"), 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(source, "cache", "deep", "secret"), []byte("secret"), 0o600))
+
+	destination := filepath.Join(t.TempDir(), "archive.tar.gz")
+	_, err := New().Create(ctx, backup.FileSource{
+		Include: []string{source},
+		Exclude: []string{"*.tmp", "cache/**"},
+	}, destination)
+	require.NoError(t, err)
+
+	names := archiveMembers(t, destination)
+	assert.Contains(t, names, filepath.Base(source)+"/keep.txt")
+	assert.NotContains(t, names, filepath.Base(source)+"/skip.tmp")
+	assert.NotContains(t, names, filepath.Base(source)+"/cache/deep/secret")
+}
+
 func TestCreateStoresSymlinkWithoutFollowingByDefault(t *testing.T) {
 	source := filepath.Join(t.TempDir(), "source")
 	require.NoError(t, os.MkdirAll(source, 0o700))

@@ -157,7 +157,8 @@ func (l *Lock) create(ctx context.Context, b backend.Backend, key *crypto.Master
 // conflicts with an exclusive request, an exclusive lock conflicts with
 // any request. Stale non-exclusive locks are removed; stale exclusive
 // locks block with ErrStaleExclusive; unreadable lock files block with
-// ErrInvalidLock. Locks with a timestamp in the future are ignored.
+// ErrInvalidLock. Future-dated locks are treated as active conflicts: clock
+// skew must not allow two writers into the repository.
 // Transient load errors are retried (restic behavior).
 func (l *Lock) checkOthers(ctx context.Context, b backend.Backend, key *crypto.MasterKey, own restic.Handle) error {
 	var err error
@@ -172,9 +173,6 @@ func (l *Lock) checkOthers(ctx context.Context, b backend.Backend, key *crypto.M
 					return &ErrInvalidLock{Handle: h}
 				}
 				return loadErr // unclear whether it can be ignored: retry, then fail
-			}
-			if other.Time.After(time.Now()) {
-				return nil // ignore future locks
 			}
 			if !other.Exclusive && !l.Exclusive {
 				return nil // readers may join

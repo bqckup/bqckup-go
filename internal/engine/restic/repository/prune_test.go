@@ -182,9 +182,9 @@ func TestPartiallyReferencedPackSurvives(t *testing.T) {
 	}
 
 	// X is still indexed (the pack keeps it), Y and tree2 are reachable
-	_, ok := r.MasterIndex().Lookup(blobX)
+	_, ok := r.MasterIndex().Lookup(restic.DataBlob, blobX)
 	assert.True(t, ok)
-	_, ok = r.MasterIndex().Lookup(blobY)
+	_, ok = r.MasterIndex().Lookup(restic.DataBlob, blobY)
 	assert.True(t, ok)
 	require.NoError(t, verifyIndexesReferenceExistingPacks(ctx, r, b))
 }

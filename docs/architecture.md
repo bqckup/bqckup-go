@@ -26,8 +26,8 @@ Dependencies point toward the use case. `backup.Runner` knows interfaces and dom
 4. Skip when the last success is inside `minimum_interval`, unless forced.
 5. Insert a `running` history record.
 6. `backup_mode: full` creates an owner-only temporary workspace and
-   `.tar.gz` file archive; `backup_mode: incremental` runs the selected
-   incremental engine (see below).
+   `.tar.gz` file archive; `backup_mode: incremental` runs the built-in
+   pure-Go incremental engine (see below).
 7. Calculate SHA-256 and size for the file archive and each enabled database export.
 8. Store every artifact to every destination without overwriting; local uses atomic staging, while S3/R2 uses conditional transfer and metadata verification.
 9. Record each stored artifact.
@@ -37,21 +37,17 @@ Dependencies point toward the use case. `backup.Runner` knows interfaces and dom
 
 Multiple destinations have all-required semantics. A destination failure fails the run and prevents retention. Previously successful backup sets are not removed after a failed current run.
 
-## Incremental engines
+## Incremental engine
 
-`backup_mode: incremental` selects its engine via `incremental.engine`:
+`backup_mode: incremental` always uses the in-process pure-Go engine in
+`internal/engine/restic/` (facade in `internal/engine/restic/facade/`). No
+external Restic binary is used at runtime. The engine serves local and S3/R2
+destinations and writes Restic repository format v2. Compatibility tests use
+the official Restic binary as a test oracle for `check`, `snapshots`, restore,
+and cross-tool locking; the binary is not part of production execution.
 
-- **`restic`** (default): runs the system `restic` binary through
-  `internal/backup/restic` (the process adapter). Required for
-  repositories in the old format v1 until the user migrates.
-- **`builtin`**: the in-process pure-Go engine in `internal/engine/restic/`
-  (facade in `internal/engine/restic/facade/`). No `restic` binary needed.
-  Serves local and S3/R2 destinations (backend in
-  `internal/engine/restic/backend/`: `Local` and `S3`). Writes
-  Restic repository format v2: repositories made by the builtin engine pass
-  the official `restic check`/`snapshots`/`restore` (restic >= 0.17.0), and
-  the engine opens and continues repositories created by the real restic
-  binary in format v2.
+Repositories in Restic format v1 are not supported. They must be migrated to
+format v2 before being configured in Bqckup.
 
 Retention (keep_last per site tag) forgets old snapshots and prunes
 unreachable pack data with a mark-and-sweep pass (no repack): the new
@@ -110,4 +106,4 @@ input.
 
 ## Deliberate exclusions
 
-The foundation has no web UI, auth, notifications, reporting, master API, webhook, restore, internal scheduler, or Rustic. Restic integration is delivered by two engines: the process adapter (`engine: restic`) and the in-tree pure-Go engine (`engine: builtin`, local + S3/R2 storage, retention without prune until L2, no restore).
+The foundation has no web UI, auth, notifications, reporting, master API, webhook, restore, internal scheduler, or Rustic. Incremental backup is delivered only by the in-tree pure-Go engine for local and S3/R2 storage. The external Restic binary is limited to opt-in compatibility tests.

@@ -26,7 +26,6 @@ site:
   enabled: true
   backup_mode: incremental
   incremental:
-    engine: restic
     password_env: TEST_RESTIC_PASS
   sources:
     files:
@@ -77,7 +76,6 @@ site:
   enabled: true
   backup_mode: incremental
   incremental:
-    engine: restic
     password_env: UNSET_DOCTOR_PASS_VAR
   sources:
     files:
@@ -128,7 +126,7 @@ func writeConfigTree(t *testing.T, dir, rootYAML, storageYAML, siteYAML string) 
 	require.NoError(t, os.WriteFile(filepath.Join(sitesDir, "test-site.yaml"), []byte(siteYAML), 0o600))
 }
 
-func TestDoctorBuiltinEngineNeedsNoResticBinary(t *testing.T) {
+func TestDoctorIncrementalEngineNeedsNoResticBinary(t *testing.T) {
 	t.Setenv("TEST_RESTIC_PASS", "secret-value")
 	tempDir := t.TempDir()
 	sourceDir := filepath.Join(tempDir, "source")
@@ -152,7 +150,6 @@ site:
   enabled: true
   backup_mode: incremental
   incremental:
-    engine: builtin
     password_env: TEST_RESTIC_PASS
   sources:
     files:
@@ -171,9 +168,9 @@ site:
 	root.SetErr(&bytes.Buffer{})
 	root.SetArgs([]string{"doctor", "--config-dir", filepath.Join(tempDir, "config")})
 	require.NoError(t, root.Execute())
-	// no binary:restic check for the builtin engine; the engine check is ok
+	// Incremental backups use the built-in engine and never probe for restic.
 	assert.NotContains(t, stdout.String(), `"name":"binary:restic"`)
-	assert.Contains(t, stdout.String(), "builtin engine")
+	assert.Contains(t, stdout.String(), "built-in incremental engine")
 }
 
 func writeFile(t *testing.T, path, content string) {

@@ -70,7 +70,7 @@ func (r *Repository) ForgetAndPrune(ctx context.Context, keepLast int, siteTag s
 	if err != nil {
 		return result, fmt.Errorf("repository: list snapshots for prune: %w", err)
 	}
-	reachable := make(map[restic.ID]struct{})
+	reachable := make(map[index.BlobHandle]struct{})
 	for _, entry := range remaining {
 		if entry.Snapshot.Tree == nil {
 			continue
@@ -105,12 +105,13 @@ func snapshotsForTag(snapshots []SnapshotWithID, siteTag string) []SnapshotWithI
 // ponytail: map-based reachable set; ~50 bytes per blob. If a repository
 // grows beyond tens of millions of blobs, switch to a bitset keyed by
 // index position (measured need first, per L2-D1).
-func (r *Repository) markTree(ctx context.Context, treeID restic.ID, reachable map[restic.ID]struct{}) error {
-	if _, seen := reachable[treeID]; seen {
+func (r *Repository) markTree(ctx context.Context, treeID restic.ID, reachable map[index.BlobHandle]struct{}) error {
+	treeHandle := index.BlobHandle{Type: restic.TreeBlob, ID: treeID}
+	if _, seen := reachable[treeHandle]; seen {
 		return nil
 	}
-	reachable[treeID] = struct{}{}
-	plain, err := r.loadBlob(ctx, treeID)
+	reachable[treeHandle] = struct{}{}
+	plain, err := r.loadBlob(ctx, restic.TreeBlob, treeID)
 	if err != nil {
 		return err
 	}
@@ -125,7 +126,7 @@ func (r *Repository) markTree(ctx context.Context, treeID restic.ID, reachable m
 			}
 		}
 		for _, contentID := range node.Content {
-			reachable[contentID] = struct{}{}
+			reachable[index.BlobHandle{Type: restic.DataBlob, ID: contentID}] = struct{}{}
 		}
 	}
 	return nil
@@ -133,8 +134,8 @@ func (r *Repository) markTree(ctx context.Context, treeID restic.ID, reachable m
 
 // loadBlob reads and decrypts one blob by ID through the master index,
 // decompressing it when the index says it was compressed.
-func (r *Repository) loadBlob(ctx context.Context, id restic.ID) ([]byte, error) {
-	entry, ok := r.index.Lookup(id)
+func (r *Repository) loadBlob(ctx context.Context, blobType restic.BlobType, id restic.ID) ([]byte, error) {
+	entry, ok := r.index.Lookup(blobType, id)
 	if !ok {
 		return nil, fmt.Errorf("repository: blob %s is not indexed", id)
 	}
@@ -168,7 +169,7 @@ func (r *Repository) loadBlob(ctx context.Context, id restic.ID) ([]byte, error)
 
 // sweep writes the new index without dead packs, removes the old index
 // files, then deletes dead and orphaned packs.
-func (r *Repository) sweep(ctx context.Context, reachable map[restic.ID]struct{}, result *PruneResult) error {
+func (r *Repository) sweep(ctx context.Context, reachable map[index.BlobHandle]struct{}, result *PruneResult) error {
 	var oldIndexes []restic.Handle
 	packs := make(map[restic.ID]index.Pack)
 	if err := r.backend.List(ctx, restic.IndexFile, func(h restic.Handle, _ int64) error {
@@ -242,9 +243,9 @@ func (r *Repository) sweep(ctx context.Context, reachable map[restic.ID]struct{}
 	return nil
 }
 
-func packHasReachableBlob(pack index.Pack, reachable map[restic.ID]struct{}) bool {
+func packHasReachableBlob(pack index.Pack, reachable map[index.BlobHandle]struct{}) bool {
 	for _, blob := range pack.Blobs {
-		if _, ok := reachable[blob.ID]; ok {
+		if _, ok := reachable[index.BlobHandle{Type: blob.Type, ID: blob.ID}]; ok {
 			return true
 		}
 	}

@@ -20,11 +20,10 @@ func TestValidateIncrementalBackupMode(t *testing.T) {
 		require.NoError(t, cfg.Validate())
 	})
 
-	t.Run("accepts valid incremental restic configuration", func(t *testing.T) {
+	t.Run("accepts incremental configuration", func(t *testing.T) {
 		cfg := validConfig(t)
 		cfg.Sites[0].BackupMode = "incremental"
 		cfg.Sites[0].Incremental = Incremental{
-			Engine:      "restic",
 			PasswordEnv: "RESTIC_PASSWORD",
 		}
 		require.NoError(t, cfg.Validate())
@@ -39,35 +38,10 @@ func TestValidateIncrementalBackupMode(t *testing.T) {
 		assert.Contains(t, err.Error(), "must be 'full' or 'incremental'")
 	})
 
-	t.Run("rejects incremental mode with unsupported engine", func(t *testing.T) {
-		cfg := validConfig(t)
-		cfg.Sites[0].BackupMode = "incremental"
-		cfg.Sites[0].Incremental = Incremental{
-			Engine:      "borg",
-			PasswordEnv: "BORG_PASSPHRASE",
-		}
-		err := cfg.Validate()
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "incremental.engine")
-		assert.Contains(t, err.Error(), "must be 'restic' or 'builtin'")
-	})
-
-	t.Run("accepts the builtin engine", func(t *testing.T) {
-		cfg := validConfig(t)
-		cfg.Sites[0].BackupMode = "incremental"
-		cfg.Sites[0].Incremental = Incremental{
-			Engine:      "builtin",
-			PasswordEnv: "RESTIC_PASSWORD",
-		}
-		require.NoError(t, cfg.Validate())
-	})
-
 	t.Run("rejects incremental mode with missing password_env", func(t *testing.T) {
 		cfg := validConfig(t)
 		cfg.Sites[0].BackupMode = "incremental"
-		cfg.Sites[0].Incremental = Incremental{
-			Engine: "restic",
-		}
+		cfg.Sites[0].Incremental = Incremental{}
 		err := cfg.Validate()
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "incremental.password_env")
@@ -78,7 +52,6 @@ func TestValidateIncrementalBackupMode(t *testing.T) {
 		cfg := validConfig(t)
 		cfg.Sites[0].BackupMode = "incremental"
 		cfg.Sites[0].Incremental = Incremental{
-			Engine:      "restic",
 			PasswordEnv: "invalid-env-name!",
 		}
 		err := cfg.Validate()
@@ -89,6 +62,42 @@ func TestValidateIncrementalBackupMode(t *testing.T) {
 }
 
 func TestLoadIncrementalSiteYAML(t *testing.T) {
+	siteYAML := `version: 2
+site:
+  name: example
+  enabled: true
+  backup_mode: incremental
+  incremental:
+    password_env: RESTIC_PASSWORD
+  sources:
+    files:
+      include:
+        - /var/www/html
+  destinations:
+    - storage: local-primary
+  policy:
+    minimum_interval: 24h
+    keep_last: 7
+`
+	dir := writeConfigTree(t, `version: 2
+app:
+  state_database: data/bqckup.db
+  temporary_directory: tmp
+  lock_directory: locks
+`, `storages:
+  local-primary:
+    type: local
+    directory: /var/backups/bqckup
+`, siteYAML)
+
+	cfg, err := Load(t.Context(), dir)
+	require.NoError(t, err)
+	require.Len(t, cfg.Sites, 1)
+	assert.Equal(t, "incremental", cfg.Sites[0].BackupMode)
+	assert.Equal(t, "RESTIC_PASSWORD", cfg.Sites[0].Incremental.PasswordEnv)
+}
+
+func TestLoadRejectsRemovedIncrementalEngineField(t *testing.T) {
 	siteYAML := `version: 2
 site:
   name: example
@@ -118,10 +127,7 @@ app:
     directory: /var/backups/bqckup
 `, siteYAML)
 
-	cfg, err := Load(t.Context(), dir)
-	require.NoError(t, err)
-	require.Len(t, cfg.Sites, 1)
-	assert.Equal(t, "incremental", cfg.Sites[0].BackupMode)
-	assert.Equal(t, "restic", cfg.Sites[0].Incremental.Engine)
-	assert.Equal(t, "RESTIC_PASSWORD", cfg.Sites[0].Incremental.PasswordEnv)
+	_, err := Load(t.Context(), dir)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "engine")
 }

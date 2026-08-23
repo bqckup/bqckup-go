@@ -114,8 +114,32 @@ func TestInitIdempotent(t *testing.T) {
 	if keyCount != 1 {
 		t.Fatalf("re-init created %d key files, want 1", keyCount)
 	}
-	if _, ok := second.index.Lookup(restic.Hash([]byte("keep me"))); !ok {
+	if _, ok := second.index.Lookup(restic.DataBlob, restic.Hash([]byte("keep me"))); !ok {
 		t.Fatal("data blob lost after re-init")
+	}
+}
+
+type failFirstKeySaveBackend struct {
+	backend.Backend
+	failed bool
+}
+
+func (b *failFirstKeySaveBackend) Save(ctx context.Context, h restic.Handle, rd io.Reader) error {
+	if h.Type == restic.KeyFileType && !b.failed {
+		b.failed = true
+		return errors.New("injected key save failure")
+	}
+	return b.Backend.Save(ctx, h, rd)
+}
+
+func TestInitRecoversAfterKeySaveFailure(t *testing.T) {
+	ctx := context.Background()
+	b := &failFirstKeySaveBackend{Backend: backend.NewLocal(t.TempDir())}
+	if _, err := Init(ctx, b, testPassword); err == nil {
+		t.Fatal("first init should fail while saving the key")
+	}
+	if _, err := Init(ctx, b, testPassword); err != nil {
+		t.Fatalf("retry must repair or restart partial init: %v", err)
 	}
 }
 
@@ -173,6 +197,41 @@ func TestSaveBlobDedup(t *testing.T) {
 	}
 }
 
+func TestSaveBlobKeepsDataAndTreeTypesSeparate(t *testing.T) {
+	ctx := context.Background()
+	repo, local := newRepo(t, ctx)
+	payload := []byte(`{"nodes":[]}`)
+	dataID, err := repo.SaveBlob(ctx, restic.DataBlob, payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	treeID, err := repo.SaveBlob(ctx, restic.TreeBlob, payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dataID != treeID {
+		t.Fatal("fixture must produce equal content IDs")
+	}
+	if err := repo.Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(ctx, local, testPassword)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reopened.MasterIndex().Len() != 2 {
+		t.Fatalf("data and tree handles must both be indexed, got %d entry", reopened.MasterIndex().Len())
+	}
+	dataEntry, dataOK := reopened.MasterIndex().Lookup(restic.DataBlob, dataID)
+	treeEntry, treeOK := reopened.MasterIndex().Lookup(restic.TreeBlob, treeID)
+	if !dataOK || !treeOK {
+		t.Fatalf("typed lookups missing: data=%v tree=%v", dataOK, treeOK)
+	}
+	if dataEntry.PackID == treeEntry.PackID {
+		t.Fatal("data and tree blobs unexpectedly resolved to the same pack")
+	}
+}
+
 func TestFlushThenReopenFindsBlobs(t *testing.T) {
 	ctx := context.Background()
 	repo, local := newRepo(t, ctx)
@@ -220,7 +279,7 @@ func TestFlushThenReopenFindsBlobs(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, id := range ids {
-		entry, ok := reopened.index.Lookup(id)
+		entry, ok := reopened.index.Lookup(blobs[name], id)
 		if !ok {
 			t.Fatalf("blob %q missing after reopen", name)
 		}
@@ -257,7 +316,7 @@ func TestZeroLengthBlobStoredUncompressed(t *testing.T) {
 	if err := repo.Flush(ctx); err != nil {
 		t.Fatal(err)
 	}
-	entry, ok := repo.index.Lookup(id)
+	entry, ok := repo.index.Lookup(restic.DataBlob, id)
 	if !ok {
 		t.Fatal("empty blob missing from index")
 	}

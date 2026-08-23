@@ -57,8 +57,8 @@ if find internal cmd -name '*.go' -type f -exec grep -liE 'rustic|restic' {} + |
     failed=1
 fi
 
-if ! grep -Fq 'Restic is not part of the foundation' docs/intern-backlog.md; then
-    echo "intern backlog must state the Restic scope boundary" >&2
+if ! grep -Fq 'one in-tree pure-Go' docs/intern-backlog.md; then
+    echo "intern backlog must state the single-engine runtime boundary" >&2
     failed=1
 fi
 

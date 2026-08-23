@@ -5,8 +5,8 @@
 // L1 scope notes:
 //   - No parent-snapshot comparison: every file is counted files_new and
 //     trees are rebuilt each run (identical trees dedup by blob ID anyway).
-//   - Excludes use filepath.Match against the basename and the full path
-//     (simpler than restic's pattern engine; upgrade when a real need shows).
+//   - Excludes support basename globs, include-root-relative patterns, absolute
+//     paths/patterns, and a trailing /** for recursive directories.
 package archiver
 
 import (
@@ -24,6 +24,7 @@ import (
 	"github.com/bqckup/bqckup-go/internal/engine/restic/repository"
 	"github.com/bqckup/bqckup-go/internal/engine/restic/snapshot"
 	"github.com/bqckup/bqckup-go/internal/engine/restic/tree"
+	"github.com/bqckup/bqckup-go/internal/fileexclude"
 )
 
 // Archiver performs backups into an opened repository.
@@ -75,7 +76,7 @@ func (a *Archiver) Backup(ctx context.Context, spec BackupSpec) (restic.ID, Summ
 		if pattern == "" {
 			continue
 		}
-		if _, err := filepath.Match(pattern, ""); err != nil {
+		if err := fileexclude.Validate(pattern); err != nil {
 			return restic.ID{}, Summary{}, fmt.Errorf("archiver: invalid exclude pattern %q: %w", pattern, err)
 		}
 	}
@@ -95,13 +96,13 @@ func (a *Archiver) Backup(ctx context.Context, spec BackupSpec) (restic.ID, Summ
 		}
 	}
 
-	// Snapshot is written LAST: packs and index are flushed first, so an
-	// interrupted run never leaves a snapshot referencing missing data.
-	if err := a.repo.Flush(ctx); err != nil {
-		return restic.ID{}, Summary{}, err
-	}
 	rootTree, err := state.combineRoots(ctx)
 	if err != nil {
+		return restic.ID{}, Summary{}, err
+	}
+	// Snapshot is written LAST: build every tree (including the synthetic
+	// multi-root tree), then flush packs and indexes before the snapshot.
+	if err := a.repo.Flush(ctx); err != nil {
 		return restic.ID{}, Summary{}, err
 	}
 	snap := snapshot.Snapshot{
@@ -360,7 +361,7 @@ func (s *backupState) combineRoots(ctx context.Context) (*restic.ID, error) {
 // saveBlob stores a blob and counts new bytes for the summary.
 func (s *backupState) saveBlob(ctx context.Context, blobType restic.BlobType, data []byte) (restic.ID, error) {
 	id := restic.Hash(data)
-	_, exists := s.archiver.repo.MasterIndex().Lookup(id)
+	_, exists := s.archiver.repo.MasterIndex().Lookup(blobType, id)
 	if !exists {
 		s.dataAdded += int64(len(data))
 		s.missed = append(s.missed, MissedBlob{Type: blobType, Size: len(data)})
@@ -368,19 +369,8 @@ func (s *backupState) saveBlob(ctx context.Context, blobType restic.BlobType, da
 	return s.archiver.repo.SaveBlob(ctx, blobType, data)
 }
 
-// excluded reports whether path matches any exclude pattern. L1 matches the
-// basename and the full path with filepath.Match.
+// excluded reports whether path matches a basename glob, an include-root
+// relative pattern, or an absolute path/pattern.
 func (s *backupState) excluded(path string) bool {
-	for _, pattern := range s.spec.Excludes {
-		if pattern == "" {
-			continue
-		}
-		if ok, _ := filepath.Match(pattern, filepath.Base(path)); ok {
-			return true
-		}
-		if ok, _ := filepath.Match(pattern, path); ok {
-			return true
-		}
-	}
-	return false
+	return fileexclude.MatchAny(s.spec.Excludes, path, s.spec.Paths)
 }

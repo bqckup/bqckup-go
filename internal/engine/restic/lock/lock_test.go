@@ -204,14 +204,14 @@ func TestStaleExclusiveLockBlocksAndSurvives(t *testing.T) {
 	require.Len(t, listLockNames(t, b), 1)
 }
 
-func TestFutureLocksAreIgnored(t *testing.T) {
+func TestFutureExclusiveLockBlocks(t *testing.T) {
 	b := testBackend(t)
 	key := testKey(t)
 	writeLock(t, b, key, "", Lock{Time: time.Now().Add(time.Hour), Exclusive: true, Hostname: "clock-skewed"})
 
-	l, err := New(context.Background(), b, key, true)
-	require.NoError(t, err)
-	defer l.Unlock(context.Background(), b)
+	_, err := New(context.Background(), b, key, true)
+	var locked *ErrLocked
+	require.ErrorAs(t, err, &locked)
 }
 
 func TestInvalidLockFileBlocks(t *testing.T) {

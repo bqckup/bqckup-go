@@ -1,5 +1,5 @@
-// Package process runs external commands for adapters that shell out to
-// real binaries (restic, mysqldump, pg_dump).
+// Package process runs external database-export commands such as
+// mysqldump and pg_dump.
 package process
 
 import (

@@ -7,20 +7,20 @@ import (
 	"strings"
 	"testing"
 
-	adaptertypes "github.com/bqckup/bqckup-go/internal/backup/restic"
+	backuprestic "github.com/bqckup/bqckup-go/internal/backup/restic"
 	"github.com/bqckup/bqckup-go/internal/engine/restic/backend"
 	"github.com/bqckup/bqckup-go/internal/engine/restic/repository"
 )
 
 const testPassword = "facade-test-password"
 
-func testRepo(t *testing.T) adaptertypes.RepoConfig {
+func testRepo(t *testing.T) backuprestic.RepoConfig {
 	t.Helper()
-	return adaptertypes.RepoConfig{URL: t.TempDir(), Password: testPassword}
+	return backuprestic.RepoConfig{URL: t.TempDir(), Password: testPassword}
 }
 
 // listSnapshots opens the repository below the facade and lists snapshots.
-func listSnapshots(t *testing.T, repo adaptertypes.RepoConfig) []repository.SnapshotWithID {
+func listSnapshots(t *testing.T, repo backuprestic.RepoConfig) []repository.SnapshotWithID {
 	t.Helper()
 	r, err := repository.Open(context.Background(), backend.NewLocal(repo.URL), repo.Password)
 	if err != nil {
@@ -50,7 +50,7 @@ func TestEnsureAndBackupAndList(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(source, "data.txt"), []byte("facade data"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	summary, err := engine.BackupFiles(ctx, repo, adaptertypes.BackupSpec{
+	summary, err := engine.BackupFiles(ctx, repo, backuprestic.BackupSpec{
 		SiteName: "testsite",
 		Include:  []string{source},
 		Tags:     []string{"bqckup", "site:testsite"},
@@ -85,7 +85,7 @@ func TestBackupNeedsNoResticBinary(t *testing.T) {
 	if err := engine.EnsureRepository(ctx, repo); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := engine.BackupFiles(ctx, repo, adaptertypes.BackupSpec{Include: []string{source}, Tags: []string{"t"}}); err != nil {
+	if _, err := engine.BackupFiles(ctx, repo, backuprestic.BackupSpec{Include: []string{source}, Tags: []string{"t"}}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -106,7 +106,7 @@ func TestApplyRetentionKeepsNewest(t *testing.T) {
 		if err := os.WriteFile(file, []byte(strings.Repeat("x", i+1)), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := engine.BackupFiles(ctx, repo, adaptertypes.BackupSpec{
+		if _, err := engine.BackupFiles(ctx, repo, backuprestic.BackupSpec{
 			Include: []string{source}, Tags: []string{"bqckup", "site:testsite"},
 		}); err != nil {
 			t.Fatal(err)
@@ -133,7 +133,7 @@ func TestApplyRetentionIgnoresOtherSites(t *testing.T) {
 		t.Fatal(err)
 	}
 	// one snapshot for another site
-	if _, err := engine.BackupFiles(ctx, repo, adaptertypes.BackupSpec{
+	if _, err := engine.BackupFiles(ctx, repo, backuprestic.BackupSpec{
 		Include: []string{source}, Tags: []string{"bqckup", "site:othersite"},
 	}); err != nil {
 		t.Fatal(err)
@@ -150,7 +150,7 @@ func TestApplyRetentionIgnoresOtherSites(t *testing.T) {
 
 func TestRejectsRemoteURLs(t *testing.T) {
 	engine := NewEngine()
-	repo := adaptertypes.RepoConfig{URL: "rest:https://user:secret-key@example.com/repo", Password: "x"}
+	repo := backuprestic.RepoConfig{URL: "rest:https://user:secret-key@example.com/repo", Password: "x"}
 	err := engine.EnsureRepository(context.Background(), repo)
 	if err == nil {
 		t.Fatal("want error for rest URL")
@@ -174,8 +174,8 @@ func TestUnlockSucceedsOnCleanRepository(t *testing.T) {
 
 // compile-time check: the facade satisfies the runner's interface.
 var _ interface {
-	EnsureRepository(context.Context, adaptertypes.RepoConfig) error
-	BackupFiles(context.Context, adaptertypes.RepoConfig, adaptertypes.BackupSpec) (adaptertypes.SnapshotSummary, error)
-	ApplyRetention(context.Context, adaptertypes.RepoConfig, int, string) (int64, error)
-	Unlock(context.Context, adaptertypes.RepoConfig) error
+	EnsureRepository(context.Context, backuprestic.RepoConfig) error
+	BackupFiles(context.Context, backuprestic.RepoConfig, backuprestic.BackupSpec) (backuprestic.SnapshotSummary, error)
+	ApplyRetention(context.Context, backuprestic.RepoConfig, int, string) (int64, error)
+	Unlock(context.Context, backuprestic.RepoConfig) error
 } = (*Engine)(nil)

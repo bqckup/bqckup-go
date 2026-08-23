@@ -106,20 +106,13 @@ func runDoctorChecks(ctx context.Context, configDir, siteFilter string) DoctorRe
 
 	needsMySQL := false
 	needsPostgres := false
-	needsRestic := false
 
 	for _, site := range sitesToCheck {
 		if !site.Enabled {
 			continue
 		}
 		if site.BackupMode == "incremental" {
-			if site.Incremental.Engine == "builtin" {
-				// the builtin engine needs no restic binary; it serves local
-				// and s3/r2 destinations (L3)
-				addCheck(fmt.Sprintf("engine:%s", site.Name), "ok", "builtin engine (no restic binary required)")
-			} else {
-				needsRestic = true
-			}
+			addCheck(fmt.Sprintf("engine:%s", site.Name), "ok", "built-in incremental engine")
 			if val, ok := os.LookupEnv(site.Incremental.PasswordEnv); !ok || val == "" {
 				addCheck(fmt.Sprintf("secret:%s:%s", site.Name, site.Incremental.PasswordEnv), "fail",
 					fmt.Sprintf("password environment variable %q is not set or empty", site.Incremental.PasswordEnv))
@@ -152,14 +145,6 @@ func runDoctorChecks(ctx context.Context, configDir, siteFilter string) DoctorRe
 			addCheck("binary:pg_dump", "fail", "pg_dump executable not found in $PATH")
 		} else {
 			addCheck("binary:pg_dump", "ok", fmt.Sprintf("found at %s", path))
-		}
-	}
-
-	if needsRestic {
-		if path, err := exec.LookPath("restic"); err != nil {
-			addCheck("binary:restic", "fail", "restic executable not found in $PATH")
-		} else {
-			addCheck("binary:restic", "ok", fmt.Sprintf("found at %s", path))
 		}
 	}
 

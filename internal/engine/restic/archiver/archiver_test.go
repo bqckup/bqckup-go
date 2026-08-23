@@ -219,10 +219,11 @@ func TestExcludes(t *testing.T) {
 	arch, local, source := newArchiver(t, ctx)
 	buildDataset(t, source)
 	writeFile(t, filepath.Join(source, "skip.tmp"), []byte("temporary"))
+	writeFile(t, filepath.Join(source, "cache", "deep", "secret.bin"), []byte("excluded recursively"))
 
 	_, summary, err := arch.Backup(ctx, BackupSpec{
 		Paths:    []string{source},
-		Excludes: []string{"*.tmp"},
+		Excludes: []string{"*.tmp", "cache/**"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -277,7 +278,17 @@ func TestBackupMultipleRootsWithSameBasename(t *testing.T) {
 	if snapID.IsNull() {
 		t.Fatal("snapshot id is null")
 	}
-	_ = local
+	repo := openRepo(t, ctx, local)
+	snapshots, err := repo.ListSnapshots(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshots) != 1 || snapshots[0].Snapshot.Tree == nil {
+		t.Fatalf("unexpected snapshots: %#v", snapshots)
+	}
+	if _, ok := repo.MasterIndex().Lookup(restic.TreeBlob, *snapshots[0].Snapshot.Tree); !ok {
+		t.Fatal("snapshot root tree was not persisted in any pack/index")
+	}
 }
 
 func TestBackupRejectsInvalidExcludePattern(t *testing.T) {

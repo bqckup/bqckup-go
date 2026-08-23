@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/bqckup/bqckup-go/internal/backup"
+	"github.com/bqckup/bqckup-go/internal/fileexclude"
 )
 
 type Archiver struct{}
@@ -183,11 +184,5 @@ func (s archiveState) writeHeader(info os.FileInfo, archivePath, link string) er
 }
 
 func (s archiveState) excluded(candidate string) bool {
-	for _, excluded := range s.source.Exclude {
-		excluded = filepath.Clean(excluded)
-		if candidate == excluded || strings.HasPrefix(candidate, excluded+string(filepath.Separator)) {
-			return true
-		}
-	}
-	return false
+	return fileexclude.MatchAny(s.source.Exclude, candidate, s.source.Include)
 }
