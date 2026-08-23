@@ -54,8 +54,6 @@ sudo chmod 700 /etc/bqckup /var/lib/bqckup /var/backups/bqckup
 Create `/etc/bqckup/bqckup.yaml`:
 
 ```yaml
-version: 2
-
 app:
   state_database: /var/lib/bqckup/bqckup.db
   temporary_directory: /var/lib/bqckup/tmp
@@ -124,8 +122,6 @@ sudo chmod 600 /etc/bqckup/config/storages.yaml
 Create `/etc/bqckup/sites/web-app.yaml`:
 
 ```yaml
-version: 2
-
 site:
   name: web-app
   enabled: true

@@ -42,6 +42,13 @@ if ! grep -qs '^app:' configs/bqckup.yaml || ! grep -qs '^site:' configs/sites/*
     failed=1
 fi
 
+if grep -nE '^[[:space:]]*version:[[:space:]]*2[[:space:]]*$' \
+    USER-GUIDE.md docs/configuration-v2.md docs/guides/incremental-backup-step-by-step.md \
+    configs/bqckup.yaml configs/sites/*.yaml; then
+    echo "active YAML examples must omit the implicit version field" >&2
+    failed=1
+fi
+
 if grep -RniE '^[[:space:]]*(password|access_key|secret_key):[[:space:]]*[^[:space:]]' configs; then
     echo "example configuration contains an inline credential" >&2
     failed=1

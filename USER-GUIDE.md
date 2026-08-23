@@ -94,8 +94,6 @@ Output sukses: `valid schema v2 configuration: N site(s), N storage(s) in /etc/b
 ### 4.1 `bqckup.yaml` (root)
 
 ```yaml
-version: 2
-
 app:
   state_database: /var/lib/bqckup/bqckup.db
   temporary_directory: /var/lib/bqckup/tmp
@@ -138,8 +136,6 @@ Aturan:
 Nama file harus sama dengan `site.name` (mis. `sites/web.yaml` → `name: web`).
 
 ```yaml
-version: 2
-
 site:
   name: web
   enabled: true
@@ -222,6 +218,17 @@ bqckup backup unlock web
 # lihat history run terakhir (default 20 baris)
 bqckup history list
 bqckup history list --site web --limit 10
+```
+
+Output teks `history list` berbentuk tabel dan merangkum status, site, waktu mulai
+lokal beserta zona waktunya, durasi, jumlah dan ukuran artifact, serta run ID. Run yang gagal juga
+menampilkan kategori dan pesan error yang sudah disanitasi setelah tabel.
+
+```text
+STATUS   SITE  STARTED                  DURATION  ARTIFACTS  SIZE      RUN ID
+SUCCESS  web   23 Aug 2026, 20:56 WITA  1.25s     2          10.4 MiB  <run-id>
+
+1 run, 2 artifacts, 10.4 MiB total
 ```
 
 Output `backup run` sukses:

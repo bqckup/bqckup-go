@@ -8,7 +8,9 @@ Bqckup reads three YAML files from `/etc/bqckup` by default:
 /etc/bqckup/sites/<site>.yaml
 ```
 
-The root and site files use schema v2 automatically. The `version` field is optional; if it is present, it must be `2`.
+The root and site files use the current schema automatically, so new YAML files
+should omit the `version` field. Existing files that explicitly contain
+`version: 2` remain accepted for backward compatibility.
 
 ## Root file
 
