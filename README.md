@@ -40,11 +40,14 @@ bqckup init
 bqckup config validate
 bqckup backup list
 bqckup backup run <site> [--force]
-bqckup history list [--site <name>] [--limit <n>]
+bqckup history list [--site <name>] [--limit <n>] [--details]
 bqckup version
 ```
 
 Use `--output json` for machine-readable output and `--config-dir` for a custom configuration directory.
+Text history reports logical artifact and destination counts without counting
+the same artifact once per destination. Add `--details` to inspect each stored
+artifact copy and its object key; JSON remains the raw history format.
 
 ## Development
 

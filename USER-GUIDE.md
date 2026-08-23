@@ -218,18 +218,26 @@ bqckup backup unlock web
 # lihat history run terakhir (default 20 baris)
 bqckup history list
 bqckup history list --site web --limit 10
+bqckup history list --site web --limit 10 --details
 ```
 
 Output teks `history list` berbentuk tabel dan merangkum status, site, waktu mulai
-lokal beserta zona waktunya, durasi, jumlah dan ukuran artifact, serta run ID. Run yang gagal juga
-menampilkan kategori dan pesan error yang sudah disanitasi setelah tabel.
+lokal beserta zona waktunya, durasi, jumlah artifact logis, jumlah destination,
+ukuran logis, serta run ID. Artifact yang sama tidak dihitung ulang hanya karena
+dikirim ke beberapa destination. Run yang gagal atau dibatalkan menampilkan
+kategori dan pesan error tereduksi yang dikaitkan dengan run ID.
 
 ```text
-STATUS   SITE  STARTED                  DURATION  ARTIFACTS  SIZE      RUN ID
-SUCCESS  web   23 Aug 2026, 20:56 WITA  1.25s     2          10.4 MiB  <run-id>
+STATUS   SITE  STARTED                  DURATION  ARTIFACTS  DESTINATIONS  LOGICAL SIZE  RUN ID
+SUCCESS  web   23 Aug 2026, 20:56 WITA  1.25s     2          2             10.4 MiB      <run-id>
 
-1 run, 2 artifacts, 10.4 MiB total
+1 run, 2 logical artifacts, 2 destinations, 10.4 MiB logical total
 ```
+
+Flag `--details` menambahkan tabel per run dengan source kind/name,
+destination, status artifact, ukuran, dan object key. Tanpa flag ini, rincian
+tersebut tidak ditampilkan. Jika `--output json` dipakai, `--details` tidak
+mengubah data history mentah maupun struktur JSON.
 
 Output `backup run` sukses:
 
