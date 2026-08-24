@@ -40,6 +40,25 @@ func TestValidateAcceptsLocalFileBackup(t *testing.T) {
 	require.NoError(t, cfg.Validate())
 }
 
+func TestValidateAcceptsExcludePatterns(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.Sites[0].BackupMode = "incremental"
+	cfg.Sites[0].Incremental.PasswordEnv = "RESTIC_PASSWORD"
+	cfg.Sites[0].Sources.Files.Exclude = []string{"*.tmp", "cache/**"}
+	require.NoError(t, cfg.Validate())
+}
+
+func TestValidateRejectsMalformedExcludePattern(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.Sites[0].BackupMode = "incremental"
+	cfg.Sites[0].Incremental.PasswordEnv = "RESTIC_PASSWORD"
+	cfg.Sites[0].Sources.Files.Exclude = []string{"["}
+	err := cfg.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "sources.files.exclude[0]")
+	assert.Contains(t, err.Error(), "invalid pattern")
+}
+
 func validConfig(t *testing.T) Config {
 	t.Helper()
 	root := t.TempDir()

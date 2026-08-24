@@ -18,13 +18,6 @@ const (
 	ArtifactFailed ArtifactStatus = "failed"
 )
 
-type SchemaMigration struct {
-	Version   int       `gorm:"primaryKey;autoIncrement:false"`
-	AppliedAt time.Time `gorm:"not null"`
-}
-
-func (SchemaMigration) TableName() string { return "schema_migrations" }
-
 type BackupRun struct {
 	ID             string     `gorm:"type:text;primaryKey" json:"id"`
 	SiteName       string     `gorm:"type:text;index;not null" json:"site_name"`

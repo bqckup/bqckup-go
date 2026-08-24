@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bqckup/bqckup-go/internal/ctxcopy"
 	"github.com/bqckup/bqckup-go/internal/storage"
 	"golang.org/x/sys/unix"
 )
@@ -82,7 +83,7 @@ func (s *Store) Put(ctx context.Context, artifact storage.Artifact, key string) 
 	}
 	defer source.Close()
 	hash := sha256.New()
-	size, err := copyWithContext(ctx, io.MultiWriter(staging, hash), source)
+	size, err := ctxcopy.Copy(ctx, io.MultiWriter(staging, hash), source)
 	if err != nil {
 		return stored, err
 	}
@@ -171,33 +172,6 @@ func (s *Store) resolve(key string) (string, error) {
 		return "", fmt.Errorf("storage key %q escapes its root", key)
 	}
 	return resolved, nil
-}
-
-func copyWithContext(ctx context.Context, destination io.Writer, source io.Reader) (int64, error) {
-	buffer := make([]byte, 128*1024)
-	var written int64
-	for {
-		if err := ctx.Err(); err != nil {
-			return written, err
-		}
-		read, readErr := source.Read(buffer)
-		if read > 0 {
-			count, writeErr := destination.Write(buffer[:read])
-			written += int64(count)
-			if writeErr != nil {
-				return written, fmt.Errorf("write storage staging file: %w", writeErr)
-			}
-			if count != read {
-				return written, io.ErrShortWrite
-			}
-		}
-		if errors.Is(readErr, io.EOF) {
-			return written, nil
-		}
-		if readErr != nil {
-			return written, fmt.Errorf("read artifact: %w", readErr)
-		}
-	}
 }
 
 func syncDirectory(directory string) error {

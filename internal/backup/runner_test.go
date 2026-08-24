@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bqckup/bqckup-go/internal/backup/restic"
 	"github.com/bqckup/bqckup-go/internal/config"
 	"github.com/bqckup/bqckup-go/internal/history"
 	"github.com/bqckup/bqckup-go/internal/storage"
@@ -26,7 +27,7 @@ func TestRunnerCompletesBackupLifecycle(t *testing.T) {
 	assert.Equal(t, StatusSuccess, result.Status)
 	assert.Equal(t, history.StatusSuccess, deps.repository.finishedStatus)
 	require.Len(t, deps.repository.artifacts, 1)
-	assert.Equal(t, "bqckup/example/2026-07-23T03-45-00Z/files.tar.gz", deps.repository.artifacts[0].ObjectKey)
+	assert.Equal(t, "bqckup/example/2026-07-23T03-45-00.000000000Z/files.tar.gz", deps.repository.artifacts[0].ObjectKey)
 	assert.Equal(t, 1, deps.retainer.calls)
 	assert.Equal(t, 1, deps.lock.unlockCalls)
 	_, statErr := os.Stat(deps.archiver.workspace)
@@ -157,8 +158,8 @@ func TestRunnerExportsEnabledDatabasesToEveryDestination(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, StatusSuccess, result.Status)
 	assert.Len(t, store.keys, 3)
-	assert.Contains(t, store.keys, "bqckup/example/2026-07-23T03-45-00Z/databases/application-mysql.sql.gz")
-	assert.Contains(t, store.keys, "bqckup/example/2026-07-23T03-45-00Z/databases/application-postgres.sql.gz")
+	assert.Contains(t, store.keys, "bqckup/example/2026-07-23T03-45-00.000000000Z/databases/application-mysql.sql.gz")
+	assert.Contains(t, store.keys, "bqckup/example/2026-07-23T03-45-00.000000000Z/databases/application-postgres.sql.gz")
 	assert.Len(t, deps.repository.artifacts, 3)
 }
 
@@ -183,24 +184,35 @@ func TestRunnerDatabaseExporterFailurePreventsRetention(t *testing.T) {
 type dependencyFakes struct {
 	repository        *fakeRepository
 	archiver          *fakeArchiver
+	incremental       *fakeIncrementalEngine
 	stores            map[string]storage.Store
+	storages          map[string]config.Storage
 	retainer          *fakeRetainer
 	lock              *fakeLocker
 	clock             fakeClock
 	tempRoot          string
 	databaseExporters map[string]Exporter
+	envLookup         func(string) (string, bool)
 }
 
 func successfulDependencies(t *testing.T) *dependencyFakes {
 	t.Helper()
 	return &dependencyFakes{
-		repository: &fakeRepository{},
-		archiver:   &fakeArchiver{},
-		stores:     map[string]storage.Store{"local-primary": &fakeStore{}},
-		retainer:   &fakeRetainer{},
-		lock:       &fakeLocker{acquired: true},
-		clock:      fakeClock{now: time.Date(2026, 7, 23, 3, 45, 0, 0, time.UTC)},
-		tempRoot:   t.TempDir(),
+		repository:  &fakeRepository{},
+		archiver:    &fakeArchiver{},
+		incremental: &fakeIncrementalEngine{summary: restic.SnapshotSummary{SnapshotID: "snap-001", DataAdded: 2048}},
+		stores:      map[string]storage.Store{"local-primary": &fakeStore{}},
+		storages:    map[string]config.Storage{"local-primary": {Type: "local", Directory: "/var/backups/bqckup"}},
+		retainer:    &fakeRetainer{},
+		lock:        &fakeLocker{acquired: true},
+		clock:       fakeClock{now: time.Date(2026, 7, 23, 3, 45, 0, 0, time.UTC)},
+		tempRoot:    t.TempDir(),
+		envLookup: func(key string) (string, bool) {
+			if key == "RESTIC_PASSWORD" {
+				return "test-secret-password", true
+			}
+			return "", false
+		},
 	}
 }
 
@@ -208,12 +220,15 @@ func (d *dependencyFakes) dependencies() Dependencies {
 	return Dependencies{
 		Repository:         d.repository,
 		Archiver:           d.archiver,
+		IncrementalEngine:  d.incremental,
 		Stores:             d.stores,
+		Storages:           d.storages,
 		Retainer:           d.retainer,
 		Locker:             d.lock,
 		Clock:              d.clock,
 		TemporaryDirectory: d.tempRoot,
 		DatabaseExporters:  d.databaseExporters,
+		EnvLookup:          d.envLookup,
 	}
 }
 
@@ -234,6 +249,7 @@ type fakeRepository struct {
 	artifacts      []history.Artifact
 	lastSuccessful *history.BackupRun
 	finishedStatus history.RunStatus
+	finishCtxErr   error
 	errorCategory  string
 	errorMessage   string
 	createErr      error
@@ -251,9 +267,10 @@ func (f *fakeRepository) CreateRun(_ context.Context, run *history.BackupRun) er
 	return nil
 }
 
-func (f *fakeRepository) FinishRun(_ context.Context, _ string, status history.RunStatus, _ time.Time, category, message string) error {
+func (f *fakeRepository) FinishRun(ctx context.Context, _ string, status history.RunStatus, _ time.Time, category, message string) error {
 	f.finishCalls++
 	f.finishedStatus = status
+	f.finishCtxErr = ctx.Err()
 	f.errorCategory = category
 	f.errorMessage = message
 	return f.finishErr
@@ -347,3 +364,134 @@ func (f *fakeLocker) TryLock(context.Context, string) (func() error, bool, error
 type fakeClock struct{ now time.Time }
 
 func (f fakeClock) Now() time.Time { return f.now }
+
+type fakeIncrementalEngine struct {
+	ensureCalls    int
+	ensureErr      error
+	backupCalls    int
+	backupErr      error
+	retentionCalls int
+	retentionErr   error
+	summary        restic.SnapshotSummary
+	lastSpec       restic.BackupSpec
+	lastRepo       restic.RepoConfig
+}
+
+func (f *fakeIncrementalEngine) EnsureRepository(_ context.Context, repo restic.RepoConfig) error {
+	f.ensureCalls++
+	f.lastRepo = repo
+	return f.ensureErr
+}
+
+func (f *fakeIncrementalEngine) BackupFiles(_ context.Context, repo restic.RepoConfig, spec restic.BackupSpec) (restic.SnapshotSummary, error) {
+	f.backupCalls++
+	f.lastRepo = repo
+	f.lastSpec = spec
+	if f.backupErr != nil {
+		return restic.SnapshotSummary{}, f.backupErr
+	}
+	return f.summary, nil
+}
+
+func (f *fakeIncrementalEngine) ApplyRetention(_ context.Context, repo restic.RepoConfig, _ int, _ string) (int64, error) {
+	f.retentionCalls++
+	f.lastRepo = repo
+	return 0, f.retentionErr
+}
+
+func (f *fakeIncrementalEngine) Unlock(_ context.Context, _ restic.RepoConfig) error {
+	return nil
+}
+
+func TestRunnerIncrementalBackupSuccess(t *testing.T) {
+	deps := successfulDependencies(t)
+	runner := NewRunner(deps.dependencies())
+
+	site := validSite()
+	site.BackupMode = "incremental"
+	site.Incremental = config.Incremental{
+		PasswordEnv: "RESTIC_PASSWORD",
+	}
+
+	result, err := runner.Run(context.Background(), site, false)
+	require.NoError(t, err)
+	assert.Equal(t, StatusSuccess, result.Status)
+	assert.Equal(t, 1, deps.incremental.ensureCalls)
+	assert.Equal(t, 1, deps.incremental.backupCalls)
+	assert.Equal(t, 1, deps.incremental.retentionCalls)
+	assert.Equal(t, 0, deps.archiver.calls) // classic archiver not called
+
+	require.Len(t, deps.repository.artifacts, 1)
+	assert.Equal(t, "snap-001", deps.repository.artifacts[0].ObjectKey)
+	assert.Equal(t, int64(2048), deps.repository.artifacts[0].Size)
+}
+
+func TestRunnerIncrementalBackupMissingPasswordEnv(t *testing.T) {
+	deps := successfulDependencies(t)
+	deps.envLookup = func(string) (string, bool) { return "", false }
+	runner := NewRunner(deps.dependencies())
+
+	site := validSite()
+	site.BackupMode = "incremental"
+	site.Incremental = config.Incremental{
+		PasswordEnv: "UNSET_VAR",
+	}
+
+	result, err := runner.Run(context.Background(), site, false)
+	require.Error(t, err)
+	assert.Equal(t, StatusFailed, result.Status)
+	assert.Equal(t, 0, deps.incremental.backupCalls)
+	assert.Equal(t, 0, deps.incremental.retentionCalls)
+}
+
+func TestRunnerIncrementalBackupFailureDoesNotRetain(t *testing.T) {
+	deps := successfulDependencies(t)
+	deps.incremental.backupErr = errors.New("restic failed to snapshot")
+	runner := NewRunner(deps.dependencies())
+
+	site := validSite()
+	site.BackupMode = "incremental"
+	site.Incremental = config.Incremental{
+		PasswordEnv: "RESTIC_PASSWORD",
+	}
+
+	result, err := runner.Run(context.Background(), site, false)
+	require.Error(t, err)
+	assert.Equal(t, StatusFailed, result.Status)
+	assert.Equal(t, 1, deps.incremental.backupCalls)
+	assert.Equal(t, 0, deps.incremental.retentionCalls) // retention must NOT run
+}
+
+// cancelAfterPutStore cancels the shared context right after a successful
+// Put, simulating a cancellation arriving just after the last storage
+// write of an otherwise successful run.
+type cancelAfterPutStore struct {
+	storage.Store
+	cancel context.CancelFunc
+}
+
+func (s *cancelAfterPutStore) Put(ctx context.Context, artifact storage.Artifact, key string) (storage.StoredArtifact, error) {
+	stored, err := s.Store.Put(ctx, artifact, key)
+	if err != nil {
+		return storage.StoredArtifact{}, err
+	}
+	s.cancel()
+	return stored, nil
+}
+
+// TestRunnerSuccessFinishRunSurvivesLateCancellation: a cancellation that
+// arrives after the last storage write must not abort the success-path
+// FinishRun (the failure path already uses context.WithoutCancel; the
+// success path must too), or the run stays in history status "running"
+// forever.
+func TestRunnerSuccessFinishRunSurvivesLateCancellation(t *testing.T) {
+	deps := successfulDependencies(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	deps.stores["local-primary"] = &cancelAfterPutStore{Store: deps.stores["local-primary"], cancel: cancel}
+
+	result, err := NewRunner(deps.dependencies()).Run(ctx, validSite(), false)
+	require.NoError(t, err)
+	assert.Equal(t, StatusSuccess, result.Status)
+	assert.Equal(t, history.StatusSuccess, deps.repository.finishedStatus)
+	assert.NoError(t, deps.repository.finishCtxErr, "FinishRun must not observe the cancelled context")
+}

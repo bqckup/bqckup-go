@@ -5,10 +5,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"io"
 	"os"
 	"path"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -19,6 +17,9 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/smithy-go"
+	"github.com/bqckup/bqckup-go/internal/apperror"
+	"github.com/bqckup/bqckup-go/internal/config"
+	"github.com/bqckup/bqckup-go/internal/ctxcopy"
 	"github.com/bqckup/bqckup-go/internal/storage"
 )
 
@@ -66,7 +67,7 @@ func (s *Store) Put(ctx context.Context, artifact storage.Artifact, key string) 
 
 	file, err := os.Open(artifact.Path)
 	if err != nil {
-		return storage.StoredArtifact{}, hiddenError("could not open backup artifact", err)
+		return storage.StoredArtifact{}, apperror.Hide("could not open backup artifact", err)
 	}
 	defer file.Close()
 	_, err = s.uploader.UploadObject(ctx, &transfermanager.UploadObjectInput{
@@ -85,9 +86,9 @@ func (s *Store) Put(ctx context.Context, artifact storage.Artifact, key string) 
 			return storage.StoredArtifact{}, err
 		}
 		if isCollision(err) {
-			return storage.StoredArtifact{}, hiddenError(ErrObjectExists.Error(), ErrObjectExists)
+			return storage.StoredArtifact{}, apperror.Hide(ErrObjectExists.Error(), ErrObjectExists)
 		}
-		return storage.StoredArtifact{}, hiddenError("S3-compatible upload failed", err)
+		return storage.StoredArtifact{}, apperror.Hide("S3-compatible upload failed", err)
 	}
 
 	head, err := s.client.HeadObject(ctx, &s3.HeadObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(finalKey)})
@@ -99,11 +100,11 @@ func (s *Store) Put(ctx context.Context, artifact storage.Artifact, key string) 
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			verificationErr = err
 		} else {
-			verificationErr = hiddenError("remote artifact verification failed", err)
+			verificationErr = apperror.Hide("remote artifact verification failed", err)
 		}
 		_, cleanupErr := s.client.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(finalKey)})
 		if cleanupErr != nil {
-			verificationErr = hiddenError(verificationErr.Error(), errors.Join(verificationErr, cleanupErr))
+			verificationErr = apperror.Hide(verificationErr.Error(), errors.Join(verificationErr, cleanupErr))
 		}
 		return storage.StoredArtifact{}, verificationErr
 	}
@@ -120,11 +121,11 @@ func inspectArtifact(ctx context.Context, artifact storage.Artifact) (string, in
 	}
 	file, err := os.Open(artifact.Path)
 	if err != nil {
-		return "", 0, hiddenError("could not inspect backup artifact", err)
+		return "", 0, apperror.Hide("could not inspect backup artifact", err)
 	}
 	defer file.Close()
 	hash := sha256.New()
-	size, err := copyWithContext(ctx, hash, file)
+	size, err := ctxcopy.Copy(ctx, hash, file)
 	if err != nil {
 		return "", size, err
 	}
@@ -133,33 +134,6 @@ func inspectArtifact(ctx context.Context, artifact storage.Artifact) (string, in
 		return "", size, errors.New("local artifact verification failed")
 	}
 	return checksum, size, nil
-}
-
-func copyWithContext(ctx context.Context, destination io.Writer, source io.Reader) (int64, error) {
-	buffer := make([]byte, 128*1024)
-	var written int64
-	for {
-		if err := ctx.Err(); err != nil {
-			return written, err
-		}
-		read, readErr := source.Read(buffer)
-		if read > 0 {
-			count, writeErr := destination.Write(buffer[:read])
-			written += int64(count)
-			if writeErr != nil {
-				return written, hiddenError("could not inspect backup artifact", writeErr)
-			}
-			if count != read {
-				return written, io.ErrShortWrite
-			}
-		}
-		if errors.Is(readErr, io.EOF) {
-			return written, nil
-		}
-		if readErr != nil {
-			return written, hiddenError("could not inspect backup artifact", readErr)
-		}
-	}
 }
 
 func verifyRemote(output *s3.HeadObjectOutput, size int64, checksum string) error {
@@ -193,21 +167,7 @@ func isCollision(err error) bool {
 	return errors.As(err, &statusError) && statusError.HTTPStatusCode() == 412
 }
 
-type redactedError struct {
-	message string
-	cause   error
-}
-
-func (e *redactedError) Error() string { return e.message }
-func (e *redactedError) Unwrap() error { return e.cause }
-
-func hiddenError(message string, cause error) error {
-	return &redactedError{message: message, cause: cause}
-}
-
 var _ storage.Store = (*Store)(nil)
-
-var safeSiteName = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
 
 func (s *Store) Delete(ctx context.Context, backupSetPrefix string) error {
 	if err := ctx.Err(); err != nil {
@@ -328,7 +288,7 @@ func validateSitePrefix(sitePrefix string) error {
 		return err
 	}
 	parts := strings.Split(sitePrefix, "/")
-	if len(parts) != 2 || parts[0] != "bqckup" || !safeSiteName.MatchString(parts[1]) {
+	if len(parts) != 2 || parts[0] != "bqckup" || !config.SafeName.MatchString(parts[1]) {
 		return errors.New("invalid backup site prefix")
 	}
 	return nil
@@ -339,7 +299,7 @@ func validateBackupSetPrefix(prefix string) error {
 		return err
 	}
 	parts := strings.Split(prefix, "/")
-	if len(parts) != 3 || parts[0] != "bqckup" || !safeSiteName.MatchString(parts[1]) {
+	if len(parts) != 3 || parts[0] != "bqckup" || !config.SafeName.MatchString(parts[1]) {
 		return errors.New("invalid backup set prefix")
 	}
 	createdAt, err := time.Parse(storage.TimestampLayout, parts[2])
@@ -353,5 +313,5 @@ func remoteOperationError(message string, err error) error {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return err
 	}
-	return hiddenError(message, err)
+	return apperror.Hide(message, err)
 }

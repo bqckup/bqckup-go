@@ -22,6 +22,24 @@ BQCKUP_S3_INTEGRATION_STORAGE=testing \
 go test -tags=integration ./internal/storage/s3compat -run TestDisposableS3CompatibleStorage -count=1 -v
 ```
 
+The native incremental engine has a separate end-to-end S3-compatible smoke
+test. It initializes a unique Restic-format repository, creates two dummy
+snapshots with excludes, verifies listing, applies retention, and removes the
+repository afterward:
+
+```bash
+BQCKUP_S3_INTEGRATION_CONFIG=/private/config \
+BQCKUP_S3_INTEGRATION_STORAGE=testing \
+go test -tags=integration ./internal/engine/restic/facade \
+  -run TestDisposableIncrementalBackupS3Compatible -count=1 -v
+```
+
+Set `BQCKUP_S3_INTEGRATION_KEEP=1` only when the isolated dummy repository
+should remain in the bucket for manual inspection. In that case,
+`BQCKUP_RESTIC_INTEGRATION_PASSWORD` is also required so the retained
+repository remains usable. The test logs its unique, non-secret object prefix.
+Never place storage credentials directly in a test command.
+
 ## Required checks
 
 ```bash

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/bqckup/bqckup-go/internal/apperror"
+	"github.com/bqckup/bqckup-go/internal/backup/restic"
 	"github.com/bqckup/bqckup-go/internal/clock"
 	"github.com/bqckup/bqckup-go/internal/config"
 	"github.com/bqckup/bqckup-go/internal/history"
@@ -39,6 +40,8 @@ type RunResult struct {
 	SkipReason SkipReason `json:"skip_reason,omitempty"`
 	StartedAt  time.Time  `json:"started_at,omitempty"`
 	FinishedAt time.Time  `json:"finished_at,omitempty"`
+	// ReclaimedBytes is the space freed by incremental retention (prune).
+	ReclaimedBytes int64 `json:"reclaimed_bytes,omitempty"`
 }
 
 type Archiver interface {
@@ -63,17 +66,55 @@ type Locker interface {
 type Dependencies struct {
 	Repository         RunRepository
 	Archiver           Archiver
+	IncrementalEngine  IncrementalEngine
 	DatabaseExporters  map[string]Exporter
 	Stores             map[string]storage.Store
+	Storages           map[string]config.Storage
 	Retainer           Retainer
 	Locker             Locker
 	Clock              clock.Clock
 	TemporaryDirectory string
+	EnvLookup          func(string) (string, bool)
 }
 
 type Runner struct{ dependencies Dependencies }
 
 func NewRunner(dependencies Dependencies) *Runner { return &Runner{dependencies: dependencies} }
+
+func (r *Runner) lookupEnv(key string) (string, bool) {
+	if r.dependencies.EnvLookup != nil {
+		return r.dependencies.EnvLookup(key)
+	}
+	return os.LookupEnv(key)
+}
+
+// buildRepo constructs the engine repository configuration for one
+// destination. requirePassword mirrors the run-time rule that the
+// repository password environment variable must be set.
+func (r *Runner) buildRepo(site config.Site, storageConfig config.Storage, requirePassword bool) (restic.RepoConfig, error) {
+	repoURL, err := restic.RepositoryURL(storageConfig, site.Name)
+	if err != nil {
+		return restic.RepoConfig{}, err
+	}
+	password, ok := r.lookupEnv(site.Incremental.PasswordEnv)
+	if requirePassword && (!ok || password == "") {
+		return restic.RepoConfig{}, apperror.Wrap(apperror.CategoryPreflight, fmt.Sprintf("environment variable %q for incremental repository password is not set or empty", site.Incremental.PasswordEnv), nil)
+	}
+	return restic.RepoConfig{
+		URL:             repoURL,
+		Password:        password,
+		AccessKeyID:     storageConfig.AccessKeyID,
+		SecretAccessKey: storageConfig.SecretAccessKey,
+		Region:          storageConfig.Region,
+		Endpoint:        storageConfig.Endpoint,
+		Bucket:          storageConfig.Bucket,
+		Prefix:          path.Join(storageConfig.Prefix, "restic", site.Name),
+	}, nil
+}
+
+// engineDetail surfaces an engine error's public text (engine errors are
+// redacted by contract, so this is safe to store and print).
+func engineDetail(err error) string { return err.Error() }
 
 func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result RunResult, returnedErr error) {
 	result.SiteName = site.Name
@@ -153,64 +194,136 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 		return result, operationErr
 	}
 
-	workspace, err := os.MkdirTemp(r.dependencies.TemporaryDirectory, site.Name+"-*")
-	if err != nil {
-		return fail(apperror.Wrap(apperror.CategoryExecution, "could not create a temporary backup workspace", err))
-	}
-	defer os.RemoveAll(workspace)
-
-	archive, err := r.dependencies.Archiver.Create(ctx, FileSource{
-		Include:        site.Sources.Files.Include,
-		Exclude:        site.Sources.Files.Exclude,
-		FollowSymlinks: site.Sources.Files.FollowSymlinks,
-	}, filepath.Join(workspace, "files.tar.gz"))
-	if err != nil {
-		return fail(apperror.Wrap(apperror.CategoryExecution, "could not create the file archive", err))
-	}
-
 	timestamp := now.Format(storage.TimestampLayout)
 	sitePrefix := path.Join("bqckup", site.Name)
-	objectKey := path.Join(sitePrefix, timestamp, "files.tar.gz")
-	if err := r.storeArtifact(ctx, run.ID, archive, objectKey, site.Destinations); err != nil {
-		return fail(err)
-	}
 
-	for _, source := range site.Sources.Databases {
-		if !source.Enabled {
-			continue
+	if site.BackupMode == "incremental" {
+		engine := r.dependencies.IncrementalEngine
+		if engine == nil {
+			return fail(apperror.Wrap(apperror.CategoryInternal, "incremental backup engine is unavailable", nil))
 		}
-		exporter, ok := r.dependencies.DatabaseExporters[source.Engine]
-		if !ok || exporter == nil {
-			return fail(apperror.Wrap(apperror.CategoryInternal, "a configured database exporter is unavailable", nil))
+		password, ok := r.lookupEnv(site.Incremental.PasswordEnv)
+		if !ok || password == "" {
+			return fail(apperror.Wrap(apperror.CategoryPreflight, fmt.Sprintf("environment variable %q for incremental repository password is not set or empty", site.Incremental.PasswordEnv), nil))
 		}
-		destination := filepath.Join(workspace, "databases", source.Name+".sql.gz")
-		if err := os.MkdirAll(filepath.Dir(destination), 0o700); err != nil {
-			return fail(apperror.Wrap(apperror.CategoryExecution, "could not prepare database export workspace", err))
-		}
-		databaseArtifact, exportErr := exporter.Export(ctx, source, destination)
-		databaseKey := path.Join(sitePrefix, timestamp, "databases", source.Name+".sql.gz")
-		if exportErr != nil {
-			recordErr := r.recordFailedArtifact(ctx, run.ID, Artifact{SourceKind: "database", SourceName: source.Name}, databaseKey, site.Destinations, "could not export database")
-			operationErr := apperror.Wrap(apperror.CategoryExecution, "could not export database", exportErr)
-			if recordErr != nil {
-				operationErr = errors.Join(operationErr, recordErr)
+		for _, destination := range site.Destinations {
+			storageConfig, ok := r.dependencies.Storages[destination.Storage]
+			if !ok {
+				return fail(apperror.Wrap(apperror.CategoryInternal, fmt.Sprintf("storage configuration %q is unavailable", destination.Storage), nil))
 			}
-			return fail(operationErr)
+			repo, err := r.buildRepo(site, storageConfig, true)
+			if err != nil {
+				return fail(err)
+			}
+			if err := engine.EnsureRepository(ctx, repo); err != nil {
+				return fail(apperror.Wrap(apperror.CategoryStorage, "could not ensure incremental repository: "+engineDetail(err), err))
+			}
+			spec := restic.BackupSpec{
+				SiteName: site.Name,
+				Include:  []string(site.Sources.Files.Include),
+				Exclude:  []string(site.Sources.Files.Exclude),
+				Tags:     []string{"bqckup", "site:" + site.Name},
+			}
+			summary, err := engine.BackupFiles(ctx, repo, spec)
+			if err != nil {
+				return fail(apperror.Wrap(apperror.CategoryExecution, "could not create incremental file backup: "+engineDetail(err), err))
+			}
+			if err := r.dependencies.Repository.CreateArtifact(ctx, &history.Artifact{
+				RunID:       run.ID,
+				SourceKind:  "files",
+				SourceName:  "files",
+				Destination: destination.Storage,
+				ObjectKey:   summary.SnapshotID,
+				Size:        summary.DataAdded,
+				SHA256:      summary.SnapshotID,
+				Status:      history.ArtifactStored,
+			}); err != nil {
+				return fail(apperror.Wrap(apperror.CategoryPersistence, "could not record incremental backup artifact", err))
+			}
 		}
-		if err := r.storeArtifact(ctx, run.ID, databaseArtifact, databaseKey, site.Destinations); err != nil {
+	} else {
+		workspace, err := os.MkdirTemp(r.dependencies.TemporaryDirectory, site.Name+"-*")
+		if err != nil {
+			return fail(apperror.Wrap(apperror.CategoryExecution, "could not create a temporary backup workspace", err))
+		}
+		defer os.RemoveAll(workspace)
+
+		archive, err := r.dependencies.Archiver.Create(ctx, FileSource{
+			Include:        []string(site.Sources.Files.Include),
+			Exclude:        []string(site.Sources.Files.Exclude),
+			FollowSymlinks: site.Sources.Files.FollowSymlinks,
+		}, filepath.Join(workspace, "files.tar.gz"))
+		if err != nil {
+			return fail(apperror.Wrap(apperror.CategoryExecution, "could not create the file archive", err))
+		}
+
+		objectKey := path.Join(sitePrefix, timestamp, "files.tar.gz")
+		if err := r.storeArtifact(ctx, run.ID, archive, objectKey, site.Destinations); err != nil {
 			return fail(err)
 		}
 	}
 
+	if len(site.Sources.Databases) > 0 {
+		workspace, err := os.MkdirTemp(r.dependencies.TemporaryDirectory, site.Name+"-db-*")
+		if err != nil {
+			return fail(apperror.Wrap(apperror.CategoryExecution, "could not create a temporary database workspace", err))
+		}
+		defer os.RemoveAll(workspace)
+
+		for _, source := range site.Sources.Databases {
+			if !source.Enabled {
+				continue
+			}
+			exporter, ok := r.dependencies.DatabaseExporters[source.Engine]
+			if !ok || exporter == nil {
+				return fail(apperror.Wrap(apperror.CategoryInternal, "a configured database exporter is unavailable", nil))
+			}
+			destination := filepath.Join(workspace, "databases", source.Name+".sql.gz")
+			if err := os.MkdirAll(filepath.Dir(destination), 0o700); err != nil {
+				return fail(apperror.Wrap(apperror.CategoryExecution, "could not prepare database export workspace", err))
+			}
+			databaseArtifact, exportErr := exporter.Export(ctx, source, destination)
+			databaseKey := path.Join(sitePrefix, timestamp, "databases", source.Name+".sql.gz")
+			if exportErr != nil {
+				recordErr := r.recordFailedArtifact(ctx, run.ID, Artifact{SourceKind: "database", SourceName: source.Name}, databaseKey, site.Destinations, "could not export database")
+				operationErr := apperror.Wrap(apperror.CategoryExecution, "could not export database", exportErr)
+				if recordErr != nil {
+					operationErr = errors.Join(operationErr, recordErr)
+				}
+				return fail(operationErr)
+			}
+			if err := r.storeArtifact(ctx, run.ID, databaseArtifact, databaseKey, site.Destinations); err != nil {
+				return fail(err)
+			}
+		}
+	}
+
 	for _, destination := range site.Destinations {
-		store := r.dependencies.Stores[destination.Storage]
-		if err := r.dependencies.Retainer.Apply(ctx, store, sitePrefix, site.Policy.KeepLast); err != nil {
-			return fail(apperror.Wrap(apperror.CategoryStorage, "backup completed but retention could not be applied", err))
+		if site.BackupMode == "incremental" {
+			engine := r.dependencies.IncrementalEngine
+			storageConfig, ok := r.dependencies.Storages[destination.Storage]
+			if !ok {
+				return fail(apperror.Wrap(apperror.CategoryInternal, fmt.Sprintf("storage configuration %q is unavailable", destination.Storage), nil))
+			}
+			repo, err := r.buildRepo(site, storageConfig, false)
+			if err != nil {
+				return fail(err)
+			}
+			reclaimed, err := engine.ApplyRetention(ctx, repo, site.Policy.KeepLast, site.Name)
+			if err != nil {
+				return fail(apperror.Wrap(apperror.CategoryStorage, "backup completed but incremental retention could not be applied: "+engineDetail(err), err))
+			}
+			result.ReclaimedBytes += reclaimed
+		} else {
+			store := r.dependencies.Stores[destination.Storage]
+			if err := r.dependencies.Retainer.Apply(ctx, store, sitePrefix, site.Policy.KeepLast); err != nil {
+				return fail(apperror.Wrap(apperror.CategoryStorage, "backup completed but retention could not be applied", err))
+			}
 		}
 	}
 
 	finished := r.dependencies.Clock.Now().UTC()
-	if err := r.dependencies.Repository.FinishRun(ctx, run.ID, history.StatusSuccess, finished, "", ""); err != nil {
+	if err := r.dependencies.Repository.FinishRun(context.WithoutCancel(ctx), run.ID, history.StatusSuccess, finished, "", ""); err != nil {
 		result.Status = StatusFailed
 		result.FinishedAt = finished
 		return result, apperror.Wrap(apperror.CategoryPersistence, "could not finalize backup history", err)
@@ -218,6 +331,32 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 	result.Status = StatusSuccess
 	result.FinishedAt = finished
 	return result, nil
+}
+
+// Unlock removes stale repository locks for every destination of a site
+// (restic unlock semantics: stale locks only).
+func (r *Runner) Unlock(ctx context.Context, site config.Site) error {
+	if site.BackupMode != "incremental" {
+		return apperror.Wrap(apperror.CategoryConfig, "unlock applies to incremental sites only", nil)
+	}
+	engine := r.dependencies.IncrementalEngine
+	if engine == nil {
+		return apperror.Wrap(apperror.CategoryInternal, "incremental backup engine is unavailable", nil)
+	}
+	for _, destination := range site.Destinations {
+		storageConfig, ok := r.dependencies.Storages[destination.Storage]
+		if !ok {
+			return apperror.Wrap(apperror.CategoryInternal, fmt.Sprintf("storage configuration %q is unavailable", destination.Storage), nil)
+		}
+		repo, err := r.buildRepo(site, storageConfig, true)
+		if err != nil {
+			return apperror.Wrap(apperror.CategoryPreflight, "could not build repository configuration", err)
+		}
+		if err := engine.Unlock(ctx, repo); err != nil {
+			return apperror.Wrap(apperror.CategoryStorage, "could not unlock the incremental repository: "+engineDetail(err), err)
+		}
+	}
+	return nil
 }
 
 func (r *Runner) storeArtifact(ctx context.Context, runID string, artifact Artifact, objectKey string, destinations []config.Destination) error {

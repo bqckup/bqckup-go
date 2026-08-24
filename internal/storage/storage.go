@@ -6,7 +6,10 @@ import (
 )
 
 // TimestampLayout is the portable UTC directory name used for backup sets.
-const TimestampLayout = "2006-01-02T15-04-05Z"
+// Nanosecond resolution: two runs in the same second (--force twice in a
+// row, cron and a manual run overlapping) must never collide on the same
+// object key — the stores are write-once and reject overwrites.
+const TimestampLayout = "2006-01-02T15-04-05.000000000Z"
 
 type StoredArtifact struct {
 	Key    string

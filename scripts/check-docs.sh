@@ -42,6 +42,13 @@ if ! grep -qs '^app:' configs/bqckup.yaml || ! grep -qs '^site:' configs/sites/*
     failed=1
 fi
 
+if grep -nE '^[[:space:]]*version:[[:space:]]*2[[:space:]]*$' \
+    USER-GUIDE.md docs/configuration-v2.md docs/guides/incremental-backup-step-by-step.md \
+    configs/bqckup.yaml configs/sites/*.yaml; then
+    echo "active YAML examples must omit the implicit version field" >&2
+    failed=1
+fi
+
 if grep -RniE '^[[:space:]]*(password|access_key|secret_key):[[:space:]]*[^[:space:]]' configs; then
     echo "example configuration contains an inline credential" >&2
     failed=1
@@ -52,13 +59,13 @@ if grep -RniE '^[[:space:]]*(access_key_id|secret_access_key):[[:space:]]*[^[:sp
     failed=1
 fi
 
-if find internal cmd -name '*.go' -type f -exec grep -liE 'rustic|restic' {} + | grep -q .; then
-    echo "Rustic or Restic implementation is outside the foundation scope" >&2
+if find internal cmd -name '*.go' -type f -exec grep -liE 'rustic' {} + | grep -q .; then
+    echo "Rustic implementation is outside the scope" >&2
     failed=1
 fi
 
-if ! grep -Fq 'Restic is not part of the foundation' docs/intern-backlog.md; then
-    echo "intern backlog must state the Restic scope boundary" >&2
+if ! grep -Fq 'one in-tree pure-Go' docs/intern-backlog.md; then
+    echo "intern backlog must state the single-engine runtime boundary" >&2
     failed=1
 fi
 

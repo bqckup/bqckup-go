@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/bqckup/bqckup-go/internal/fileexclude"
 )
 
 const (
@@ -17,7 +19,12 @@ const (
 	defaultKeepLast        = 7
 )
 
-var safeName = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
+var (
+	// SafeName matches names safe to use as site names, storage names,
+	// and file-system path segments.
+	SafeName     = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
+	validEnvName = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
+)
 
 func (c Config) Validate() error {
 	if c.Version != SchemaVersion {
@@ -64,7 +71,7 @@ func (c Config) Validate() error {
 
 func validateStorage(name string, value Storage) error {
 	field := "storages." + name
-	if !safeName.MatchString(name) {
+	if !SafeName.MatchString(name) {
 		return validationError("config/storages.yaml", field, "name contains unsupported characters")
 	}
 	switch value.Type {
@@ -216,7 +223,7 @@ func (c Config) validateSite(site Site, seen map[string]struct{}) error {
 	if site.SchemaVersion != SchemaVersion {
 		return validationError(file, "version", "must equal %d", SchemaVersion)
 	}
-	if !safeName.MatchString(site.Name) {
+	if !SafeName.MatchString(site.Name) {
 		return validationError(file, baseField+".name", "contains unsupported characters")
 	}
 	if _, exists := seen[site.Name]; exists {
@@ -231,6 +238,17 @@ func (c Config) validateSite(site Site, seen map[string]struct{}) error {
 	if !site.Enabled {
 		return nil
 	}
+	if site.BackupMode != "" && site.BackupMode != "full" && site.BackupMode != "incremental" {
+		return validationError(file, baseField+".backup_mode", "must be 'full' or 'incremental'")
+	}
+	if site.BackupMode == "incremental" {
+		if site.Incremental.PasswordEnv == "" {
+			return validationError(file, baseField+".incremental.password_env", "is required")
+		}
+		if !validEnvName.MatchString(site.Incremental.PasswordEnv) {
+			return validationError(file, baseField+".incremental.password_env", "must be a valid environment variable name")
+		}
+	}
 	if len(site.Sources.Files.Include) == 0 {
 		return validationError(file, baseField+".sources.files.include", "at least one path is required")
 	}
@@ -240,8 +258,8 @@ func (c Config) validateSite(site Site, seen map[string]struct{}) error {
 		}
 	}
 	for index, exclude := range site.Sources.Files.Exclude {
-		if !filepath.IsAbs(exclude) {
-			return validationError(file, fmt.Sprintf("%s.sources.files.exclude[%d]", baseField, index), "must be an absolute path")
+		if err := fileexclude.Validate(exclude); err != nil {
+			return validationError(file, fmt.Sprintf("%s.sources.files.exclude[%d]", baseField, index), "invalid pattern: %v", err)
 		}
 	}
 	databaseNames := make(map[string]struct{}, len(site.Sources.Databases))
@@ -276,7 +294,7 @@ func (c Config) validateSite(site Site, seen map[string]struct{}) error {
 }
 
 func validateDatabaseSource(file, field string, source DatabaseSource) error {
-	if !safeName.MatchString(source.Name) {
+	if !SafeName.MatchString(source.Name) {
 		return validationError(file, field+".name", "must be a safe source name")
 	}
 	if source.Engine != "mysql" && source.Engine != "postgres" {

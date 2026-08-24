@@ -1,4 +1,6 @@
-package database
+// Package process runs external database-export commands such as
+// mysqldump and pg_dump.
+package process
 
 import (
 	"context"
@@ -7,6 +9,7 @@ import (
 	"os/exec"
 )
 
+// ProcessSpec describes one external command to run.
 type ProcessSpec struct {
 	Command string
 	Args    []string
@@ -15,6 +18,7 @@ type ProcessSpec struct {
 	Stderr  io.Writer
 }
 
+// ProcessRunner executes external commands.
 type ProcessRunner interface {
 	LookPath(command string) (string, error)
 	Run(ctx context.Context, spec ProcessSpec) error
@@ -22,6 +26,7 @@ type ProcessRunner interface {
 
 type osProcessRunner struct{}
 
+// NewProcessRunner returns the real OS-backed runner.
 func NewProcessRunner() ProcessRunner { return osProcessRunner{} }
 
 func (osProcessRunner) LookPath(command string) (string, error) {

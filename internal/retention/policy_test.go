@@ -13,13 +13,13 @@ import (
 
 func TestApplyKeepsNewestSuccessfulSets(t *testing.T) {
 	store := &fakeStore{sets: backupSets(
-		"2026-01-03T00-00-00Z",
-		"2026-01-01T00-00-00Z",
-		"2026-01-02T00-00-00Z",
+		"2026-01-03T00-00-00.000000000Z",
+		"2026-01-01T00-00-00.000000000Z",
+		"2026-01-02T00-00-00.000000000Z",
 	)}
 
 	require.NoError(t, Apply(context.Background(), store, "bqckup/site", 2))
-	assert.Equal(t, []string{"bqckup/site/2026-01-01T00-00-00Z"}, store.deleted)
+	assert.Equal(t, []string{"bqckup/site/2026-01-01T00-00-00.000000000Z"}, store.deleted)
 }
 
 func TestApplyRejectsInvalidKeepLast(t *testing.T) {
@@ -31,13 +31,13 @@ func TestApplyRejectsInvalidKeepLast(t *testing.T) {
 func TestApplyStopsAtFirstDeletionFailure(t *testing.T) {
 	deleteErr := errors.New("disk unavailable")
 	store := &fakeStore{
-		sets:      backupSets("2026-01-01T00-00-00Z", "2026-01-02T00-00-00Z", "2026-01-03T00-00-00Z"),
+		sets:      backupSets("2026-01-01T00-00-00.000000000Z", "2026-01-02T00-00-00.000000000Z", "2026-01-03T00-00-00.000000000Z"),
 		deleteErr: deleteErr,
 	}
 
 	err := Apply(context.Background(), store, "bqckup/site", 1)
 	require.ErrorIs(t, err, deleteErr)
-	assert.Equal(t, []string{"bqckup/site/2026-01-01T00-00-00Z"}, store.deleted)
+	assert.Equal(t, []string{"bqckup/site/2026-01-01T00-00-00.000000000Z"}, store.deleted)
 }
 
 type fakeStore struct {

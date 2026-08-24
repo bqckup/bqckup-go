@@ -66,11 +66,21 @@ func TestBackupRunAndHistoryListEndToEnd(t *testing.T) {
 
 	root, stdout, _ = commandForTest(t, "--config-dir", configDir, "--output", "json", "history", "list", "--site", "example", "--limit", "1")
 	require.NoError(t, root.Execute())
+	rawJSON := stdout.String()
 	var runs []history.BackupRun
-	require.NoError(t, json.Unmarshal(stdout.Bytes(), &runs))
+	require.NoError(t, json.Unmarshal([]byte(rawJSON), &runs))
 	require.Len(t, runs, 1)
 	assert.Equal(t, history.StatusSuccess, runs[0].Status)
 	assert.Len(t, runs[0].Artifacts, 1)
+
+	root, stdout, _ = commandForTest(t, "--config-dir", configDir, "--output", "json", "history", "list", "--details", "--site", "example", "--limit", "1")
+	require.NoError(t, root.Execute())
+	assert.JSONEq(t, rawJSON, stdout.String(), "--details must not change raw JSON history output")
+
+	root, stdout, _ = commandForTest(t, "--config-dir", configDir, "history", "list", "--details", "--site", "example", "--limit", "1")
+	require.NoError(t, root.Execute())
+	assert.Contains(t, stdout.String(), "Artifacts for run "+runs[0].ID)
+	assert.Contains(t, stdout.String(), runs[0].Artifacts[0].ObjectKey)
 }
 
 func TestExitCodeMapping(t *testing.T) {

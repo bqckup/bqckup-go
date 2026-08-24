@@ -6,13 +6,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sync"
 
+	"github.com/bqckup/bqckup-go/internal/config"
 	"golang.org/x/sys/unix"
 )
-
-var safeSiteName = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
 
 type Locker struct {
 	directory string
@@ -24,7 +22,7 @@ func (l *Locker) TryLock(ctx context.Context, site string) (func() error, bool, 
 	if err := ctx.Err(); err != nil {
 		return nil, false, err
 	}
-	if !safeSiteName.MatchString(site) {
+	if !config.SafeName.MatchString(site) {
 		return nil, false, fmt.Errorf("unsafe site lock name %q", site)
 	}
 	if err := os.MkdirAll(l.directory, 0o700); err != nil {

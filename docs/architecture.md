@@ -25,7 +25,9 @@ Dependencies point toward the use case. `backup.Runner` knows interfaces and dom
 3. Acquire a non-blocking cross-process lock for the site.
 4. Skip when the last success is inside `minimum_interval`, unless forced.
 5. Insert a `running` history record.
-6. Create an owner-only temporary workspace and `.tar.gz` file archive.
+6. `backup_mode: full` creates an owner-only temporary workspace and
+   `.tar.gz` file archive; `backup_mode: incremental` runs the built-in
+   pure-Go incremental engine (see below).
 7. Calculate SHA-256 and size for the file archive and each enabled database export.
 8. Store every artifact to every destination without overwriting; local uses atomic staging, while S3/R2 uses conditional transfer and metadata verification.
 9. Record each stored artifact.
@@ -35,17 +37,42 @@ Dependencies point toward the use case. `backup.Runner` knows interfaces and dom
 
 Multiple destinations have all-required semantics. A destination failure fails the run and prevents retention. Previously successful backup sets are not removed after a failed current run.
 
+## Incremental engine
+
+`backup_mode: incremental` always uses the in-process pure-Go engine in
+`internal/engine/restic/` (facade in `internal/engine/restic/facade/`). No
+external Restic binary is used at runtime. The engine serves local and S3/R2
+destinations and writes Restic repository format v2. Compatibility tests use
+the official Restic binary as a test oracle for `check`, `snapshots`, restore,
+and cross-tool locking; the binary is not part of production execution.
+
+Repositories in Restic format v1 are not supported. They must be migrated to
+format v2 before being configured in Bqckup.
+
+Retention (keep_last per site tag) forgets old snapshots and prunes
+unreachable pack data with a mark-and-sweep pass (no repack): the new
+index is written before any pack is deleted, so a crash at any point
+leaves `restic check` green. Restore is a future phase with an explicit
+destination and no silent overwrites.
+
 ## Boundaries
 
 - `internal/config`: one Viper instance per YAML file, exact typed unmarshalling, defaults, validation.
 - `internal/backup`: orchestration, file artifact domain types, status decisions.
 - `internal/backup/files`: tar/gzip filesystem adapter with explicit symlink behavior.
 - `internal/backup/database`: MySQL/PostgreSQL process exporters producing gzip-compressed, checksummed SQL artifacts.
+- `internal/engine/restic`: pure-Go Restic repository format v2 implementation (crypto, chunker, backend, pack, index, tree, snapshot, repository, archiver) and its facade. Zero `github.com/restic/*` imports.
 - `internal/storage`: adapter contract and portable object-key types.
 - `internal/storage/local`: path-safe, checksum-verified local writes and backup-set listing.
 - `internal/storage/s3compat`: shared S3/R2 verified uploads and prefix-scoped retention.
 - `internal/history`: GORM models, SQLite lifecycle, ordered recorded migrations, repository queries.
-- `internal/platform/lock`: Linux `flock` implementation.
+- `internal/platform/lock`: Linux `flock` implementation (site-level
+  mutual exclusion).
+- Repository-level locking for the builtin engine lives in
+  `internal/engine/restic/lock` (restic-compatible lock files: encrypted
+  blobs in `locks/`, 30-minute staleness, exclusive for backup/retention,
+  refresh every 5 minutes during long operations). `bqckup backup unlock
+  <site>` removes stale locks.
 - `internal/cli`: command parsing, presentation, and the single exit-code mapper.
 - `internal/app`: the only normal place that constructs concrete dependencies.
 
@@ -61,7 +88,11 @@ Artifact keys use:
 bqckup/<site>/<UTC timestamp>/<artifact name>
 ```
 
-The timestamp layout is `2006-01-02T15-04-05Z`. Names come from validated configuration, not raw runtime input.
+The timestamp layout is `2006-01-02T15-04-05.000000000Z` (nanosecond
+resolution, so two runs in the same second — a forced rerun, cron and a
+manual run overlapping — never collide on the same object key; stores are
+write-once). Names come from validated configuration, not raw runtime
+input.
 
 ## Security rules
 
@@ -75,4 +106,4 @@ The timestamp layout is `2006-01-02T15-04-05Z`. Names come from validated config
 
 ## Deliberate exclusions
 
-The foundation has no web UI, auth, notifications, reporting, master API, webhook, restore, internal scheduler, Rustic, or Restic implementation. Restic requires a later design review and adapter plan; see the repository skill roadmap once installed.
+The foundation has no web UI, auth, notifications, reporting, master API, webhook, restore, internal scheduler, or Rustic. Incremental backup is delivered only by the in-tree pure-Go engine for local and S3/R2 storage. The external Restic binary is limited to opt-in compatibility tests.

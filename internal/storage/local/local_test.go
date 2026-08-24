@@ -5,8 +5,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"os"
+	"path"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/bqckup/bqckup-go/internal/storage"
 	"github.com/stretchr/testify/assert"
@@ -41,7 +43,7 @@ func TestPutCancelledRemovesStagingFiles(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err = store.Put(ctx, artifact, "bqckup/site/2026-07-23T03-45-00Z/files.tar.gz")
+	_, err = store.Put(ctx, artifact, "bqckup/site/2026-07-23T03-45-00.000000000Z/files.tar.gz")
 	require.ErrorIs(t, err, context.Canceled)
 
 	var files []string
@@ -55,12 +57,28 @@ func TestPutCancelledRemovesStagingFiles(t *testing.T) {
 	assert.Empty(t, files)
 }
 
+// TestPutSameSecondRunsDoNotCollide: two runs in the same second (--force
+// rerun, cron plus manual overlap) must not collide on the same object
+// key; the timestamp layout carries nanosecond resolution.
+func TestPutSameSecondRunsDoNotCollide(t *testing.T) {
+	store, err := New(t.TempDir())
+	require.NoError(t, err)
+
+	for _, nsec := range []int{0, 123_456_789} {
+		timestamp := time.Date(2026, 7, 23, 3, 45, 0, nsec, time.UTC).Format(storage.TimestampLayout)
+		key := path.Join("bqckup", "site", timestamp, "files.tar.gz")
+		stored, putErr := store.Put(context.Background(), sourceArtifact(t, []byte("archive")), key)
+		require.NoError(t, putErr, "run at %s must be storable", timestamp)
+		assert.Equal(t, key, stored.Key)
+	}
+}
+
 func TestPutDoesNotOverwriteExistingObject(t *testing.T) {
 	root := t.TempDir()
 	store, err := New(root)
 	require.NoError(t, err)
 	artifact := sourceArtifact(t, []byte("new"))
-	key := "bqckup/site/2026-07-23T03-45-00Z/files.tar.gz"
+	key := "bqckup/site/2026-07-23T03-45-00.000000000Z/files.tar.gz"
 	finalPath := filepath.Join(root, filepath.FromSlash(key))
 	require.NoError(t, os.MkdirAll(filepath.Dir(finalPath), 0o700))
 	require.NoError(t, os.WriteFile(finalPath, []byte("existing"), 0o600))
@@ -78,7 +96,7 @@ func TestPutPersistsVerifiedArtifactWithPrivatePermissions(t *testing.T) {
 	require.NoError(t, err)
 	contents := []byte("verified backup")
 	artifact := sourceArtifact(t, contents)
-	key := "bqckup/site/2026-07-23T03-45-00Z/files.tar.gz"
+	key := "bqckup/site/2026-07-23T03-45-00.000000000Z/files.tar.gz"
 
 	stored, err := store.Put(context.Background(), artifact, key)
 	require.NoError(t, err)
@@ -100,20 +118,20 @@ func TestListBackupSetsRecognizesOnlyUTCApplicationTimestamps(t *testing.T) {
 	store, err := New(root)
 	require.NoError(t, err)
 	for _, name := range []string{
-		"2026-07-22T03-45-00Z",
-		"2026-07-23T03-45-00Z",
+		"2026-07-22T03-45-00.000000000Z",
+		"2026-07-23T03-45-00.000000000Z",
 		"2026-07-23T03:45:00Z",
 		"notes",
 	} {
 		require.NoError(t, os.MkdirAll(filepath.Join(root, "bqckup", "site", name), 0o700))
 	}
-	require.NoError(t, os.WriteFile(filepath.Join(root, "bqckup", "site", "2026-07-24T03-45-00Z"), []byte("file"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "bqckup", "site", "2026-07-24T03-45-00.000000000Z"), []byte("file"), 0o600))
 
 	sets, err := store.ListBackupSets(context.Background(), "bqckup/site")
 	require.NoError(t, err)
 	require.Len(t, sets, 2)
-	assert.Equal(t, "bqckup/site/2026-07-22T03-45-00Z", sets[0].Key)
-	assert.Equal(t, "bqckup/site/2026-07-23T03-45-00Z", sets[1].Key)
+	assert.Equal(t, "bqckup/site/2026-07-22T03-45-00.000000000Z", sets[0].Key)
+	assert.Equal(t, "bqckup/site/2026-07-23T03-45-00.000000000Z", sets[1].Key)
 }
 
 func sourceArtifact(t *testing.T, contents []byte) storage.Artifact {

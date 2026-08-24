@@ -39,9 +39,15 @@ type Site struct {
 	SourceFile    string        `mapstructure:"-" yaml:"-"`
 	Name          string        `mapstructure:"name" yaml:"name"`
 	Enabled       bool          `mapstructure:"enabled" yaml:"enabled"`
+	BackupMode    string        `mapstructure:"backup_mode" yaml:"backup_mode"`
+	Incremental   Incremental   `mapstructure:"incremental" yaml:"incremental"`
 	Sources       Sources       `mapstructure:"sources" yaml:"sources"`
 	Destinations  []Destination `mapstructure:"destinations" yaml:"destinations"`
 	Policy        Policy        `mapstructure:"policy" yaml:"policy"`
+}
+
+type Incremental struct {
+	PasswordEnv string `mapstructure:"password_env" yaml:"password_env"`
 }
 
 type Sources struct {

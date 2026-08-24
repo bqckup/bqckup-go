@@ -12,8 +12,10 @@ import (
 	"github.com/bqckup/bqckup-go/internal/backup/files"
 	"github.com/bqckup/bqckup-go/internal/clock"
 	"github.com/bqckup/bqckup-go/internal/config"
+	resticfacade "github.com/bqckup/bqckup-go/internal/engine/restic/facade"
 	"github.com/bqckup/bqckup-go/internal/history"
 	"github.com/bqckup/bqckup-go/internal/platform/lock"
+	"github.com/bqckup/bqckup-go/internal/process"
 	"github.com/bqckup/bqckup-go/internal/retention"
 	"github.com/bqckup/bqckup-go/internal/storage"
 	localstorage "github.com/bqckup/bqckup-go/internal/storage/local"
@@ -48,7 +50,7 @@ func Open(ctx context.Context, configDir string) (*App, error) {
 		_ = closeDatabase()
 		return nil, err
 	}
-	databaseExporters, err := buildDatabaseExporters(ctx, configuration, databaseexporter.NewProcessRunner())
+	databaseExporters, err := buildDatabaseExporters(ctx, configuration, process.NewProcessRunner())
 	if err != nil {
 		_ = closeDatabase()
 		return nil, err
@@ -58,8 +60,10 @@ func Open(ctx context.Context, configDir string) (*App, error) {
 	runner := backup.NewRunner(backup.Dependencies{
 		Repository:         repository,
 		Archiver:           files.New(),
+		IncrementalEngine:  resticfacade.NewEngine(),
 		DatabaseExporters:  databaseExporters,
 		Stores:             stores,
+		Storages:           configuration.Storages,
 		Retainer:           retentionAdapter{},
 		Locker:             lock.New(configuration.App.LockDirectory),
 		Clock:              clock.System{},
@@ -73,7 +77,9 @@ func Open(ctx context.Context, configDir string) (*App, error) {
 	}, nil
 }
 
-func buildDatabaseExporters(ctx context.Context, configuration config.Config, process databaseexporter.ProcessRunner) (map[string]backup.Exporter, error) {
+// buildDatabaseExporters constructs one exporter per configured database
+// engine that is enabled somewhere.
+func buildDatabaseExporters(ctx context.Context, configuration config.Config, process process.ProcessRunner) (map[string]backup.Exporter, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -151,6 +157,18 @@ func (a *App) RunBackup(ctx context.Context, siteName string, force bool) (backu
 
 func (a *App) LastSuccessful(ctx context.Context, siteName string) (*history.BackupRun, error) {
 	return a.repository.LastSuccessful(ctx, siteName)
+}
+
+// UnlockRepository removes stale repository locks for a site.
+func (a *App) UnlockRepository(ctx context.Context, siteName string) error {
+	site, ok := a.configuration.Site(siteName)
+	if !ok {
+		return apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q was not found", siteName), nil)
+	}
+	if !site.Enabled {
+		return apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q is disabled", siteName), nil)
+	}
+	return a.runner.Unlock(ctx, site)
 }
 
 func (a *App) ListRuns(ctx context.Context, siteName string, limit int) ([]history.BackupRun, error) {
