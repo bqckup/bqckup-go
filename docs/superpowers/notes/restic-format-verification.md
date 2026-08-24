@@ -158,8 +158,9 @@ type Key struct {
   `linktarget,omitempty`, `linktarget_raw,omitempty`,
   `extended_attributes,omitempty`, `generic_attributes,omitempty`,
   `device,omitempty`, `content`, `subtree,omitempty`.
-- `atime`/`ctime` are NOT omitempty in restic (always written). Either form
-  parses; our engine should pick one canonical form and keep it stable.
+- `atime`/`ctime`/`mtime` are all `omitempty` in restic; `atime` is only
+  written with `--with-atime` (it changes on every read and would break
+  dedup). We write `mtime`+`ctime` and never `atime`.
 
 ### 2.9 Snapshots
 

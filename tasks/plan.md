@@ -1,7 +1,7 @@
 # Implementation Plan: Pure-Go Restic Engine (Phase 1 / L1)
 
 **Date:** 2026-08-20
-**Status:** Draft — waiting for human review
+**Status:** Phase 0 + Phase 1 (L1) complete; awaiting PR review. See tasks/todo.md for the final checklist.
 **Spec it follows:** `docs/superpowers/specs/2026-08-20-restic-engine-phase1-design.md`
 **Backlog milestone:** M11 (design cycle). Implementation milestones come AFTER approval.
 **Branch:** `7-incremental-backup`

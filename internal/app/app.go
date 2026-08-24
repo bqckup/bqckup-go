@@ -60,8 +60,10 @@ func Open(ctx context.Context, configDir string) (*App, error) {
 	runner := backup.NewRunner(backup.Dependencies{
 		Repository:         repository,
 		Archiver:           files.New(),
+		IncrementalEngine:  resticfacade.NewEngine(),
 		DatabaseExporters:  databaseExporters,
 		Stores:             stores,
+		Storages:           configuration.Storages,
 		Retainer:           retentionAdapter{},
 		Locker:             lock.New(configuration.App.LockDirectory),
 		Clock:              clock.System{},
