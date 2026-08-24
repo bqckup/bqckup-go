@@ -25,7 +25,7 @@ func TestListBackupSetsPaginatesAndFilters(t *testing.T) {
 			{Key: aws.String("company/bqckup/other/2026-08-03T00-00-00.000000000Z/files.tar.gz")},
 		}},
 	}}
-	store := newWithClients(Options{Bucket: "backups", Prefix: "company"}, &fakeUploader{}, client)
+	store := newWithClients(Options{Bucket: "backups", Prefix: "company"}, &fakeUploader{}, client, nil)
 
 	sets, err := store.ListBackupSets(context.Background(), "bqckup/site")
 	require.NoError(t, err)
@@ -43,7 +43,7 @@ func TestDeletePaginatesAndBatchesAtOneThousand(t *testing.T) {
 		objects[index].Key = aws.String(fmt.Sprintf("company/bqckup/site/2026-08-01T00-00-00.000000000Z/file-%04d", index))
 	}
 	client := &fakeClient{listOutputs: []*s3.ListObjectsV2Output{{Contents: objects}}}
-	store := newWithClients(Options{Bucket: "backups", Prefix: "company"}, &fakeUploader{}, client)
+	store := newWithClients(Options{Bucket: "backups", Prefix: "company"}, &fakeUploader{}, client, nil)
 
 	require.NoError(t, store.Delete(context.Background(), "bqckup/site/2026-08-01T00-00-00.000000000Z"))
 	require.Len(t, client.deleteObjectsInputs, 2)
@@ -53,7 +53,7 @@ func TestDeletePaginatesAndBatchesAtOneThousand(t *testing.T) {
 }
 
 func TestDeleteRejectsUnsafeOrBroadPrefixes(t *testing.T) {
-	store := newWithClients(Options{Bucket: "backups"}, &fakeUploader{}, &fakeClient{})
+	store := newWithClients(Options{Bucket: "backups"}, &fakeUploader{}, &fakeClient{}, nil)
 	for _, prefix := range []string{"", "bqckup", "bqckup/site", "bqckup/site/not-a-date", "../escape"} {
 		t.Run(prefix, func(t *testing.T) {
 			require.Error(t, store.Delete(context.Background(), prefix))

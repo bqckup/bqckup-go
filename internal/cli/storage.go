@@ -4,12 +4,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
 
 	"github.com/bqckup/bqckup-go/internal/app"
 	"github.com/bqckup/bqckup-go/internal/backup"
+	"github.com/bqckup/bqckup-go/internal/storage"
 	"github.com/spf13/cobra"
 )
 
@@ -62,7 +64,94 @@ func newStorageCommand(opts *options) *cobra.Command {
 	}
 	list.Flags().StringVar(&site, "site", "", "site whose contents to list (required)")
 	command.AddCommand(list)
+
+	var key, expiry string
+	var expiryDuration time.Duration
+	link := &cobra.Command{
+		Use:   "link <destination>",
+		Short: "Create a temporary download link for one remote artifact",
+		Args: func(_ *cobra.Command, args []string) error {
+			if len(args) != 1 {
+				return fmt.Errorf("%w: storage link requires exactly one destination", ErrInvalidInput)
+			}
+			return nil
+		},
+		PreRunE: func(_ *cobra.Command, _ []string) error {
+			if key == "" {
+				return fmt.Errorf("%w: --key is required", ErrInvalidInput)
+			}
+			hours, err := parseExpiryHours(expiry)
+			if err != nil {
+				return err
+			}
+			expiryDuration = time.Duration(hours) * time.Hour
+			return nil
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return withApplication(cmd, opts.configDir, func(application *app.App) error {
+				link, err := application.Link(cmd.Context(), args[0], key, expiryDuration)
+				if err != nil {
+					return err
+				}
+				if opts.output == "json" {
+					return writeLinkJSON(cmd, args[0], link)
+				}
+				return writeLinkText(cmd.OutOrStdout(), cmd.ErrOrStderr(), link)
+			})
+		},
+	}
+	link.Flags().StringVar(&key, "key", "", "object key to link, as printed by storage list (required)")
+	link.Flags().StringVar(&expiry, "expires", "24h", "link validity in whole hours, 1-24")
+	command.AddCommand(link)
 	return command
+}
+
+// parseExpiryHours accepts only whole-hour values between 1 and 24.
+func parseExpiryHours(value string) (int, error) {
+	if !strings.HasSuffix(value, "h") {
+		return 0, invalidExpiryError()
+	}
+	hours, err := strconv.Atoi(strings.TrimSuffix(value, "h"))
+	if err != nil || hours < 1 || hours > 24 {
+		return 0, invalidExpiryError()
+	}
+	return hours, nil
+}
+
+func invalidExpiryError() error {
+	return fmt.Errorf("%w: --expires must be a whole number of hours between 1 and 24, like 6h", ErrInvalidInput)
+}
+
+func writeLinkText(stdout, stderr io.Writer, link storage.DownloadLink) error {
+	if _, err := fmt.Fprintln(stdout, link.URL); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(stderr, "Link expires at %s.\n", link.ExpiresAt.UTC().Format(time.RFC3339)); err != nil {
+		return err
+	}
+	_, err := fmt.Fprintln(stderr, "Anyone with this link can download the file.")
+	return err
+}
+
+type linkJSON struct {
+	URL         string    `json:"url"`
+	Key         string    `json:"key"`
+	Destination string    `json:"destination"`
+	ExpiresAt   time.Time `json:"expires_at"`
+}
+
+func writeLinkJSON(cmd *cobra.Command, destination string, link storage.DownloadLink) error {
+	return encodeLinkJSON(json.NewEncoder(cmd.OutOrStdout()), destination, link)
+}
+
+func encodeLinkJSON(encoder *json.Encoder, destination string, link storage.DownloadLink) error {
+	encoder.SetEscapeHTML(false)
+	return encoder.Encode(linkJSON{
+		URL:         link.URL,
+		Key:         link.Key,
+		Destination: destination,
+		ExpiresAt:   link.ExpiresAt.UTC(),
+	})
 }
 
 func writeStorageText(output io.Writer, listing backup.Listing) error {

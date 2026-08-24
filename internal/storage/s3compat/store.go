@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"os"
 	"path"
 	"sort"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	signerv4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	"github.com/aws/aws-sdk-go-v2/feature/s3/transfermanager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
@@ -41,15 +43,20 @@ type objectAPI interface {
 	DeleteObjects(context.Context, *s3.DeleteObjectsInput, ...func(*s3.Options)) (*s3.DeleteObjectsOutput, error)
 }
 
-type Store struct {
-	bucket   string
-	prefix   string
-	uploader uploaderAPI
-	client   objectAPI
+type presignerAPI interface {
+	PresignGetObject(context.Context, *s3.GetObjectInput, ...func(*s3.PresignOptions)) (*signerv4.PresignedHTTPRequest, error)
 }
 
-func newWithClients(options Options, uploader uploaderAPI, client objectAPI) *Store {
-	return &Store{bucket: options.Bucket, prefix: options.Prefix, uploader: uploader, client: client}
+type Store struct {
+	bucket    string
+	prefix    string
+	uploader  uploaderAPI
+	client    objectAPI
+	presigner presignerAPI
+}
+
+func newWithClients(options Options, uploader uploaderAPI, client objectAPI, presigner presignerAPI) *Store {
+	return &Store{bucket: options.Bucket, prefix: options.Prefix, uploader: uploader, client: client, presigner: presigner}
 }
 
 func (s *Store) Put(ctx context.Context, artifact storage.Artifact, key string) (storage.StoredArtifact, error) {
@@ -165,6 +172,51 @@ func isCollision(err error) bool {
 	}
 	var statusError interface{ HTTPStatusCode() int }
 	return errors.As(err, &statusError) && statusError.HTTPStatusCode() == 412
+}
+
+func isNotFound(err error) bool {
+	var apiError smithy.APIError
+	if errors.As(err, &apiError) && (apiError.ErrorCode() == "NotFound" || apiError.ErrorCode() == "NoSuchKey") {
+		return true
+	}
+	var statusError interface{ HTTPStatusCode() int }
+	return errors.As(err, &statusError) && statusError.HTTPStatusCode() == 404
+}
+
+// PresignLink checks that the object exists, then returns a temporary signed
+// download URL for it. Key is relative to the storage document prefix. The
+// only network call is the existence HEAD; presigning is client-side.
+func (s *Store) PresignLink(ctx context.Context, key string, expires time.Duration) (storage.DownloadLink, error) {
+	if err := ctx.Err(); err != nil {
+		return storage.DownloadLink{}, err
+	}
+	finalKey, err := storage.JoinPrefix(s.prefix, key)
+	if err != nil {
+		return storage.DownloadLink{}, err
+	}
+	if _, err := s.client.HeadObject(ctx, &s3.HeadObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(finalKey)}); err != nil {
+		if isNotFound(err) {
+			return storage.DownloadLink{}, fmt.Errorf("object %q was not found in the destination", key)
+		}
+		return storage.DownloadLink{}, remoteOperationError("could not check the remote object", err)
+	}
+	if s.presigner == nil {
+		return storage.DownloadLink{}, errors.New("presigning is unavailable")
+	}
+	request, err := s.presigner.PresignGetObject(ctx, &s3.GetObjectInput{
+		Bucket:                     aws.String(s.bucket),
+		Key:                        aws.String(finalKey),
+		ResponseContentDisposition: aws.String("attachment; filename=" + path.Base(key)),
+	}, func(options *s3.PresignOptions) {
+		options.Expires = expires
+	})
+	if err != nil {
+		return storage.DownloadLink{}, apperror.Hide("could not create the download link", err)
+	}
+	if request == nil {
+		return storage.DownloadLink{}, errors.New("presigning produced no result")
+	}
+	return storage.DownloadLink{URL: request.URL, Key: key, ExpiresAt: time.Now().UTC().Add(expires)}, nil
 }
 
 var _ storage.Store = (*Store)(nil)

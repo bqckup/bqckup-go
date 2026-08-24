@@ -60,6 +60,9 @@ func (fakeLocalStore) Delete(context.Context, string) error { return errors.New(
 func (fakeLocalStore) ListBackupSets(context.Context, string) ([]storage.BackupSet, error) {
 	return nil, errors.New("unused")
 }
+func (fakeLocalStore) LocalPath(key string) (string, error) {
+	return "/srv/backups/" + key, nil
+}
 
 func fullSite() config.Site {
 	return config.Site{Name: "site-a", Enabled: true, BackupMode: "full"}

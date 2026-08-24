@@ -8,6 +8,7 @@ import (
 
 	"github.com/bqckup/bqckup-go/internal/apperror"
 	"github.com/bqckup/bqckup-go/internal/backup"
+	"github.com/bqckup/bqckup-go/internal/storage"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -140,4 +141,67 @@ func TestStorageFailureExitsFourRedacted(t *testing.T) {
 	err := apperror.Wrap(apperror.CategoryStorage, "could not list remote backup sets", apperror.Hide("provider secret", nil))
 	assert.Equal(t, 4, ExitCode(err))
 	assert.NotContains(t, apperror.UserMessage(err), "secret")
+}
+
+func TestWriteLinkTextSplitsURLAndInfo(t *testing.T) {
+	link := storage.DownloadLink{
+		URL:       "https://example.test/signed",
+		Key:       "bqckup/site-a/2026-08-05T00-00-00Z/files.tar.gz",
+		ExpiresAt: time.Date(2026, 8, 6, 3, 0, 0, 0, time.UTC),
+	}
+	var stdout, stderr bytes.Buffer
+	require.NoError(t, writeLinkText(&stdout, &stderr, link))
+	assert.Equal(t, "https://example.test/signed\n", stdout.String())
+	assert.Contains(t, stderr.String(), "Link expires at 2026-08-06T03:00:00Z.")
+	assert.Contains(t, stderr.String(), "Anyone with this link can download the file.")
+}
+
+func TestWriteLinkJSONSchema(t *testing.T) {
+	link := storage.DownloadLink{
+		URL:       "https://example.test/signed",
+		Key:       "bqckup/site-a/2026-08-05T00-00-00Z/files.tar.gz",
+		ExpiresAt: time.Date(2026, 8, 6, 3, 0, 0, 0, time.UTC),
+	}
+	var output bytes.Buffer
+	require.NoError(t, encodeLinkJSON(json.NewEncoder(&output), "s3-primary", link))
+	assert.Equal(t, `{"url":"https://example.test/signed","key":"bqckup/site-a/2026-08-05T00-00-00Z/files.tar.gz","destination":"s3-primary","expires_at":"2026-08-06T03:00:00Z"}`+"\n", output.String())
+}
+
+func TestStorageLinkRejectsMissingKey(t *testing.T) {
+	root, _, _ := commandForTest(t, "storage", "link", "s3-primary")
+	err := root.Execute()
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrInvalidInput)
+	assert.Equal(t, 2, ExitCode(err))
+}
+
+func TestStorageLinkRejectsMissingDestination(t *testing.T) {
+	root, _, _ := commandForTest(t, "storage", "link", "--key", "bqckup/site-a/2026-08-05T00-00-00Z/files.tar.gz")
+	err := root.Execute()
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrInvalidInput)
+	assert.Equal(t, 2, ExitCode(err))
+}
+
+func TestStorageLinkRejectsInvalidExpiryValues(t *testing.T) {
+	for _, expiry := range []string{"15m", "0h", "25h", "6", "2h30m"} {
+		root, _, _ := commandForTest(t, "storage", "link", "s3-primary", "--key", "bqckup/site-a/2026-08-05T00-00-00Z/files.tar.gz", "--expires", expiry)
+		err := root.Execute()
+		require.Error(t, err, expiry)
+		assert.ErrorIs(t, err, ErrInvalidInput, expiry)
+		assert.Equal(t, 2, ExitCode(err), expiry)
+		assert.Contains(t, err.Error(), "whole number of hours", expiry)
+	}
+}
+
+func TestStorageLinkLocalDestinationShowsLocalPath(t *testing.T) {
+	configDir, backupRoot := writeCLIConfig(t)
+	root, _, _ := commandForTest(t, "--config-dir", configDir, "storage", "link", "local-primary", "--key", "bqckup/example/2026-08-05T00-00-00Z/files.tar.gz", "--expires", "6h")
+	err := root.Execute()
+	require.Error(t, err)
+	assert.Equal(t, 2, ExitCode(err))
+	message := apperror.UserMessage(err)
+	assert.Contains(t, message, "local")
+	assert.Contains(t, message, "has no download link")
+	assert.Contains(t, message, backupRoot)
 }

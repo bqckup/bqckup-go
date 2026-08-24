@@ -274,6 +274,24 @@ green after prune.
 
 **Suggested commit:** `feat: add remote storage listing command`
 
+## M16 — Download link for remote artifacts
+
+**Status:** Delivered; retain this section as its acceptance checklist. See `docs/superpowers/specs/2026-08-24-download-link.md` and `docs/superpowers/plans/2026-08-24-download-link-plan.md`.
+
+**Objective:** `bqckup storage link <destination> --key <key> --expires <n>h` prints a temporary signed download URL for one archive artifact of a full-mode site on a remote destination. Port of the legacy web UI's `get_download_link` endpoint.
+
+**Prerequisites:** M04 and M15 delivered (S3 adapter, `storage list` output format the key is copied from).
+
+**In scope:** one `storage link` subcommand, `storage.DownloadLink` value type, `s3compat.Store.PresignLink` (HEAD existence check plus client-side presign with `attachment` content disposition), `local.Store.LocalPath` for the local-destination error message, a consumer-owned linker in `internal/backup`, app wiring that parses the site from the key, text and JSON rendering, README and `CONTEXT.md` updates.
+
+**Out of scope:** linking restic repository blobs (incremental sites fail with a pointer to restore), local destinations (no URL exists; the error shows the local path), any config field or dependency change, history writes, restore.
+
+**Acceptance:** a valid key produces a signed URL on stdout that downloads the artifact as an attachment and expires after the requested whole-hour duration (1–24h, default 24h); missing objects exit 4 with a redacted message naming the key; the URL never appears in errors, logs, or history; the command writes nothing and touches the remote only with one HEAD.
+
+**Required tests:** presign URL shape (signature, disposition, expiry), 404 mapping, redaction, cancellation, key-shape rejection, mode branching, local-path error, CLI flag validation and output split, exit codes.
+
+**Suggested commit:** `feat: add download link for remote storage artifacts`
+
 ## Mentor review checklist
 
 - Assignment is exactly one milestone with prerequisites satisfied.

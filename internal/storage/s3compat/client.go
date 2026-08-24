@@ -66,5 +66,5 @@ func New(ctx context.Context, options Options) (*Store, error) {
 		}
 	})
 	uploader := transfermanager.New(client)
-	return newWithClients(options, uploader, client), nil
+	return newWithClients(options, uploader, client, s3.NewPresignClient(client)), nil
 }

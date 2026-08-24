@@ -29,6 +29,14 @@ type BackupSet struct {
 	CreatedAt time.Time
 }
 
+// DownloadLink is a temporary signed URL for one stored object. Key is
+// relative to the storage document prefix, exactly as storage list prints it.
+type DownloadLink struct {
+	URL       string
+	Key       string
+	ExpiresAt time.Time
+}
+
 // RemoteArtifact is one stored object listed from a remote destination.
 // Key is relative to the storage document prefix (bqckup/<site>/<set>/<name>).
 type RemoteArtifact struct {

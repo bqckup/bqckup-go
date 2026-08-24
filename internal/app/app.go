@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/bqckup/bqckup-go/internal/apperror"
 	"github.com/bqckup/bqckup-go/internal/backup"
@@ -213,6 +215,49 @@ func siteUsesDestination(site config.Site, destination string) bool {
 		}
 	}
 	return false
+}
+
+// parseSiteFromKey extracts the site name from a download-link key. Valid
+// keys start with bqckup/<site>/ and carry at least one segment after the
+// site.
+func parseSiteFromKey(key string) (string, error) {
+	parts := strings.Split(key, "/")
+	if len(parts) < 3 || parts[0] != "bqckup" || parts[1] == "" || parts[2] == "" {
+		return "", fmt.Errorf("key %q must start with bqckup/<site>/", key)
+	}
+	return parts[1], nil
+}
+
+// Link creates a temporary download link for one artifact of a remote
+// destination. The site is parsed from the key; it must exist, be enabled,
+// use full mode, and send backups to the destination. Nothing is written to
+// history and the remote only receives one existence check.
+func (a *App) Link(ctx context.Context, destinationName, key string, expires time.Duration) (storage.DownloadLink, error) {
+	siteName, err := parseSiteFromKey(key)
+	if err != nil {
+		return storage.DownloadLink{}, apperror.Wrap(apperror.CategoryConfig, err.Error(), nil)
+	}
+	if err := storage.ValidateKey(key); err != nil {
+		return storage.DownloadLink{}, apperror.Wrap(apperror.CategoryConfig, "unsafe storage key", nil)
+	}
+	site, ok := a.configuration.Site(siteName)
+	if !ok {
+		return storage.DownloadLink{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q was not found", siteName), nil)
+	}
+	if !site.Enabled {
+		return storage.DownloadLink{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q is disabled", siteName), nil)
+	}
+	if _, ok := a.configuration.Storages[destinationName]; !ok {
+		return storage.DownloadLink{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("storage destination %q was not found", destinationName), nil)
+	}
+	if !siteUsesDestination(site, destinationName) {
+		return storage.DownloadLink{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q does not send backups to destination %q", siteName, destinationName), nil)
+	}
+	store, ok := a.stores[destinationName]
+	if !ok || store == nil {
+		return storage.DownloadLink{}, apperror.Wrap(apperror.CategoryInternal, "a configured storage destination is unavailable", nil)
+	}
+	return (&backup.Linker{}).Link(ctx, destinationName, site, store, key, expires)
 }
 
 func (a *App) Close() error {
