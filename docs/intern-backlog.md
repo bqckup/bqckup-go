@@ -256,6 +256,24 @@ green after prune.
 
 **Suggested commit:** `feat: reclaim space with mark-and-sweep prune`
 
+## M15 — Remote storage listing
+
+**Status:** Delivered; retain this section as its acceptance checklist. See `docs/superpowers/specs/2026-08-24-remote-storage-listing.md` and `docs/superpowers/plans/2026-08-24-remote-storage-listing-plan.md`.
+
+**Objective:** `bqckup storage list <destination> --site <site>` shows the live contents of one remote destination for one site: archive artifacts for `full` mode, restic snapshots for `incremental` mode. Port of the legacy `get-list` command.
+
+**Prerequisites:** M04 and M07 delivered (S3 adapter, prefix-scoped listing and pagination); facade and lock package from M12/M13.
+
+**In scope:** one `storage list` subcommand, `storage.Artifact` value type, `s3compat.Store.ListArtifacts`, `facade.Engine.ListSnapshots` with a non-exclusive lock, a consumer-owned lister in `internal/backup`, app wiring, text and JSON rendering, README and `CONTEXT.md` updates.
+
+**Out of scope:** local destination listing (use `history list --details`), restore, link generation, Python-era object layouts, listing raw restic repository objects, `--full-id`, any new config field or dependency.
+
+**Acceptance:** text tables match the spec; `--output json` emits the two spec schemas with `[]` on empty results; local or unknown destination fails with exit 2 and a pointer to `history`; storage failures exit 4 redacted; listing mutates nothing on the remote; `make verify` and `sh scripts/check-docs.sh` pass.
+
+**Required tests:** S3 fake-client pagination/filter/cancellation/redaction, facade snapshot listing with lock lifecycle, use-case mode branching and error mapping, CLI table and JSON shape, exit codes.
+
+**Suggested commit:** `feat: add remote storage listing command`
+
 ## Mentor review checklist
 
 - Assignment is exactly one milestone with prerequisites satisfied.

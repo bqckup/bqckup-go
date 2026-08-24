@@ -8,10 +8,12 @@ import (
 	"path/filepath"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/feature/s3/transfermanager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/smithy-go"
 	"github.com/bqckup/bqckup-go/internal/storage"
 	"github.com/stretchr/testify/assert"
@@ -141,6 +143,90 @@ func (f *fakeClient) DeleteObjects(_ context.Context, input *s3.DeleteObjectsInp
 		return &s3.DeleteObjectsOutput{}, f.deleteObjectsErr
 	}
 	return f.deleteObjectsOutput, f.deleteObjectsErr
+}
+
+func TestListArtifactsReturnsEveryObjectUnderTheSet(t *testing.T) {
+	created := time.Date(2026, 11, 10, 3, 0, 12, 0, time.UTC)
+	client := &fakeClient{listOutputs: []*s3.ListObjectsV2Output{
+		{Contents: []types.Object{
+			{Key: aws.String("company/bqckup/site-a/2026-11-10T03-00-00.000000000Z/files.tar.gz"), Size: aws.Int64(100), LastModified: aws.Time(created)},
+			{Key: aws.String("company/bqckup/site-a/2026-11-10T03-00-00.000000000Z/databases/db.sql.gz"), Size: aws.Int64(50), LastModified: aws.Time(created.Add(time.Second))},
+		}, IsTruncated: aws.Bool(true), NextContinuationToken: aws.String("next")},
+		{Contents: []types.Object{
+			{Key: aws.String("company/bqckup/site-a/2026-11-10T03-00-00.000000000Z/databases/db2.sql.gz"), Size: aws.Int64(25), LastModified: aws.Time(created.Add(2 * time.Second))},
+		}, IsTruncated: aws.Bool(false)},
+	}}
+	store := newWithClients(Options{Bucket: "backups", Prefix: "company"}, &fakeUploader{}, client)
+
+	artifacts, err := store.ListArtifacts(context.Background(), "bqckup/site-a/2026-11-10T03-00-00.000000000Z")
+	require.NoError(t, err)
+	require.Len(t, artifacts, 3)
+	assert.Equal(t, "bqckup/site-a/2026-11-10T03-00-00.000000000Z/files.tar.gz", artifacts[0].Key)
+	assert.Equal(t, int64(100), artifacts[0].Size)
+	assert.Equal(t, created, artifacts[0].CreatedAt)
+	assert.Equal(t, "bqckup/site-a/2026-11-10T03-00-00.000000000Z/databases/db.sql.gz", artifacts[1].Key)
+	assert.Equal(t, "bqckup/site-a/2026-11-10T03-00-00.000000000Z/databases/db2.sql.gz", artifacts[2].Key)
+	assert.Equal(t, int64(25), artifacts[2].Size)
+	require.Len(t, client.listInputs, 2)
+	assert.Equal(t, "company/bqckup/site-a/2026-11-10T03-00-00.000000000Z/", aws.ToString(client.listInputs[0].Prefix))
+	assert.Equal(t, "next", aws.ToString(client.listInputs[1].ContinuationToken))
+}
+
+func TestListArtifactsSkipsKeysOutsideTheSet(t *testing.T) {
+	created := time.Date(2026, 11, 10, 3, 0, 0, 0, time.UTC)
+	client := &fakeClient{listOutputs: []*s3.ListObjectsV2Output{
+		{Contents: []types.Object{
+			{Key: aws.String("company/bqckup/site-a/2026-11-10T03-00-00.000000000Z/files.tar.gz"), Size: aws.Int64(1), LastModified: aws.Time(created)},
+			// Foreign keys must not surface: another set, another site, a restic blob prefix.
+			{Key: aws.String("company/bqckup/site-a/2026-11-11T03-00-00.000000000Z/files.tar.gz"), Size: aws.Int64(2), LastModified: aws.Time(created)},
+			{Key: aws.String("company/bqckup/site-b/2026-11-10T03-00-00.000000000Z/files.tar.gz"), Size: aws.Int64(3), LastModified: aws.Time(created)},
+		}, IsTruncated: aws.Bool(false)},
+	}}
+	store := newWithClients(Options{Bucket: "backups", Prefix: "company"}, &fakeUploader{}, client)
+
+	artifacts, err := store.ListArtifacts(context.Background(), "bqckup/site-a/2026-11-10T03-00-00.000000000Z")
+	require.NoError(t, err)
+	require.Len(t, artifacts, 1)
+	assert.Equal(t, "bqckup/site-a/2026-11-10T03-00-00.000000000Z/files.tar.gz", artifacts[0].Key)
+}
+
+func TestListArtifactsRejectsInvalidPrefixes(t *testing.T) {
+	store := newWithClients(Options{Bucket: "backups"}, &fakeUploader{}, &fakeClient{})
+	for _, invalid := range []string{
+		"bqckup",
+		"bqckup/site-a",
+		"bqckup/site-a/not-a-timestamp",
+		"bqckup/site-a/2026-11-10T03-00-00.000000000Z/",
+		"../bqckup/site-a/2026-11-10T03-00-00.000000000Z",
+	} {
+		_, err := store.ListArtifacts(context.Background(), invalid)
+		assert.Error(t, err, invalid)
+	}
+}
+
+func TestListArtifactsPreservesCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	store := newWithClients(Options{Bucket: "backups"}, &fakeUploader{}, &fakeClient{})
+	_, err := store.ListArtifacts(ctx, "bqckup/site-a/2026-11-10T03-00-00.000000000Z")
+	require.ErrorIs(t, err, context.Canceled)
+}
+
+func TestListArtifactsRedactsProviderErrors(t *testing.T) {
+	client := &fakeClient{listErr: &smithy.GenericAPIError{Code: "AccessDenied", Message: "provider secret response"}}
+	store := newWithClients(Options{Bucket: "backups"}, &fakeUploader{}, client)
+	_, err := store.ListArtifacts(context.Background(), "bqckup/site-a/2026-11-10T03-00-00.000000000Z")
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "provider secret response")
+}
+
+func TestListArtifactsRejectsMissingContinuationToken(t *testing.T) {
+	client := &fakeClient{listOutputs: []*s3.ListObjectsV2Output{
+		{Contents: []types.Object{}, IsTruncated: aws.Bool(true)},
+	}}
+	store := newWithClients(Options{Bucket: "backups"}, &fakeUploader{}, client)
+	_, err := store.ListArtifacts(context.Background(), "bqckup/site-a/2026-11-10T03-00-00.000000000Z")
+	require.Error(t, err)
 }
 
 func sourceArtifact(t *testing.T, contents []byte) storage.Artifact {

@@ -1,5 +1,7 @@
 package restic
 
+import "time"
+
 type RepoConfig struct {
 	URL             string
 	Password        string
@@ -30,4 +32,14 @@ type SnapshotSummary struct {
 	TotalBytesProcessed int64   `json:"total_bytes_processed"`
 	DataAdded           int64   `json:"data_added"`
 	TotalDuration       float64 `json:"total_duration"`
+}
+
+// Snapshot is one snapshot listed for a repository. Size comes from the
+// snapshot summary (TotalBytesProcessed); a snapshot without a summary has
+// size 0 and renders as "-" in text output.
+type Snapshot struct {
+	ID        string
+	Paths     []string
+	Size      int64
+	CreatedAt time.Time
 }

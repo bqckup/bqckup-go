@@ -26,6 +26,8 @@ type App struct {
 	configuration config.Config
 	runner        *backup.Runner
 	repository    *history.Repository
+	stores        map[string]storage.Store
+	snapshots     backup.SnapshotLister
 	closeOnce     sync.Once
 	closeErr      error
 	closeDatabase func() error
@@ -57,10 +59,11 @@ func Open(ctx context.Context, configDir string) (*App, error) {
 	}
 
 	repository := history.NewRepository(database)
+	engine := resticfacade.NewEngine()
 	runner := backup.NewRunner(backup.Dependencies{
 		Repository:         repository,
 		Archiver:           files.New(),
-		IncrementalEngine:  resticfacade.NewEngine(),
+		IncrementalEngine:  engine,
 		DatabaseExporters:  databaseExporters,
 		Stores:             stores,
 		Storages:           configuration.Storages,
@@ -73,6 +76,8 @@ func Open(ctx context.Context, configDir string) (*App, error) {
 		configuration: configuration,
 		runner:        runner,
 		repository:    repository,
+		stores:        stores,
+		snapshots:     engine,
 		closeDatabase: closeDatabase,
 	}, nil
 }
@@ -173,6 +178,41 @@ func (a *App) UnlockRepository(ctx context.Context, siteName string) error {
 
 func (a *App) ListRuns(ctx context.Context, siteName string, limit int) ([]history.BackupRun, error) {
 	return a.repository.ListRuns(ctx, history.RunFilter{Site: siteName, Limit: limit})
+}
+
+// ListRemoteContents lists the live remote contents of one destination of
+// one site. The site must exist and be enabled (mirrors RunBackup), the
+// destination must exist and be one the site actually uses; local
+// destinations are rejected inside the use case with a pointer to history.
+func (a *App) ListRemoteContents(ctx context.Context, siteName, destinationName string) (backup.Listing, error) {
+	site, ok := a.configuration.Site(siteName)
+	if !ok {
+		return backup.Listing{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q was not found", siteName), nil)
+	}
+	if !site.Enabled {
+		return backup.Listing{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q is disabled", siteName), nil)
+	}
+	storageConfig, ok := a.configuration.Storages[destinationName]
+	if !ok {
+		return backup.Listing{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("storage destination %q was not found", destinationName), nil)
+	}
+	if !siteUsesDestination(site, destinationName) {
+		return backup.Listing{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q does not send backups to destination %q", siteName, destinationName), nil)
+	}
+	store, ok := a.stores[destinationName]
+	if !ok || store == nil {
+		return backup.Listing{}, apperror.Wrap(apperror.CategoryInternal, "a configured storage destination is unavailable", nil)
+	}
+	return (&backup.Lister{Snapshots: a.snapshots}).List(ctx, destinationName, site, storageConfig, store)
+}
+
+func siteUsesDestination(site config.Site, destination string) bool {
+	for _, configured := range site.Destinations {
+		if configured.Storage == destination {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *App) Close() error {

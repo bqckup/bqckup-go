@@ -129,6 +129,50 @@ func (e *Engine) ApplyRetention(ctx context.Context, repo backuprestic.RepoConfi
 	return result.BytesReclaimed, nil
 }
 
+// ListSnapshots lists the repository's snapshots under a non-exclusive
+// lock (policy L4 reserves non-exclusive locks for listing). The lock is
+// removed on every return path. Size comes from the snapshot summary.
+func (e *Engine) ListSnapshots(ctx context.Context, repo backuprestic.RepoConfig) ([]backuprestic.Snapshot, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := e.rejectUnsupportedURL(repo.URL); err != nil {
+		return nil, err
+	}
+	b, err := e.openBackend(ctx, repo)
+	if err != nil {
+		return nil, err
+	}
+	r, err := repository.Open(ctx, b, repo.Password)
+	if err != nil {
+		return nil, &restic.RedactedError{Category: "repository", Message: "could not open the repository", Err: err}
+	}
+	listingLock, err := lock.New(ctx, b, r.MasterKey(), false)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = listingLock.Unlock(context.WithoutCancel(ctx), b) }()
+
+	stored, err := r.ListSnapshots(ctx)
+	if err != nil {
+		return nil, &restic.RedactedError{Category: "repository", Message: "could not list the repository snapshots", Err: err}
+	}
+	snapshots := make([]backuprestic.Snapshot, 0, len(stored))
+	for _, entry := range stored {
+		size := int64(0)
+		if entry.Snapshot.Summary != nil {
+			size = int64(entry.Snapshot.Summary.TotalBytesProcessed)
+		}
+		snapshots = append(snapshots, backuprestic.Snapshot{
+			ID:        entry.ID.String(),
+			Paths:     entry.Snapshot.Paths,
+			Size:      size,
+			CreatedAt: entry.Snapshot.Time,
+		})
+	}
+	return snapshots, nil
+}
+
 // Unlock removes stale repository locks (restic unlock semantics: stale
 // locks only, never a live one). Locks are encrypted with the repository
 // key, so the repository must be opened first.

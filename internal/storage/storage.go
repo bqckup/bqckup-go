@@ -29,6 +29,14 @@ type BackupSet struct {
 	CreatedAt time.Time
 }
 
+// RemoteArtifact is one stored object listed from a remote destination.
+// Key is relative to the storage document prefix (bqckup/<site>/<set>/<name>).
+type RemoteArtifact struct {
+	Key       string
+	Size      int64
+	CreatedAt time.Time
+}
+
 type Store interface {
 	Put(ctx context.Context, artifact Artifact, key string) (StoredArtifact, error)
 	Delete(ctx context.Context, key string) error

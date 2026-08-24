@@ -283,6 +283,56 @@ func (s *Store) ListBackupSets(ctx context.Context, sitePrefix string) ([]storag
 	return sets, nil
 }
 
+func (s *Store) ListArtifacts(ctx context.Context, setPrefix string) ([]storage.RemoteArtifact, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := validateBackupSetPrefix(setPrefix); err != nil {
+		return nil, err
+	}
+	finalPrefix, err := storage.JoinPrefix(s.prefix, setPrefix)
+	if err != nil {
+		return nil, err
+	}
+	requestPrefix := finalPrefix + "/"
+	var artifacts []storage.RemoteArtifact
+	var continuation *string
+	for {
+		output, listErr := s.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+			Bucket:            aws.String(s.bucket),
+			Prefix:            aws.String(requestPrefix),
+			ContinuationToken: continuation,
+		})
+		if listErr != nil {
+			return nil, remoteOperationError("could not list remote backup artifacts", listErr)
+		}
+		if output == nil {
+			return nil, errors.New("remote object listing returned no result")
+		}
+		for _, object := range output.Contents {
+			key := aws.ToString(object.Key)
+			if !strings.HasPrefix(key, requestPrefix) {
+				continue
+			}
+			artifacts = append(artifacts, storage.RemoteArtifact{
+				Key:       setPrefix + "/" + strings.TrimPrefix(key, requestPrefix),
+				Size:      aws.ToInt64(object.Size),
+				CreatedAt: aws.ToTime(object.LastModified),
+			})
+		}
+		if !aws.ToBool(output.IsTruncated) {
+			return artifacts, nil
+		}
+		if output.NextContinuationToken == nil || aws.ToString(output.NextContinuationToken) == "" {
+			return nil, errors.New("remote object listing omitted its continuation token")
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		continuation = output.NextContinuationToken
+	}
+}
+
 func validateSitePrefix(sitePrefix string) error {
 	if err := storage.ValidateKey(sitePrefix); err != nil {
 		return err
