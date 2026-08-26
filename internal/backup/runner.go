@@ -306,6 +306,10 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 	}
 
 	for _, destination := range site.Destinations {
+		store, ok := r.dependencies.Stores[destination.Storage]
+		if !ok || store == nil {
+			return fail(apperror.Wrap(apperror.CategoryInternal, "a configured storage destination is unavailable", nil))
+		}
 		if site.BackupMode == "incremental" {
 			engine := r.dependencies.IncrementalEngine
 			storageConfig, ok := r.dependencies.Storages[destination.Storage]
@@ -321,11 +325,13 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 				return fail(apperror.Wrap(apperror.CategoryStorage, "backup completed but incremental retention could not be applied: "+engineDetail(err), err))
 			}
 			result.ReclaimedBytes += reclaimed
-		} else {
-			store := r.dependencies.Stores[destination.Storage]
-			if err := r.dependencies.Retainer.Apply(ctx, store, sitePrefix, site.Policy.KeepLast); err != nil {
-				return fail(apperror.Wrap(apperror.CategoryStorage, "backup completed but retention could not be applied", err))
-			}
+		}
+		// Set retention covers every mode: full sites store the file
+		// archive here, and incremental sites store their database dumps
+		// here. Without this, incremental runs would grow
+		// bqckup/<site>/<timestamp>/databases/ without bound.
+		if err := r.dependencies.Retainer.Apply(ctx, store, sitePrefix, site.Policy.KeepLast); err != nil {
+			return fail(apperror.Wrap(apperror.CategoryStorage, "backup completed but retention could not be applied", err))
 		}
 	}
 
