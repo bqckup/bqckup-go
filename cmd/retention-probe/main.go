@@ -14,16 +14,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
+	"path"
 	"strings"
-	"time"
 
 	backuprestic "github.com/bqckup/bqckup-go/internal/backup/restic"
 	"github.com/bqckup/bqckup-go/internal/config"
 	erestic "github.com/bqckup/bqckup-go/internal/engine/restic"
 	"github.com/bqckup/bqckup-go/internal/engine/restic/backend"
-	"github.com/bqckup/bqckup-go/internal/engine/restic/index"
 	"github.com/bqckup/bqckup-go/internal/engine/restic/repository"
 )
 
@@ -80,7 +78,7 @@ func main() {
 		Region:          storageConfig.Region,
 		Endpoint:        storageConfig.Endpoint,
 		Bucket:          storageConfig.Bucket,
-		Prefix:          strings.TrimRight(storageConfig.Prefix, "/"),
+		Prefix:          path.Join(storageConfig.Prefix, "restic", site.Name),
 	}
 
 	fmt.Printf("site=%s mode=%s storage=%s type=%s bucket=%s prefix=%q keep_last=%d\n",
@@ -93,7 +91,7 @@ func main() {
 		b, err = backend.NewS3(ctx, backend.S3Options{
 			Bucket:          rc.Bucket,
 			Endpoint:        rc.Endpoint,
-			Prefix:          rc.Prefix,
+			Prefix:          path.Join(storageConfig.Prefix, "restic", site.Name),
 			Region:          rc.Region,
 			AccessKeyID:     rc.AccessKeyID,
 			SecretAccessKey: rc.SecretAccessKey,
@@ -106,57 +104,27 @@ func main() {
 	r, err := repository.Open(ctx, b, rc.Password)
 	fatal(err, "open repository")
 
-	// Phase 1: list and parse every snapshot file.
-	snaps, err := r.ListSnapshots(ctx)
-	if err != nil {
-		fmt.Println("ListSnapshots FAILED:")
-		chain(err)
-		os.Exit(1)
-	}
-	fmt.Printf("snapshots: %d\n", len(snaps))
-	for _, s := range snaps {
-		tree := "<nil>"
-		if s.Snapshot.Tree != nil {
-			tree = s.Snapshot.Tree.String()
-		}
-		fmt.Printf("  %s time=%s tags=%v tree=%s\n",
-			s.ID, s.Snapshot.Time.Format(time.RFC3339), s.Snapshot.Tags, tree)
-	}
-
-	// Phase 2: load and decrypt every index file (what sweep does first).
-	indexCount := 0
-	err = b.List(ctx, erestic.IndexFile, func(h erestic.Handle, _ int64) error {
-		var raw []byte
-		if err := b.Load(ctx, h, 0, 0, func(rd io.Reader) error {
-			var readErr error
-			raw, readErr = io.ReadAll(rd)
-			return readErr
-		}); err != nil {
-			return fmt.Errorf("load index %s: %w", h.Name, err)
-		}
-		idx, err := index.Open(raw, r.MasterKey())
+	// Inventory: one line of counts per object type (what exists in the repo).
+	var counts []string
+	for _, t := range []erestic.FileType{erestic.ConfigFile, erestic.KeyFileType, erestic.IndexFile, erestic.SnapshotFile, erestic.LockFile, erestic.DataFile} {
+		count := 0
+		err := b.List(ctx, t, func(h erestic.Handle, size int64) error {
+			count++
+			return nil
+		})
 		if err != nil {
-			return fmt.Errorf("open index %s: %w", h.Name, err)
+			fatal(err, "inventory "+fileTypeName(t))
 		}
-		fmt.Printf("index %s: %d packs\n", h.Name, len(idx.Packs))
-		indexCount++
-		return nil
-	})
-	if err != nil {
-		fmt.Println("index load FAILED:")
-		chain(err)
-		os.Exit(1)
+		counts = append(counts, fmt.Sprintf("%s=%d", fileTypeName(t), count))
 	}
-	if indexCount == 0 {
-		fmt.Println("no index files found")
-	}
+	fmt.Printf("inventory: %s\n", strings.Join(counts, " "))
 
 	if !doPrune {
-		fmt.Println("read-only phase passed; rerun with -prune to exercise ForgetAndPrune")
+		fmt.Println("inventory OK; rerun with -prune to exercise ForgetAndPrune")
 		return
 	}
 
-	// Phase 3: the exact production operation, unredacted.
+	// The exact production operation, unredacted.
 	res, err := r.ForgetAndPrune(ctx, site.Policy.KeepLast, "site:"+site.Name)
 	if err != nil {
 		fmt.Println("ForgetAndPrune FAILED:")
@@ -168,16 +136,34 @@ func main() {
 }
 
 func fatal(err error, step string) {
-	if err != nil {
-		fmt.Printf("%s FAILED:\n", step)
-		chain(err)
-	} else {
-		fmt.Fprintln(os.Stderr, step)
+	if err == nil {
+		return
 	}
+	fmt.Printf("%s FAILED:\n", step)
+	chain(err)
 	os.Exit(1)
 }
 
 func chain(err error) { walk(err, 0) }
+
+func fileTypeName(t erestic.FileType) string {
+	switch t {
+	case erestic.ConfigFile:
+		return "config"
+	case erestic.KeyFileType:
+		return "keys"
+	case erestic.IndexFile:
+		return "index"
+	case erestic.SnapshotFile:
+		return "snapshots"
+	case erestic.LockFile:
+		return "locks"
+	case erestic.DataFile:
+		return "data"
+	default:
+		return fmt.Sprintf("type-%v", t)
+	}
+}
 
 func walk(err error, depth int) {
 	if err == nil {
