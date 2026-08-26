@@ -32,6 +32,7 @@ func (f *fakeLinkGenerator) Delete(context.Context, string) error { return error
 func (f *fakeLinkGenerator) ListBackupSets(context.Context, string) ([]storage.BackupSet, error) {
 	return nil, errors.New("unused")
 }
+func (f *fakeLinkGenerator) Probe(context.Context) error { return nil }
 
 func TestLinkFullModeReturnsTheLink(t *testing.T) {
 	generator := &fakeLinkGenerator{link: storage.DownloadLink{URL: "https://example.test/signed", Key: "k", ExpiresAt: time.Now()}}

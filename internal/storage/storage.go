@@ -75,4 +75,5 @@ type Store interface {
 	Put(ctx context.Context, artifact Artifact, key string) (StoredArtifact, error)
 	Delete(ctx context.Context, key string) error
 	ListBackupSets(ctx context.Context, sitePrefix string) ([]BackupSet, error)
+	Probe(ctx context.Context) error
 }

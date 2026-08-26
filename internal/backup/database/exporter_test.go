@@ -110,6 +110,103 @@ type fakeProcessRunner struct {
 	waitForCancel bool
 }
 
+func TestProcessExporterProbeMySQL(t *testing.T) {
+	runner := &fakeProcessRunner{}
+	exporter := NewMySQL(runner)
+	source := validDatabaseSource("mysql")
+
+	require.NoError(t, exporter.Probe(context.Background(), source))
+	assert.Equal(t, "mysqldump", runner.spec.Command)
+	assert.Contains(t, runner.spec.Args, "--host=localhost")
+	assert.Contains(t, runner.spec.Args, "--port=3306")
+	assert.Contains(t, runner.spec.Args, "--user=backup-user")
+	assert.Contains(t, runner.spec.Args, "--no-data")
+	assert.Contains(t, runner.spec.Args, "application")
+	assert.NotContains(t, runner.spec.Args, "--single-transaction")
+	assert.NotContains(t, strings.Join(runner.spec.Args, " "), source.Password)
+	assert.Equal(t, source.Password, environmentValue(runner.spec.Env, "MYSQL_PWD"))
+	assert.Equal(t, io.Discard, runner.spec.Stdout, "probe output must be discarded")
+}
+
+func TestProcessExporterProbePostgres(t *testing.T) {
+	runner := &fakeProcessRunner{}
+	exporter := NewPostgres(runner)
+	source := validDatabaseSource("postgres")
+
+	require.NoError(t, exporter.Probe(context.Background(), source))
+	assert.Equal(t, "pg_dump", runner.spec.Command)
+	assert.Contains(t, runner.spec.Args, "--schema-only")
+	assert.Contains(t, runner.spec.Args, "--username=backup-user")
+	assert.Contains(t, runner.spec.Args, "application")
+	assert.NotContains(t, runner.spec.Args, "--format=plain")
+	assert.NotContains(t, runner.spec.Args, "--no-owner")
+	assert.Equal(t, source.Password, environmentValue(runner.spec.Env, "PGPASSWORD"))
+	assert.Equal(t, io.Discard, runner.spec.Stdout)
+}
+
+func TestProcessExporterProbeReportsFirstStderrLine(t *testing.T) {
+	runner := &fakeProcessRunner{
+		err:    errors.New("exit status 1"),
+		stderr: "mysqldump: Got error: 1045: Access denied for user 'x' (using password: YES)\nExtra line\n",
+	}
+	exporter := NewMySQL(runner)
+
+	err := exporter.Probe(context.Background(), validDatabaseSource("mysql"))
+	require.Error(t, err)
+	assert.Equal(t, "mysqldump: Got error: 1045: Access denied for user 'x' (using password: YES)", err.Error())
+}
+
+func TestProcessExporterProbeTruncatesLongStderrLines(t *testing.T) {
+	runner := &fakeProcessRunner{err: errors.New("exit status 1"), stderr: strings.Repeat("x", 500) + "\n"}
+	exporter := NewMySQL(runner)
+
+	err := exporter.Probe(context.Background(), validDatabaseSource("mysql"))
+	require.Error(t, err)
+	assert.LessOrEqual(t, len(err.Error()), 200)
+}
+
+func TestProcessExporterProbeFallsBackWhenStderrEmpty(t *testing.T) {
+	runner := &fakeProcessRunner{err: errors.New("exit status 1")}
+	exporter := NewMySQL(runner)
+
+	err := exporter.Probe(context.Background(), validDatabaseSource("mysql"))
+	require.Error(t, err)
+	assert.Equal(t, "database connection check failed", err.Error())
+}
+
+func TestProcessExporterProbeRejectsEngineMismatch(t *testing.T) {
+	exporter := NewMySQL(&fakeProcessRunner{})
+
+	err := exporter.Probe(context.Background(), validDatabaseSource("postgres"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "does not match source engine")
+}
+
+func TestProcessExporterProbeCancelledContextSkipsRun(t *testing.T) {
+	runner := &fakeProcessRunner{}
+	exporter := NewPostgres(runner)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := exporter.Probe(ctx, validDatabaseSource("postgres"))
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Equal(t, "", runner.spec.Command, "runner must not be called")
+}
+
+func TestProcessExporterProbeReturnsContextErrorOnLateCancel(t *testing.T) {
+	runner := &fakeProcessRunner{waitForCancel: true}
+	exporter := NewPostgres(runner)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	done := make(chan error, 1)
+	go func() {
+		done <- exporter.Probe(ctx, validDatabaseSource("postgres"))
+	}()
+	cancel()
+
+	require.ErrorIs(t, <-done, context.Canceled)
+}
+
 func (f *fakeProcessRunner) LookPath(command string) (string, error) { return command, nil }
 
 func (f *fakeProcessRunner) Run(ctx context.Context, spec process.ProcessSpec) error {

@@ -323,6 +323,8 @@ func (f *fakeStore) Put(_ context.Context, artifact storage.Artifact, key string
 	return storage.StoredArtifact{Key: key, Size: artifact.Size, SHA256: artifact.SHA256}, nil
 }
 
+func (f *fakeStore) Probe(context.Context) error { return nil }
+
 type fakeExporter struct {
 	err        error
 	sourceKind string
@@ -478,6 +480,8 @@ func (s *cancelAfterPutStore) Put(ctx context.Context, artifact storage.Artifact
 	s.cancel()
 	return stored, nil
 }
+
+func (s *cancelAfterPutStore) Probe(context.Context) error { return nil }
 
 // TestRunnerSuccessFinishRunSurvivesLateCancellation: a cancellation that
 // arrives after the last storage write must not abort the success-path

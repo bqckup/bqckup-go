@@ -129,6 +129,23 @@ func (s *Store) Delete(ctx context.Context, key string) error {
 	return syncDirectory(filepath.Dir(target))
 }
 
+// Probe verifies the destination is writable by creating and immediately
+// removing a temporary file. The error text is safe to print (local paths
+// only).
+func (s *Store) Probe(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	file, err := os.CreateTemp(s.root, ".bqckup-probe-*")
+	if err != nil {
+		return fmt.Errorf("destination not writable: %w", err)
+	}
+	name := file.Name()
+	_ = file.Close()
+	_ = os.Remove(name) // best effort; never return an error from Remove
+	return nil
+}
+
 // LocalPath resolves an object key to its path on the local filesystem.
 // Used by the download-link command to explain where a local file lives.
 func (s *Store) LocalPath(key string) (string, error) {

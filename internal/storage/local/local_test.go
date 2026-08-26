@@ -161,3 +161,20 @@ func TestLocalPathRejectsUnsafeKeys(t *testing.T) {
 	_, err = store.LocalPath("../outside/files.tar.gz")
 	require.Error(t, err)
 }
+
+func TestLocalStoreProbe(t *testing.T) {
+	root := t.TempDir()
+	store, err := New(root)
+	require.NoError(t, err)
+
+	require.NoError(t, store.Probe(context.Background()))
+	entries, readErr := os.ReadDir(root)
+	require.NoError(t, readErr)
+	assert.Empty(t, entries, "probe must leave the storage root empty")
+
+	require.NoError(t, os.Chmod(root, 0o500))
+	t.Cleanup(func() { _ = os.Chmod(root, 0o700) })
+	probeErr := store.Probe(context.Background())
+	require.Error(t, probeErr)
+	assert.Contains(t, probeErr.Error(), "not writable")
+}

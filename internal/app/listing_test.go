@@ -30,6 +30,7 @@ func (appFakeStore) Delete(context.Context, string) error { return errors.New("u
 func (appFakeStore) ListBackupSets(context.Context, string) ([]storage.BackupSet, error) {
 	return nil, errors.New("unused")
 }
+func (appFakeStore) Probe(context.Context) error { return nil }
 
 func (a *appRemoteLister) ListBackupSets(context.Context, string) ([]storage.BackupSet, error) {
 	return a.sets, nil

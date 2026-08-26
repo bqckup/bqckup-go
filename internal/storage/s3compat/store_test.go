@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -309,4 +310,57 @@ func TestPresignLinkRejectsUnsafeKeys(t *testing.T) {
 	_, err := store.PresignLink(context.Background(), "../bqckup/site-a/files.tar.gz", time.Hour)
 	require.Error(t, err)
 	assert.Nil(t, client.headInput)
+}
+
+func TestStoreProbe(t *testing.T) {
+	t.Run("lists one object under the storage prefix", func(t *testing.T) {
+		client := &fakeClient{}
+		store := newWithClients(Options{Bucket: "backups", Prefix: "company"}, &fakeUploader{}, client, nil)
+
+		require.NoError(t, store.Probe(context.Background()))
+		require.Len(t, client.listInputs, 1)
+		assert.Equal(t, "backups", aws.ToString(client.listInputs[0].Bucket))
+		assert.Equal(t, "company", aws.ToString(client.listInputs[0].Prefix))
+		assert.Equal(t, int32(1), aws.ToInt32(client.listInputs[0].MaxKeys))
+		assert.Nil(t, client.headInput, "probe must only list, never head or delete")
+		assert.Nil(t, client.deleteInput)
+	})
+
+	t.Run("returns the API error code only", func(t *testing.T) {
+		client := &fakeClient{listErr: &smithy.GenericAPIError{Code: "AccessDenied", Message: "provider secret response"}}
+		store := newWithClients(Options{Bucket: "backups"}, &fakeUploader{}, client, nil)
+
+		err := store.Probe(context.Background())
+		require.Error(t, err)
+		assert.Equal(t, "AccessDenied", err.Error())
+		assert.NotContains(t, err.Error(), "provider secret response")
+	})
+
+	t.Run("hides non-smithy errors", func(t *testing.T) {
+		client := &fakeClient{listErr: errors.New("dial tcp: lookup secret-endpoint.example")}
+		store := newWithClients(Options{Bucket: "backups"}, &fakeUploader{}, client, nil)
+
+		err := store.Probe(context.Background())
+		require.Error(t, err)
+		assert.Equal(t, "request failed", err.Error())
+	})
+
+	t.Run("reports timeouts plainly", func(t *testing.T) {
+		client := &fakeClient{listErr: context.DeadlineExceeded}
+		store := newWithClients(Options{Bucket: "backups"}, &fakeUploader{}, client, nil)
+
+		err := store.Probe(context.Background())
+		require.Error(t, err)
+		assert.Equal(t, "timed out", err.Error())
+	})
+
+	t.Run("preserves cancellation without calling the client", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		client := &fakeClient{}
+		store := newWithClients(Options{Bucket: "backups"}, &fakeUploader{}, client, nil)
+
+		require.ErrorIs(t, store.Probe(ctx), context.Canceled)
+		assert.Empty(t, client.listInputs)
+	})
 }

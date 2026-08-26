@@ -125,6 +125,8 @@ response, missing URL env, URL and credential redaction.
 
 ## M08 — Doctor command
 
+**Status:** Delivered (issue #16: database and storage connectivity probes). Retain this section as its acceptance checklist.
+
 **Objective:** Add read-only dependency and connectivity diagnostics with text and JSON output.
 
 **Prerequisites:** Checks are specified for every implemented source/destination type.
@@ -133,11 +135,23 @@ response, missing URL env, URL and credential redaction.
 
 **Out of scope:** Repair, creating buckets, running backups, revealing provider details or secrets.
 
-**Acceptance:** Each check has stable name/status/message; JSON has no ANSI; missing dependency maps to exit code 3; checks honor context cancellation.
+**Acceptance:**
+- [x] Each check has stable name/status/message; database checks are `database:<site>:<source>`, storage checks `storage:<storage>`.
+- [x] JSON has no ANSI; text and JSON output stay identical in shape to the original doctor.
+- [x] Missing dependency maps to exit code 3; `--site` unknown or disabled maps to exit code 2.
+- [x] Checks honor context cancellation; every connectivity probe runs under a 10 s timeout child context.
+- [x] Probes are non-mutating: DB probe uses `--no-data`/`--schema-only` with stdout discarded; local probe creates and removes one temp file; S3/R2 probe lists with `MaxKeys=1`. Known ceiling: S3 probe verifies list access, not `PutObject`.
 
-**Required tests:** Healthy/unhealthy matrices, site filter, JSON schema, stderr routing, exit mapping, redaction, no backup/history mutation.
+**Required tests:**
+- [x] Healthy/unhealthy matrices (unit fakes in `internal/doctor`, no real connections).
+- [x] Site filter (unit + CLI exit-code mapping).
+- [x] JSON schema (CLI fixture asserts JSON field names and no ANSI bytes).
+- [x] stderr routing (errors flow through the standard `cli.Execute` path with `SilenceErrors`).
+- [x] Exit mapping (2 invalid input, 3 preflight).
+- [x] Redaction (probe error codes only; no password/endpoint strings in any check message).
+- [x] No backup/history mutation (doctor never opens the history database).
 
-**Suggested commit:** `feat: add backup preflight doctor command`
+**Suggested commit:** `feat: add database and storage probes to doctor`
 
 ## M09 — Legacy YAML migration command
 
