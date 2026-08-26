@@ -54,7 +54,7 @@ func Load(ctx context.Context, dir string) (Config, error) {
 		return Config{}, err
 	}
 	for name, storage := range stores.Storages {
-		if storage.Type == "r2" && storage.Region == "" {
+		if storage.Type == "r2" && storage.Region == "" && storage.Credentials.Source != "remote" {
 			storage.Region = "auto"
 			stores.Storages[name] = storage
 		}

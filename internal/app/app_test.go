@@ -4,10 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/bqckup/bqckup-go/internal/apperror"
 	databaseexporter "github.com/bqckup/bqckup-go/internal/backup/database"
@@ -18,6 +21,100 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type fakeRemoteStorageResolver struct {
+	storages map[string]config.Storage
+	err      error
+}
+
+func (f fakeRemoteStorageResolver) Resolve(context.Context, map[string]config.Storage) (map[string]config.Storage, error) {
+	return f.storages, f.err
+}
+
+func TestResolveRemoteStorageConfigurationValidatesResolvedValues(t *testing.T) {
+	configuration := validApplicationConfig(t)
+	configuration.Storages = map[string]config.Storage{
+		"remote": {Type: "s3", Credentials: config.StorageCredentials{Source: "remote", URL: "BQCKUP_REMOTE_URL"}},
+	}
+	configuration.Sites[0].Destinations = []config.Destination{{Storage: "remote"}}
+	resolvedStorage := config.Storage{
+		Type: "s3", Bucket: "bucket", AccessKeyID: "key", SecretAccessKey: "secret", Region: "us-east-1",
+	}
+
+	resolved, err := resolveRemoteStorageConfiguration(t.Context(), configuration, fakeRemoteStorageResolver{
+		storages: map[string]config.Storage{"remote": resolvedStorage},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, resolvedStorage, resolved.Storages["remote"])
+
+	_, err = resolveRemoteStorageConfiguration(t.Context(), configuration, fakeRemoteStorageResolver{
+		storages: map[string]config.Storage{"remote": {Type: "s3", AccessKeyID: "secret-key"}},
+	})
+	require.Error(t, err)
+	assert.Equal(t, apperror.CategoryConfig, apperror.CategoryOf(err))
+	assert.Equal(t, "remote storage configuration is invalid", err.Error())
+	assert.NotContains(t, err.Error(), "secret-key")
+}
+
+func TestResolveRemoteStorageConfigurationCategorizesProviderFailure(t *testing.T) {
+	configuration := validApplicationConfig(t)
+	_, err := resolveRemoteStorageConfiguration(t.Context(), configuration, fakeRemoteStorageResolver{
+		err: errors.New("https://provider.invalid/?token=secret provider body secret"),
+	})
+	require.Error(t, err)
+	assert.Equal(t, apperror.CategoryPreflight, apperror.CategoryOf(err))
+	assert.Equal(t, "could not load remote storage configuration", err.Error())
+	assert.NotContains(t, err.Error(), "provider.invalid")
+	assert.NotContains(t, err.Error(), "secret")
+}
+
+func TestOpenResolvesRemoteStorageBeforeBuildingDestinations(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"bucket":"remote-bucket","access_key_id":"remote-key","secret_access_key":"remote-secret","region":"us-east-1"}`))
+	}))
+	t.Cleanup(server.Close)
+	t.Setenv("BQCKUP_REMOTE_URL", server.URL)
+	configDir, _ := writeApplicationConfig(t)
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, "config", "storages.yaml"), []byte(`storages:
+  remote:
+    type: s3
+    credentials:
+      source: remote
+      url: BQCKUP_REMOTE_URL
+`), 0o600))
+	sitePath := filepath.Join(configDir, "sites", "example.yaml")
+	siteBody, err := os.ReadFile(sitePath)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(sitePath, []byte(strings.Replace(string(siteBody), "local-primary", "remote", 1)), 0o600))
+
+	application, err := Open(t.Context(), configDir)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, application.Close()) })
+	storage := application.Configuration().Storages["remote"]
+	assert.Equal(t, "remote-bucket", storage.Bucket)
+	assert.Equal(t, "remote-key", storage.AccessKeyID)
+	assert.Equal(t, "remote-secret", storage.SecretAccessKey)
+	assert.Empty(t, storage.Credentials)
+}
+
+func validApplicationConfig(t *testing.T) config.Config {
+	t.Helper()
+	root := t.TempDir()
+	return config.Config{
+		Version: config.SchemaVersion,
+		App: config.App{
+			StateDatabase: filepath.Join(root, "state.db"), TemporaryDirectory: filepath.Join(root, "tmp"),
+			LockDirectory: filepath.Join(root, "locks"), LogLevel: "info",
+		},
+		Storages: map[string]config.Storage{"local": {Type: "local", Directory: filepath.Join(root, "backups")}},
+		Sites: []config.Site{{
+			SchemaVersion: config.SchemaVersion, SourceFile: filepath.Join(root, "sites", "example.yaml"),
+			Name: "example", Enabled: true, Sources: config.Sources{Files: config.FileSource{Include: []string{root}}},
+			Destinations: []config.Destination{{Storage: "local"}},
+			Policy:       config.Policy{MinimumInterval: time.Hour, KeepLast: 1},
+		}},
+	}
+}
 
 func TestBuildDatabaseExportersPreflightsEnabledEngines(t *testing.T) {
 	process := &fakeDatabaseProcessRunner{}

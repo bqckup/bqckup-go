@@ -109,12 +109,22 @@ func validateLocalStorage(field string, value Storage) error {
 			return validationError("config/storages.yaml", field+"."+candidate.name, "%s is not valid for local storage", candidate.name)
 		}
 	}
+	if value.Credentials.Source != "" || value.Credentials.URL != "" {
+		return validationError("config/storages.yaml", field+".credentials", "credentials are not valid for local storage")
+	}
 	return nil
 }
 
 func validateS3Storage(field string, value Storage) error {
 	if value.Directory != "" {
 		return validationError("config/storages.yaml", field+".directory", "directory is not valid for s3 storage")
+	}
+	remote, err := validateCredentialSource(field, value)
+	if err != nil {
+		return err
+	}
+	if remote {
+		return validateRemotePlaceholders(field, value)
 	}
 	if err := validateRemoteRequiredFields(field, value); err != nil {
 		return err
@@ -132,6 +142,13 @@ func validateR2Storage(field string, value Storage) error {
 	if value.Directory != "" {
 		return validationError("config/storages.yaml", field+".directory", "directory is not valid for r2 storage")
 	}
+	remote, err := validateCredentialSource(field, value)
+	if err != nil {
+		return err
+	}
+	if remote {
+		return validateRemotePlaceholders(field, value)
+	}
 	if err := validateRemoteRequiredFields(field, value); err != nil {
 		return err
 	}
@@ -144,6 +161,42 @@ func validateR2Storage(field string, value Storage) error {
 	parsed, _ := url.Parse(value.Endpoint)
 	if !strings.EqualFold(parsed.Scheme, "https") {
 		return validationError("config/storages.yaml", field+".endpoint", "endpoint must use HTTPS for r2 storage")
+	}
+	return validatePrefix(field+".prefix", value.Prefix)
+}
+
+func validateCredentialSource(field string, value Storage) (bool, error) {
+	credentials := value.Credentials
+	if credentials.Source == "" && credentials.URL == "" {
+		return false, nil
+	}
+	if credentials.Source != "remote" {
+		return false, validationError("config/storages.yaml", field+".credentials.source", "source must be remote")
+	}
+	if credentials.URL == "" {
+		return false, validationError("config/storages.yaml", field+".credentials.url", "url environment variable is required")
+	}
+	if !validEnvName.MatchString(credentials.URL) {
+		return false, validationError("config/storages.yaml", field+".credentials.url", "must be a valid environment variable name")
+	}
+	return true, nil
+}
+
+func validateRemotePlaceholders(field string, value Storage) error {
+	fields := []struct {
+		name  string
+		value string
+	}{
+		{"bucket", value.Bucket},
+		{"access_key_id", value.AccessKeyID},
+		{"secret_access_key", value.SecretAccessKey},
+		{"region", value.Region},
+		{"endpoint", value.Endpoint},
+	}
+	for _, candidate := range fields {
+		if candidate.value != "" {
+			return validationError("config/storages.yaml", field+"."+candidate.name, "%s must not be set when credentials.source is remote", candidate.name)
+		}
 	}
 	return validatePrefix(field+".prefix", value.Prefix)
 }

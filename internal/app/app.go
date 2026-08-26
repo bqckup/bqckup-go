@@ -22,8 +22,13 @@ import (
 	"github.com/bqckup/bqckup-go/internal/retention"
 	"github.com/bqckup/bqckup-go/internal/storage"
 	localstorage "github.com/bqckup/bqckup-go/internal/storage/local"
+	"github.com/bqckup/bqckup-go/internal/storage/remoteconfig"
 	"github.com/bqckup/bqckup-go/internal/storage/s3compat"
 )
+
+type remoteStorageResolver interface {
+	Resolve(context.Context, map[string]config.Storage) (map[string]config.Storage, error)
+}
 
 type App struct {
 	configuration config.Config
@@ -39,6 +44,10 @@ type App struct {
 
 func Open(ctx context.Context, configDir string) (*App, error) {
 	configuration, err := config.Load(ctx, configDir)
+	if err != nil {
+		return nil, err
+	}
+	configuration, err = resolveRemoteStorageConfiguration(ctx, configuration, remoteconfig.New())
 	if err != nil {
 		return nil, err
 	}
@@ -85,6 +94,21 @@ func Open(ctx context.Context, configDir string) (*App, error) {
 		restorer:      engine,
 		closeDatabase: closeDatabase,
 	}, nil
+}
+
+func resolveRemoteStorageConfiguration(ctx context.Context, configuration config.Config, resolver remoteStorageResolver) (config.Config, error) {
+	storages, err := resolver.Resolve(ctx, configuration.Storages)
+	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return config.Config{}, err
+		}
+		return config.Config{}, apperror.Wrap(apperror.CategoryPreflight, "could not load remote storage configuration", err)
+	}
+	configuration.Storages = storages
+	if err := configuration.Validate(); err != nil {
+		return config.Config{}, apperror.Wrap(apperror.CategoryConfig, "remote storage configuration is invalid", err)
+	}
+	return configuration, nil
 }
 
 // buildDatabaseExporters constructs one exporter per configured database
