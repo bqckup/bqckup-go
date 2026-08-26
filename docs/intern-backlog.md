@@ -328,6 +328,36 @@ green after prune.
 
 **Suggested commit:** `feat: add incremental snapshot restore command`
 
+## M19 — Human-readable archive backup-set layout
+
+**Status:** Delivered (2026-08-26). Issue #20.
+
+**Objective:** Make full-mode archive paths recognizable and sortable in local
+and S3/R2 object browsers.
+
+**Prerequisites:** M07 and M15 delivered (retention and remote listing consume
+the archive backup-set prefix).
+
+**In scope:** new UTC
+`bqckup/<site>/DD-MMMM-YYYY/HH-mm-ss/<artifact>` keys with English
+month names, file and database artifact paths, local and S3/R2 listing,
+retention deletion, legacy flat-layout recognition, and canonical docs.
+
+**Out of scope:** incremental/Restic repository layout, configuration changes,
+artifact content, restore, or migration/renaming of existing objects.
+
+**Acceptance:** new full-mode runs use the readable layout; write-once storage
+rejects a duplicate site/second instead of overwriting it; listing and retention
+recognize both new and legacy archive sets; delete validation cannot target a
+date directory or wider prefix; `make verify` and `sh scripts/check-docs.sh`
+pass.
+
+**Required tests:** UTC/English formatting, parser strictness and legacy
+compatibility, runner file/database keys, local and S3/R2 set discovery,
+same-second overwrite rejection, and safe retention prefix validation.
+
+**Suggested commit:** `feat: use readable archive backup paths`
+
 ## Mentor review checklist
 
 - Assignment is exactly one milestone with prerequisites satisfied.

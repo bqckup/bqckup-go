@@ -85,13 +85,15 @@ SQLite runs with WAL, foreign keys, a five-second busy timeout, and one open con
 Artifact keys use:
 
 ```text
-bqckup/<site>/<UTC timestamp>/<artifact name>
+bqckup/<site>/<DD-MMMM-YYYY>/<HH-mm-ss>/<artifact name>
 ```
 
-The timestamp layout is `2006-01-02T15-04-05.000000000Z` (nanosecond
-resolution, so two runs in the same second — a forced rerun, cron and a
-manual run overlapping — never collide on the same object key; stores are
-write-once). Names come from validated configuration, not raw runtime
+The date and run directories use UTC, with English month names. Archive sets
+have one-second name resolution; because stores are write-once, a second run
+for the same site and UTC second is rejected instead of overwriting data.
+Listing and retention also recognize the previous flat
+`2006-01-02T15-04-05.000000000Z` backup-set directory so existing archives
+remain manageable. Names come from validated configuration, not raw runtime
 input.
 
 ## Security rules

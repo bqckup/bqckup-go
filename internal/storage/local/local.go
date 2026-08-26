@@ -155,14 +155,39 @@ func (s *Store) ListBackupSets(ctx context.Context, sitePrefix string) ([]storag
 		if !entry.IsDir() {
 			continue
 		}
-		createdAt, err := time.Parse(storage.TimestampLayout, entry.Name())
-		if err != nil || createdAt.Location() != time.UTC {
+		if createdAt, parseErr := storage.ParseBackupSet(entry.Name()); parseErr == nil {
+			sets = append(sets, storage.BackupSet{
+				Key:       path.Join(sitePrefix, entry.Name()),
+				CreatedAt: createdAt,
+			})
 			continue
 		}
-		sets = append(sets, storage.BackupSet{
-			Key:       path.Join(sitePrefix, entry.Name()),
-			CreatedAt: createdAt,
-		})
+
+		date, dateErr := time.Parse(storage.BackupDateLayout, entry.Name())
+		if dateErr != nil || date.Format(storage.BackupDateLayout) != entry.Name() {
+			continue
+		}
+		runs, readErr := os.ReadDir(filepath.Join(directory, entry.Name()))
+		if readErr != nil {
+			return nil, fmt.Errorf("list backup runs %q: %w", path.Join(sitePrefix, entry.Name()), readErr)
+		}
+		for _, run := range runs {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			if !run.IsDir() {
+				continue
+			}
+			setName := path.Join(entry.Name(), run.Name())
+			createdAt, parseErr := storage.ParseBackupSet(setName)
+			if parseErr != nil {
+				continue
+			}
+			sets = append(sets, storage.BackupSet{
+				Key:       path.Join(sitePrefix, setName),
+				CreatedAt: createdAt,
+			})
+		}
 	}
 	sort.Slice(sets, func(i, j int) bool { return sets[i].CreatedAt.Before(sets[j].CreatedAt) })
 	return sets, nil

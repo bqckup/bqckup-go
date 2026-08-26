@@ -61,7 +61,7 @@ func TestBackupRunAndHistoryListEndToEnd(t *testing.T) {
 	require.NoError(t, json.Unmarshal(stdout.Bytes(), &result))
 	assert.Equal(t, "success", result["status"])
 
-	matches, err := filepath.Glob(filepath.Join(backupRoot, "bqckup", "example", "*", "files.tar.gz"))
+	matches, err := filepath.Glob(filepath.Join(backupRoot, "bqckup", "example", "*", "*", "files.tar.gz"))
 	require.NoError(t, err)
 	assert.Len(t, matches, 1)
 
