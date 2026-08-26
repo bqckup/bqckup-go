@@ -195,6 +195,186 @@ func TestRestoreOverwritesAfterConfirm(t *testing.T) {
 	assert.Equal(t, "snapshot content", string(data))
 }
 
+func TestRestoreDoesNotFollowTargetSymlinks(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		conflictPath func(target, source string) string
+	}{
+		{
+			name: "snapshot directory",
+			conflictPath: func(target, source string) string {
+				return restoredPath(target, source, "node")
+			},
+		},
+		{
+			name: "synthetic ancestor",
+			conflictPath: func(target, source string) string {
+				return filepath.Join(target, strings.Split(strings.TrimLeft(filepath.Clean(source), string(filepath.Separator)), string(filepath.Separator))[0])
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			repo := newTestRepository(t)
+			source := t.TempDir()
+			require.NoError(t, os.MkdirAll(filepath.Join(source, "node"), 0o755))
+			require.NoError(t, os.WriteFile(filepath.Join(source, "node", "child.txt"), []byte("restored"), 0o644))
+			snap := backupTree(t, repo, source)
+
+			target := t.TempDir()
+			external := t.TempDir()
+			conflict := test.conflictPath(target, source)
+			require.NoError(t, os.MkdirAll(filepath.Dir(conflict), 0o755))
+			require.NoError(t, os.Symlink(external, conflict))
+
+			_, err := New(repo).Restore(context.Background(), snap, []string{source}, target, proceed)
+			require.NoError(t, err)
+			info, err := os.Lstat(conflict)
+			require.NoError(t, err)
+			assert.True(t, info.IsDir())
+			assert.Zero(t, info.Mode()&os.ModeSymlink)
+			externalEntries, err := os.ReadDir(external)
+			require.NoError(t, err)
+			assert.Empty(t, externalEntries, "restore wrote outside the target")
+			data, err := os.ReadFile(restoredPath(target, source, filepath.Join("node", "child.txt")))
+			require.NoError(t, err)
+			assert.Equal(t, "restored", string(data))
+		})
+	}
+}
+
+func TestRestoreDecliningSymlinkConflictLeavesTargetUntouched(t *testing.T) {
+	repo := newTestRepository(t)
+	source := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(source, "node"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(source, "node", "child.txt"), []byte("restored"), 0o644))
+	snap := backupTree(t, repo, source)
+
+	target := t.TempDir()
+	external := t.TempDir()
+	firstComponent := strings.Split(strings.TrimLeft(filepath.Clean(source), string(filepath.Separator)), string(filepath.Separator))[0]
+	conflict := filepath.Join(target, firstComponent)
+	require.NoError(t, os.Symlink(external, conflict))
+	sentinel := errors.New("user declined overwrite")
+	var got []string
+	_, err := New(repo).Restore(context.Background(), snap, []string{source}, target, func(conflicts []string) error {
+		got = append(got, conflicts...)
+		return sentinel
+	})
+	require.ErrorIs(t, err, sentinel)
+	assert.Equal(t, []string{conflict}, got)
+	info, err := os.Lstat(conflict)
+	require.NoError(t, err)
+	assert.NotZero(t, info.Mode()&os.ModeSymlink)
+	externalEntries, err := os.ReadDir(external)
+	require.NoError(t, err)
+	assert.Empty(t, externalEntries)
+}
+
+func TestRestoreReplacesConflictingPathTypes(t *testing.T) {
+	t.Run("directory over file", func(t *testing.T) {
+		repo := newTestRepository(t)
+		source := t.TempDir()
+		require.NoError(t, os.MkdirAll(filepath.Join(source, "node"), 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(source, "node", "child.txt"), []byte("restored"), 0o644))
+		snap := backupTree(t, repo, source)
+
+		target := t.TempDir()
+		conflict := restoredPath(target, source, "node")
+		require.NoError(t, os.MkdirAll(filepath.Dir(conflict), 0o755))
+		require.NoError(t, os.WriteFile(conflict, []byte("old file"), 0o644))
+
+		_, err := New(repo).Restore(context.Background(), snap, []string{source}, target, proceed)
+		require.NoError(t, err)
+		data, err := os.ReadFile(filepath.Join(conflict, "child.txt"))
+		require.NoError(t, err)
+		assert.Equal(t, "restored", string(data))
+	})
+
+	t.Run("file over directory", func(t *testing.T) {
+		repo := newTestRepository(t)
+		source := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(source, "node"), []byte("restored"), 0o644))
+		snap := backupTree(t, repo, source)
+
+		target := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(target, "unrelated.txt"), []byte("keep"), 0o644))
+		conflict := restoredPath(target, source, "node")
+		require.NoError(t, os.MkdirAll(conflict, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(conflict, "old.txt"), []byte("old"), 0o644))
+
+		_, err := New(repo).Restore(context.Background(), snap, []string{source}, target, proceed)
+		require.NoError(t, err)
+		data, err := os.ReadFile(conflict)
+		require.NoError(t, err)
+		assert.Equal(t, "restored", string(data))
+		unrelated, err := os.ReadFile(filepath.Join(target, "unrelated.txt"))
+		require.NoError(t, err)
+		assert.Equal(t, "keep", string(unrelated))
+	})
+
+	t.Run("symlink over directory", func(t *testing.T) {
+		repo := newTestRepository(t)
+		source := t.TempDir()
+		require.NoError(t, os.Symlink("destination.txt", filepath.Join(source, "node")))
+		snap := backupTree(t, repo, source)
+
+		target := t.TempDir()
+		conflict := restoredPath(target, source, "node")
+		require.NoError(t, os.MkdirAll(conflict, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(conflict, "old.txt"), []byte("old"), 0o644))
+
+		_, err := New(repo).Restore(context.Background(), snap, []string{source}, target, proceed)
+		require.NoError(t, err)
+		linkTarget, err := os.Readlink(conflict)
+		require.NoError(t, err)
+		assert.Equal(t, "destination.txt", linkTarget)
+	})
+}
+
+func TestRestoreRejectsUnsafeSnapshotTree(t *testing.T) {
+	t.Run("symlink with subtree", func(t *testing.T) {
+		ctx := context.Background()
+		repo := newTestRepository(t)
+		external := t.TempDir()
+		subID := saveTree(t, ctx, repo, &tree.Tree{Nodes: []*tree.Node{
+			{Name: "pwn", Type: tree.TypeFile, Mode: 0o644, Content: []restic.ID{}},
+		}})
+		rootID := saveTree(t, ctx, repo, &tree.Tree{Nodes: []*tree.Node{
+			{Name: "data", Type: tree.TypeSymlink, LinkTarget: external, Subtree: &subID},
+		}})
+		require.NoError(t, repo.Flush(ctx))
+		snapID, err := repo.SaveSnapshot(ctx, snapshot.Snapshot{Tree: &rootID, Paths: []string{"/data"}})
+		require.NoError(t, err)
+		entry, err := repo.LoadSnapshot(ctx, snapID)
+		require.NoError(t, err)
+
+		_, err = New(repo).Restore(ctx, entry.Snapshot, []string{"/data"}, filepath.Join(t.TempDir(), "restore"), proceed)
+		require.Error(t, err)
+		externalEntries, readErr := os.ReadDir(external)
+		require.NoError(t, readErr)
+		assert.Empty(t, externalEntries, "malformed snapshot escaped staging")
+	})
+
+	t.Run("name with path separator", func(t *testing.T) {
+		ctx := context.Background()
+		repo := newTestRepository(t)
+		subID := saveTree(t, ctx, repo, &tree.Tree{Nodes: []*tree.Node{
+			{Name: "nested/pwn", Type: tree.TypeFile, Mode: 0o644, Content: []restic.ID{}},
+		}})
+		rootID := saveTree(t, ctx, repo, &tree.Tree{Nodes: []*tree.Node{
+			{Name: "data", Type: tree.TypeDir, Mode: 0o755, Subtree: &subID},
+		}})
+		require.NoError(t, repo.Flush(ctx))
+		snapID, err := repo.SaveSnapshot(ctx, snapshot.Snapshot{Tree: &rootID, Paths: []string{"/data"}})
+		require.NoError(t, err)
+		entry, err := repo.LoadSnapshot(ctx, snapID)
+		require.NoError(t, err)
+
+		_, err = New(repo).Restore(ctx, entry.Snapshot, []string{"/data"}, filepath.Join(t.TempDir(), "restore"), proceed)
+		require.ErrorContains(t, err, "invalid name")
+	})
+}
+
 func TestRestoreCancellationRemovesStaging(t *testing.T) {
 	repo := newTestRepository(t)
 	source := t.TempDir()
