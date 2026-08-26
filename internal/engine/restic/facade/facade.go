@@ -6,6 +6,7 @@ package facade
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"strings"
@@ -40,10 +41,46 @@ func (e *Engine) EnsureRepository(ctx context.Context, repo backuprestic.RepoCon
 	if err != nil {
 		return err
 	}
+	// First-run initialization is stat-then-write: two machines starting
+	// the first backup of the same site simultaneously would each write a
+	// config with its own random master key, and the loser's data would be
+	// undecryptable forever. Serialize initialization with an exclusive
+	// lock while no config exists. Master-key locks cannot be used here —
+	// the master key only exists after Init — and an init lock cannot read
+	// master-key locks, so once a config exists this path skips locking
+	// entirely and the normal master-key lock (taken by BackupFiles)
+	// governs. Lock errors are returned unwrapped, like BackupFiles: their
+	// message (hostname, PID) must reach the user.
+	if _, err := b.Stat(ctx, restic.Handle{Type: restic.ConfigFile}); b.IsNotExist(err) {
+		initLock, lockErr := lock.New(ctx, b, initLockKey(repo.Password), true)
+		if lockErr != nil {
+			return lockErr
+		}
+		defer func() { _ = initLock.Unlock(context.WithoutCancel(ctx), b) }()
+	} else if err != nil {
+		return err
+	}
 	if _, err := repository.Init(ctx, b, repo.Password); err != nil {
 		return &restic.RedactedError{Category: "repository", Message: "could not initialize the repository", Err: err}
 	}
 	return nil
+}
+
+// initLockKey derives the key sealing the initialization lock. Before the
+// first Init there is no repository master key, so the lock is sealed with
+// a password-derived key — the one secret every machine that may initialize
+// the repository shares. The domain-separated derivation never produces a
+// real master key, and the lock only protects non-secret metadata
+// (hostname, PID, timestamps), so a fast hash suffices.
+func initLockKey(password string) *crypto.MasterKey {
+	encrypt := sha256.Sum256([]byte("bqckup init-lock encrypt" + password))
+	mack := sha256.Sum256([]byte("bqckup init-lock mack" + password))
+	macr := sha256.Sum256([]byte("bqckup init-lock macr" + password))
+	return &crypto.MasterKey{
+		Encrypt: encrypt,
+		MACK:    [16]byte(mack[:16]),
+		MACR:    [16]byte(macr[:16]),
+	}
 }
 
 // BackupFiles walks the include paths and writes one snapshot.
