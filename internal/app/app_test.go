@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/bqckup/bqckup-go/internal/apperror"
 	databaseexporter "github.com/bqckup/bqckup-go/internal/backup/database"
+	restic "github.com/bqckup/bqckup-go/internal/backup/restic"
 	"github.com/bqckup/bqckup-go/internal/config"
 	"github.com/bqckup/bqckup-go/internal/process"
 	"github.com/bqckup/bqckup-go/internal/storage/s3compat"
@@ -77,6 +79,97 @@ func TestBuildStoresConstructsS3AndR2WithoutNetworkIO(t *testing.T) {
 	assert.IsType(t, &s3compat.Store{}, stores["r2"])
 }
 
+type fakeSnapshotLister struct {
+	snapshots []restic.Snapshot
+	err       error
+	gotRepo   restic.RepoConfig
+}
+
+func (f *fakeSnapshotLister) ListSnapshots(_ context.Context, repo restic.RepoConfig) ([]restic.Snapshot, error) {
+	f.gotRepo = repo
+	return f.snapshots, f.err
+}
+
+func appWithSite(site config.Site) *App {
+	return &App{
+		configuration: config.Config{
+			Sites: []config.Site{site},
+			Storages: map[string]config.Storage{
+				"local-primary": {Type: "local", Directory: "/srv/backups"},
+			},
+		},
+		snapshots: &fakeSnapshotLister{},
+	}
+}
+
+func TestListSiteSnapshotsUnknownSiteFails(t *testing.T) {
+	_, err := appWithSite(config.Site{Name: "example", Enabled: true, BackupMode: "incremental"}).ListSiteSnapshots(context.Background(), "missing", "local-primary")
+	require.Error(t, err)
+	assert.Equal(t, apperror.CategoryConfig, apperror.CategoryOf(err))
+	assert.Contains(t, err.Error(), "was not found")
+}
+
+func TestListSiteSnapshotsDisabledSiteFails(t *testing.T) {
+	site := config.Site{Name: "example", Enabled: false, BackupMode: "incremental"}
+	_, err := appWithSite(site).ListSiteSnapshots(context.Background(), "example", "local-primary")
+	require.Error(t, err)
+	assert.Equal(t, apperror.CategoryConfig, apperror.CategoryOf(err))
+	assert.Contains(t, err.Error(), "disabled")
+}
+
+func TestListSiteSnapshotsFullModeFails(t *testing.T) {
+	site := config.Site{Name: "example", Enabled: true, BackupMode: "full"}
+	_, err := appWithSite(site).ListSiteSnapshots(context.Background(), "example", "local-primary")
+	require.Error(t, err)
+	assert.Equal(t, apperror.CategoryConfig, apperror.CategoryOf(err))
+	assert.Contains(t, err.Error(), "history list")
+}
+
+func TestListSiteSnapshotsUnknownDestinationFails(t *testing.T) {
+	site := config.Site{Name: "example", Enabled: true, BackupMode: "incremental", Destinations: []config.Destination{{Storage: "local-primary"}}}
+	_, err := appWithSite(site).ListSiteSnapshots(context.Background(), "example", "s3-primary")
+	require.Error(t, err)
+	assert.Equal(t, apperror.CategoryConfig, apperror.CategoryOf(err))
+	assert.Contains(t, err.Error(), "was not found")
+}
+
+func TestListSiteSnapshotsUnusedDestinationFails(t *testing.T) {
+	site := config.Site{Name: "example", Enabled: true, BackupMode: "incremental", Destinations: []config.Destination{{Storage: "other-primary"}}}
+	_, err := appWithSite(site).ListSiteSnapshots(context.Background(), "example", "local-primary")
+	require.Error(t, err)
+	assert.Equal(t, apperror.CategoryConfig, apperror.CategoryOf(err))
+	assert.Contains(t, err.Error(), "does not send backups to destination")
+}
+
+func TestListSiteSnapshotsSucceedsWithLocalStorageDocument(t *testing.T) {
+	t.Setenv("RESTIC_PASSWORD", "secret")
+	site := config.Site{
+		Name: "example", Enabled: true, BackupMode: "incremental",
+		Incremental:  config.Incremental{PasswordEnv: "RESTIC_PASSWORD"},
+		Destinations: []config.Destination{{Storage: "local-primary"}},
+	}
+	lister := &fakeSnapshotLister{snapshots: []restic.Snapshot{{
+		ID: "33e25d78", Paths: []string{"/var/www/html"}, Size: 2147483648,
+	}}}
+	application := &App{
+		configuration: config.Config{
+			Sites: []config.Site{site},
+			Storages: map[string]config.Storage{
+				"local-primary": {Type: "local", Directory: "/srv/backups"},
+			},
+		},
+		snapshots: lister,
+	}
+
+	listing, err := application.ListSiteSnapshots(context.Background(), "example", "local-primary")
+	require.NoError(t, err)
+	assert.Equal(t, "incremental", listing.Mode)
+	assert.Equal(t, "local-primary", listing.Destination)
+	require.Len(t, listing.Snapshots, 1)
+	assert.Equal(t, "/srv/backups/restic/example", lister.gotRepo.URL)
+	assert.Equal(t, "secret", lister.gotRepo.Password)
+}
+
 func TestOpenWiresAWorkingLocalBackupApplication(t *testing.T) {
 	configDir, backupRoot := writeApplicationConfig(t)
 	application, err := Open(context.Background(), configDir)
@@ -135,4 +228,111 @@ site:
     keep_last: 3
 `, source), 0o600))
 	return configDir, backupRoot
+}
+
+type fakeSnapshotRestorer struct {
+	snapshotID string
+	paths      []string
+	target     string
+	confirm    restic.RestoreOverwrite
+	summary    restic.RestoreSummary
+	err        error
+}
+
+func (f *fakeSnapshotRestorer) RestoreSnapshot(_ context.Context, _ restic.RepoConfig, snapshotID string, paths []string, target string, confirm restic.RestoreOverwrite) (restic.RestoreSummary, error) {
+	f.snapshotID, f.paths, f.target, f.confirm = snapshotID, paths, target, confirm
+	return f.summary, f.err
+}
+
+func restoreSite() config.Site {
+	return config.Site{
+		Name: "example", Enabled: true, BackupMode: "incremental",
+		Incremental:  config.Incremental{PasswordEnv: "RESTIC_PASSWORD"},
+		Sources:      config.Sources{Files: config.FileSource{Include: []string{"/var/www/html"}}},
+		Destinations: []config.Destination{{Storage: "local-primary"}},
+	}
+}
+
+func appWithRestoreSite(site config.Site) *App {
+	return &App{
+		configuration: config.Config{
+			Sites: []config.Site{site},
+			Storages: map[string]config.Storage{
+				"local-primary": {Type: "local", Directory: "/srv/backups"},
+			},
+		},
+		snapshots: &fakeSnapshotLister{},
+		restorer:  &fakeSnapshotRestorer{},
+	}
+}
+
+func TestRestoreUnknownSiteFails(t *testing.T) {
+	_, err := appWithRestoreSite(restoreSite()).RestoreSnapshot(context.Background(), "missing", "local-primary", "latest", "/tmp/restore", nil)
+	require.Error(t, err)
+	assert.Equal(t, apperror.CategoryConfig, apperror.CategoryOf(err))
+	assert.Contains(t, err.Error(), "was not found")
+}
+
+func TestRestoreDisabledSiteFails(t *testing.T) {
+	site := restoreSite()
+	site.Enabled = false
+	_, err := appWithRestoreSite(site).RestoreSnapshot(context.Background(), "example", "local-primary", "latest", "/tmp/restore", nil)
+	require.Error(t, err)
+	assert.Equal(t, apperror.CategoryConfig, apperror.CategoryOf(err))
+	assert.Contains(t, err.Error(), "disabled")
+}
+
+func TestRestoreFullModeFails(t *testing.T) {
+	site := restoreSite()
+	site.BackupMode = "full"
+	_, err := appWithRestoreSite(site).RestoreSnapshot(context.Background(), "example", "local-primary", "latest", "/tmp/restore", nil)
+	require.Error(t, err)
+	assert.Equal(t, apperror.CategoryConfig, apperror.CategoryOf(err))
+	assert.Contains(t, err.Error(), "history list")
+}
+
+func TestRestoreUnknownDestinationFails(t *testing.T) {
+	_, err := appWithRestoreSite(restoreSite()).RestoreSnapshot(context.Background(), "example", "s3-primary", "latest", "/tmp/restore", nil)
+	require.Error(t, err)
+	assert.Equal(t, apperror.CategoryConfig, apperror.CategoryOf(err))
+	assert.Contains(t, err.Error(), "was not found")
+}
+
+func TestRestoreUnusedDestinationFails(t *testing.T) {
+	site := restoreSite()
+	site.Destinations = []config.Destination{{Storage: "other-primary"}}
+	_, err := appWithRestoreSite(site).RestoreSnapshot(context.Background(), "example", "local-primary", "latest", "/tmp/restore", nil)
+	require.Error(t, err)
+	assert.Equal(t, apperror.CategoryConfig, apperror.CategoryOf(err))
+	assert.Contains(t, err.Error(), "does not send backups to destination")
+}
+
+func TestRestoreSucceedsThroughEngine(t *testing.T) {
+	t.Setenv("RESTIC_PASSWORD", "secret")
+	site := restoreSite()
+	lister := &fakeSnapshotLister{snapshots: []restic.Snapshot{{
+		ID: strings.Repeat("a", 64), Paths: []string{"/var/www/html"}, Size: 100,
+		Tags: []string{"site:example"},
+	}}}
+	engine := &fakeSnapshotRestorer{summary: restic.RestoreSummary{
+		SnapshotID: strings.Repeat("a", 64), Target: "/tmp/restore", FilesRestored: 3,
+	}}
+	application := &App{
+		configuration: config.Config{
+			Sites: []config.Site{site},
+			Storages: map[string]config.Storage{
+				"local-primary": {Type: "local", Directory: "/srv/backups"},
+			},
+		},
+		snapshots: lister,
+		restorer:  engine,
+	}
+
+	confirm := func([]string) error { return nil }
+	result, err := application.RestoreSnapshot(context.Background(), "example", "local-primary", "latest", "/tmp/restore", confirm)
+	require.NoError(t, err)
+	assert.Equal(t, 3, result.FilesRestored)
+	assert.Equal(t, strings.Repeat("a", 64), engine.snapshotID)
+	assert.Equal(t, "/tmp/restore", engine.target)
+	assert.NotNil(t, engine.confirm)
 }

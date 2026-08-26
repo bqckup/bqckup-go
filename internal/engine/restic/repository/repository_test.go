@@ -4,16 +4,21 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/bqckup/bqckup-go/internal/engine/restic"
 	"github.com/bqckup/bqckup-go/internal/engine/restic/backend"
 	"github.com/bqckup/bqckup-go/internal/engine/restic/crypto"
+	"github.com/bqckup/bqckup-go/internal/engine/restic/snapshot"
+	"github.com/bqckup/bqckup-go/internal/engine/restic/tree"
+	"github.com/klauspost/compress/zstd"
 )
 
 const testPassword = "test-repository-password"
@@ -349,6 +354,128 @@ func TestLargeBlobFlushesPack(t *testing.T) {
 	}
 	if packCount == 0 {
 		t.Fatal("pack over threshold was not flushed")
+	}
+}
+
+func TestLoadTreeRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := newRepo(t, ctx)
+	doc, err := (&tree.Tree{Nodes: []*tree.Node{
+		{Name: "alpha", Type: tree.TypeFile, Mode: 0o644},
+		{Name: "beta", Type: tree.TypeDir, Mode: 0o755},
+	}}).Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := repo.SaveBlob(ctx, restic.TreeBlob, doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := repo.LoadTree(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.Nodes) != 2 || loaded.Nodes[0].Name != "alpha" || loaded.Nodes[1].Name != "beta" {
+		t.Fatalf("unexpected tree: %+v", loaded)
+	}
+}
+
+func TestLoadSnapshotByID(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := newRepo(t, ctx)
+	snap := snapshot.Snapshot{
+		Time:     time.Date(2026, 8, 26, 10, 0, 0, 0, time.UTC),
+		Hostname: "host-a",
+		Tags:     []string{"site:site-b"},
+	}
+	id, err := repo.SaveSnapshot(ctx, snap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := repo.LoadSnapshot(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.ID != id || loaded.Snapshot.Hostname != "host-a" || len(loaded.Snapshot.Tags) != 1 {
+		t.Fatalf("unexpected snapshot: %+v", loaded)
+	}
+}
+
+// TestLoadSnapshotToleratesResticUnpackedEnvelope covers snapshots written
+// by restic >= 0.17, whose SaveUnpacked path stores 0x02 || zstd(JSON)
+// (0x01 || JSON with compression off) instead of the engine's plain JSON
+// (restic-format-verification.md §2.11). Listing must not fail on them or
+// retention breaks for the whole repository.
+func TestLoadSnapshotToleratesResticUnpackedEnvelope(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := newRepo(t, ctx)
+	snap := snapshot.Snapshot{
+		Time:     time.Date(2026, 8, 26, 10, 0, 0, 0, time.UTC),
+		Hostname: "host-a",
+		Tags:     []string{"site:site-b"},
+	}
+	doc, err := json.Marshal(snap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoder, err := zstd.NewWriter(nil, zstd.WithEncoderConcurrency(1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer encoder.Close()
+	for _, plain := range [][]byte{
+		append([]byte{2}, encoder.EncodeAll(doc, nil)...), // compressed unpacked blob
+		append([]byte{1}, doc...),                         // uncompressed unpacked blob
+	} {
+		sealed, err := repo.master.Seal(nil, plain)
+		if err != nil {
+			t.Fatal(err)
+		}
+		id := restic.Hash(sealed)
+		if err := repo.backend.Save(ctx, restic.Handle{Type: restic.SnapshotFile, Name: id.String()}, bytes.NewReader(sealed)); err != nil {
+			t.Fatal(err)
+		}
+		loaded, err := repo.LoadSnapshot(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if loaded.ID != id || loaded.Snapshot.Hostname != "host-a" {
+			t.Fatalf("unexpected snapshot: %+v", loaded)
+		}
+	}
+	listed, err := repo.ListSnapshots(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != 2 {
+		t.Fatalf("expected 2 snapshots, got %d", len(listed))
+	}
+}
+
+func TestLoadBlobMissingIDFails(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := newRepo(t, ctx)
+	if _, err := repo.LoadBlob(ctx, restic.DataBlob, restic.Hash([]byte("missing"))); err == nil {
+		t.Fatal("missing blob ID must fail")
+	}
+}
+
+func TestLoadTreeMalformedJSONFails(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := newRepo(t, ctx)
+	id, err := repo.SaveBlob(ctx, restic.TreeBlob, []byte("[]"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.LoadTree(ctx, id); err == nil {
+		t.Fatal("malformed tree must fail to parse")
 	}
 }
 

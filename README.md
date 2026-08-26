@@ -50,7 +50,11 @@ bqckup config validate
 bqckup doctor [--site <name>]
 bqckup backup list
 bqckup backup run <site> [--force]
+bqckup backup snapshots <site> --destination <name>
+bqckup backup restore <site> --destination <name> --snapshot <id|latest> --target <path> [--force]
 bqckup history list [--site <name>] [--limit <n>] [--details]
+bqckup storage list <destination> --site <site>
+bqckup storage link <destination> --key <key> [--expires <n>h]
 bqckup version
 ```
 
@@ -58,6 +62,19 @@ Use `--output json` for machine-readable output and `--config-dir` for a custom 
 Text history reports logical artifact and destination counts without counting
 the same artifact once per destination. Add `--details` to inspect each stored
 artifact copy and its object key; JSON remains the raw history format.
+`bqckup storage list` shows the live remote contents of one destination: archive
+artifacts for full-mode sites, snapshots for incremental sites. It is read-only
+and never uses the local history database.
+`bqckup backup snapshots` shows the live snapshots of one incremental site,
+read directly from its repository on any destination type (local, S3, or R2).
+It is read-only and never uses the local history database.
+`bqckup backup restore` rebuilds the configured paths of one snapshot into
+the target directory in restic layout, and never overwrites existing files
+without asking (or `--force`). It writes nothing to history.
+`bqckup storage link` creates a temporary download link for one full-mode
+archive artifact, using the key exactly as `storage list` prints it. Expiry is
+in whole hours, 1 to 24, default 24h. The command is read-only on the remote
+and never writes history.
 
 ## Development
 

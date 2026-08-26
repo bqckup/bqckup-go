@@ -92,11 +92,18 @@ func (r *Runner) lookupEnv(key string) (string, bool) {
 // destination. requirePassword mirrors the run-time rule that the
 // repository password environment variable must be set.
 func (r *Runner) buildRepo(site config.Site, storageConfig config.Storage, requirePassword bool) (restic.RepoConfig, error) {
+	return buildRepoConfig(site, storageConfig, r.lookupEnv, requirePassword)
+}
+
+// buildRepoConfig constructs the engine repository configuration for one
+// destination. requirePassword mirrors the run-time rule that the
+// repository password environment variable must be set.
+func buildRepoConfig(site config.Site, storageConfig config.Storage, lookupEnv func(string) (string, bool), requirePassword bool) (restic.RepoConfig, error) {
 	repoURL, err := restic.RepositoryURL(storageConfig, site.Name)
 	if err != nil {
 		return restic.RepoConfig{}, err
 	}
-	password, ok := r.lookupEnv(site.Incremental.PasswordEnv)
+	password, ok := lookupEnv(site.Incremental.PasswordEnv)
 	if requirePassword && (!ok || password == "") {
 		return restic.RepoConfig{}, apperror.Wrap(apperror.CategoryPreflight, fmt.Sprintf("environment variable %q for incremental repository password is not set or empty", site.Incremental.PasswordEnv), nil)
 	}

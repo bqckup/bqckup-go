@@ -256,6 +256,78 @@ green after prune.
 
 **Suggested commit:** `feat: reclaim space with mark-and-sweep prune`
 
+## M15 — Remote storage listing
+
+**Status:** Delivered; retain this section as its acceptance checklist. See `docs/superpowers/specs/2026-08-24-remote-storage-listing.md` and `docs/superpowers/plans/2026-08-24-remote-storage-listing-plan.md`.
+
+**Objective:** `bqckup storage list <destination> --site <site>` shows the live contents of one remote destination for one site: archive artifacts for `full` mode, restic snapshots for `incremental` mode. Port of the legacy `get-list` command.
+
+**Prerequisites:** M04 and M07 delivered (S3 adapter, prefix-scoped listing and pagination); facade and lock package from M12/M13.
+
+**In scope:** one `storage list` subcommand, `storage.Artifact` value type, `s3compat.Store.ListArtifacts`, `facade.Engine.ListSnapshots` with a non-exclusive lock, a consumer-owned lister in `internal/backup`, app wiring, text and JSON rendering, README and `CONTEXT.md` updates.
+
+**Out of scope:** local destination listing (use `history list --details`), restore, link generation, Python-era object layouts, listing raw restic repository objects, `--full-id`, any new config field or dependency.
+
+**Acceptance:** text tables match the spec; `--output json` emits the two spec schemas with `[]` on empty results; local or unknown destination fails with exit 2 and a pointer to `history`; storage failures exit 4 redacted; listing mutates nothing on the remote; `make verify` and `sh scripts/check-docs.sh` pass.
+
+**Required tests:** S3 fake-client pagination/filter/cancellation/redaction, facade snapshot listing with lock lifecycle, use-case mode branching and error mapping, CLI table and JSON shape, exit codes.
+
+**Suggested commit:** `feat: add remote storage listing command`
+
+## M16 — Download link for remote artifacts
+
+**Status:** Delivered; retain this section as its acceptance checklist. See `docs/superpowers/specs/2026-08-24-download-link.md` and `docs/superpowers/plans/2026-08-24-download-link-plan.md`.
+
+**Objective:** `bqckup storage link <destination> --key <key> --expires <n>h` prints a temporary signed download URL for one archive artifact of a full-mode site on a remote destination. Port of the legacy web UI's `get_download_link` endpoint.
+
+**Prerequisites:** M04 and M15 delivered (S3 adapter, `storage list` output format the key is copied from).
+
+**In scope:** one `storage link` subcommand, `storage.DownloadLink` value type, `s3compat.Store.PresignLink` (HEAD existence check plus client-side presign with `attachment` content disposition), `local.Store.LocalPath` for the local-destination error message, a consumer-owned linker in `internal/backup`, app wiring that parses the site from the key, text and JSON rendering, README and `CONTEXT.md` updates.
+
+**Out of scope:** linking restic repository blobs (incremental sites fail with a pointer to restore), local destinations (no URL exists; the error shows the local path), any config field or dependency change, history writes, restore.
+
+**Acceptance:** a valid key produces a signed URL on stdout that downloads the artifact as an attachment and expires after the requested whole-hour duration (1–24h, default 24h); missing objects exit 4 with a redacted message naming the key; the URL never appears in errors, logs, or history; the command writes nothing and touches the remote only with one HEAD.
+
+**Required tests:** presign URL shape (signature, disposition, expiry), 404 mapping, redaction, cancellation, key-shape rejection, mode branching, local-path error, CLI flag validation and output split, exit codes.
+
+**Suggested commit:** `feat: add download link for remote storage artifacts`
+
+## M17 — Incremental snapshot listing
+
+**Status:** Delivered (2026-08-26). See `docs/superpowers/specs/2026-08-26-backup-snapshots.md`.
+
+**Objective:** `bqckup backup snapshots <site> --destination <name>` shows the live snapshots of one incremental site, read directly from the repository for local, S3, and R2 destinations. First half of issue #17; the legacy counterpart is `bqckup get-list <name>`.
+
+**Prerequisites:** M12–M14 delivered (engine facade with `ListSnapshots` and non-exclusive listing locks), M15 delivered (`storage list` whose incremental output shapes this command reuses).
+
+**In scope:** one `backup snapshots` subcommand, a new `backup.Lister` method that skips M15's remote-only assertion and reuses the existing snapshot listing path, app wiring for site/destination validation, text and JSON rendering reused from `storage list` (8-character IDs, no `--full-id`), README and guide updates, and one message change: `storage list` on a local destination of an incremental site points at `backup snapshots` instead of `history list --details`.
+
+**Out of scope:** restore (second half of issue #17, reserved as M18 with guardrails already locked in the M11 design), any history behavior change beyond that message, `--full-id`, full-mode sites (config error pointing at `history list --details`), any new config field or dependency.
+
+**Acceptance:** local and S3/R2 destinations list snapshots newest first; `--output json` emits the M15 incremental schema with `[]` on empty results; a `full`-mode site exits 2 pointing at `history list --details`; a missing password env exits 3; a broken repository exits 4 redacted; listing writes nothing to history and touches the repository only with the short-lived non-exclusive lock; `make verify` and `sh scripts/check-docs.sh` pass.
+
+**Required tests:** use-case mode branching and error mapping (local destination succeeds, full mode rejected, password and engine failures mapped), app validation matrix (unknown/disabled site, unknown or unused destination), CLI flags and table/JSON shape, updated `storage list` local-rejection message, exit codes.
+
+**Suggested commit:** `feat: add incremental snapshot listing command`
+
+## M18 — Incremental snapshot restore
+
+**Status:** In progress (2026-08-26). See `docs/superpowers/specs/2026-08-26-restore.md`.
+
+**Objective:** `bqckup backup restore <site> --destination <name> --snapshot <id|latest> --target <path> [--force] [--quiet]` rebuilds the configured file paths of one snapshot into an explicit target directory (restic layout), from local, S3, or R2 repositories. Second half of issue #17; the legacy counterpart is `bqckup restore <site> --target <dir>`.
+
+**Prerequisites:** M12–M15 delivered (engine facade, non-exclusive locks, index/pack/decrypt/zstd read path), M17 delivered (snapshot listing the restore resolves against).
+
+**In scope:** an in-tree `internal/engine/restic/restorer` package (tree walk, blob loading, staging directory, conflict collection, single confirm callback, move into place), repository `LoadBlob`/`LoadTree`/`LoadSnapshot` exports, a facade `RestoreSnapshot` method, a new `backup.Restorer` use case (mode gate, password preflight, site-tag snapshot resolution, target preflight), app wiring sharing M17's validation matrix, the `backup restore` subcommand with `--destination --snapshot --target --force --quiet`, text and JSON summaries, README/guide/backlog/CONTEXT updates.
+
+**Out of scope:** restoring full-mode sites (config error pointing at `history list --details`), paths no longer configured in the site, uid/gid and xattr restoration, hardlink grouping, special node types (skipped), history writes, any new config field or dependency.
+
+**Acceptance:** byte-for-byte round trip with restic layout and symlinks/modes intact on all three destination types; conflicts prompt once on stderr with the exact list, a declined prompt exits 4 and writes nothing, `--force` skips the prompt, non-TTY conflicts without `--force` exit 3 naming `--force`; `latest` and ID prefixes resolve against the site tag only; skipped configured paths are reported, an empty intersection exits 4; cancellation removes staging and leaves the target untouched; `--output json` emits the summary schema, `--quiet` prints nothing on success; no credential ever appears; history unchanged; `make verify` and `sh scripts/check-docs.sh` pass.
+
+**Required tests:** engine round trip (bytes, modes, symlinks, empty dirs, filtering, skipped paths, conflicts, abort, cancellation, missing blobs, special nodes), facade restore and lock lifecycle, use-case snapshot resolution and error mapping (site tag, prefixes, full-mode rejection, password and target preflights, confirm pass-through, redaction), app validation matrix, CLI flags/prompt/summary/exit codes.
+
+**Suggested commit:** `feat: add incremental snapshot restore command`
+
 ## Mentor review checklist
 
 - Assignment is exactly one milestone with prerequisites satisfied.

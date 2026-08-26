@@ -129,6 +129,12 @@ func (s *Store) Delete(ctx context.Context, key string) error {
 	return syncDirectory(filepath.Dir(target))
 }
 
+// LocalPath resolves an object key to its path on the local filesystem.
+// Used by the download-link command to explain where a local file lives.
+func (s *Store) LocalPath(key string) (string, error) {
+	return s.resolve(key)
+}
+
 func (s *Store) ListBackupSets(ctx context.Context, sitePrefix string) ([]storage.BackupSet, error) {
 	directory, err := s.resolve(sitePrefix)
 	if err != nil {

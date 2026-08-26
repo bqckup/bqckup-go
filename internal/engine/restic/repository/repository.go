@@ -15,8 +15,33 @@ import (
 	"github.com/bqckup/bqckup-go/internal/engine/restic/crypto"
 	"github.com/bqckup/bqckup-go/internal/engine/restic/index"
 	"github.com/bqckup/bqckup-go/internal/engine/restic/pack"
+	"github.com/bqckup/bqckup-go/internal/engine/restic/tree"
 	"github.com/klauspost/compress/zstd"
 )
+
+// LoadBlob reads and decrypts one blob by ID through the master index,
+// decompressing it when the index says it was compressed.
+func (r *Repository) LoadBlob(ctx context.Context, blobType restic.BlobType, id restic.ID) ([]byte, error) {
+	return r.loadBlob(ctx, blobType, id)
+}
+
+// LoadTree loads and parses one tree blob.
+func (r *Repository) LoadTree(ctx context.Context, id restic.ID) (*tree.Tree, error) {
+	data, err := r.LoadBlob(ctx, restic.TreeBlob, id)
+	if err != nil {
+		return nil, fmt.Errorf("repository: load tree %s: %w", id, err)
+	}
+	t, err := tree.Unmarshal(data)
+	if err != nil {
+		return nil, fmt.Errorf("repository: parse tree %s: %w", id, err)
+	}
+	return t, nil
+}
+
+// LoadSnapshot loads one snapshot document by its storage ID.
+func (r *Repository) LoadSnapshot(ctx context.Context, id restic.ID) (SnapshotWithID, error) {
+	return r.loadSnapshot(ctx, restic.Handle{Type: restic.SnapshotFile, Name: id.String()})
+}
 
 // DefaultPackSize is the pack flush threshold (16 MiB), matching restic.
 const DefaultPackSize = 16 * 1024 * 1024

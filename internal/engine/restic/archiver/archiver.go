@@ -105,6 +105,9 @@ func (a *Archiver) Backup(ctx context.Context, spec BackupSpec) (restic.ID, Summ
 	if err := a.repo.Flush(ctx); err != nil {
 		return restic.ID{}, Summary{}, err
 	}
+	duration := time.Since(started).Seconds()
+	// Persist the summary inside the snapshot document (restic 0.19 writes
+	// it too), so listing snapshots can report sizes without a live run.
 	snap := snapshot.Snapshot{
 		Time:           started.UTC(),
 		Tree:           rootTree,
@@ -116,13 +119,21 @@ func (a *Archiver) Backup(ctx context.Context, spec BackupSpec) (restic.ID, Summ
 		Excludes:       spec.Excludes,
 		Tags:           spec.Tags,
 		ProgramVersion: "bqckup",
+		Summary: &snapshot.Summary{
+			FilesNew:            state.filesNew,
+			FilesChanged:        state.filesChanged,
+			FilesUnmodified:     state.filesUnmodified,
+			DataAdded:           uint64(state.dataAdded),
+			TotalFilesProcessed: state.filesNew + state.filesChanged + state.filesUnmodified,
+			TotalBytesProcessed: uint64(state.bytesProcessed),
+			TotalDuration:       duration,
+		},
 	}
 	snapID, err := a.repo.SaveSnapshot(ctx, snap)
 	if err != nil {
 		return restic.ID{}, Summary{}, err
 	}
 
-	duration := time.Since(started).Seconds()
 	summary := Summary{
 		SnapshotID:          snapID.String(),
 		FilesNew:            state.filesNew,

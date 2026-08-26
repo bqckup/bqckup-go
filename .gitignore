@@ -1,3 +1,10 @@
 .worktrees/
 /bqckup
 coverage.out
+MANUAL-TEST-REPORT.txt
+USER-GUIDE.md
+TESTING-GUIDE.md
+docs/ponytail-audit-execution-plan.md
+docs/guides/
+docs/ideas/
+*.md

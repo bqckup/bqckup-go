@@ -145,3 +145,20 @@ func sourceArtifact(t *testing.T, contents []byte) storage.Artifact {
 		SHA256: hex.EncodeToString(sum[:]),
 	}
 }
+
+func TestLocalPathJoinsKeyUnderRoot(t *testing.T) {
+	store, err := New(t.TempDir())
+	require.NoError(t, err)
+
+	resolved, err := store.LocalPath("bqckup/site-a/2026-08-05T00-00-00Z/files.tar.gz")
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(store.root, "bqckup", "site-a", "2026-08-05T00-00-00Z", "files.tar.gz"), resolved)
+}
+
+func TestLocalPathRejectsUnsafeKeys(t *testing.T) {
+	store, err := New(t.TempDir())
+	require.NoError(t, err)
+
+	_, err = store.LocalPath("../outside/files.tar.gz")
+	require.Error(t, err)
+}

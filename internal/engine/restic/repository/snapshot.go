@@ -9,6 +9,7 @@ import (
 
 	"github.com/bqckup/bqckup-go/internal/engine/restic"
 	"github.com/bqckup/bqckup-go/internal/engine/restic/snapshot"
+	"github.com/klauspost/compress/zstd"
 )
 
 // SnapshotWithID pairs a stored snapshot document with its storage ID.
@@ -73,8 +74,28 @@ func (r *Repository) loadSnapshot(ctx context.Context, h restic.Handle) (Snapsho
 	if err != nil {
 		return SnapshotWithID{}, fmt.Errorf("repository: decrypt snapshot %s: %w", h.Name, err)
 	}
+	// The engine stores snapshots as plain JSON, but restic >= 0.17 writes
+	// them through SaveUnpacked (0x02 || zstd(JSON), or 0x01 || JSON with
+	// compression off — verification notes §2.11). Tolerate both.
+	payload := plain
+	if len(payload) > 0 {
+		switch payload[0] {
+		case 0x01:
+			payload = payload[1:]
+		case 0x02:
+			decoder, err := zstd.NewReader(nil, zstd.WithDecoderConcurrency(1))
+			if err != nil {
+				return SnapshotWithID{}, fmt.Errorf("repository: parse snapshot %s: %w", h.Name, err)
+			}
+			defer decoder.Close()
+			payload, err = decoder.DecodeAll(payload[1:], nil)
+			if err != nil {
+				return SnapshotWithID{}, fmt.Errorf("repository: parse snapshot %s: %w", h.Name, err)
+			}
+		}
+	}
 	var snap snapshot.Snapshot
-	if err := json.Unmarshal(plain, &snap); err != nil {
+	if err := json.Unmarshal(payload, &snap); err != nil {
 		return SnapshotWithID{}, fmt.Errorf("repository: parse snapshot %s: %w", h.Name, err)
 	}
 	id, err := restic.ParseID(h.Name)
