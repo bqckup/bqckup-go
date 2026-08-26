@@ -78,6 +78,11 @@ func (l *Lister) List(ctx context.Context, destination string, site config.Site,
 	}
 	remote, ok := store.(RemoteLister)
 	if !ok {
+		if site.BackupMode == "incremental" {
+			return Listing{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf(
+				"destination %q is local-only; use 'bqckup backup snapshots %s --destination %q' to list snapshots",
+				destination, site.Name, destination), nil)
+		}
 		return Listing{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf(
 			"destination %q is local-only; use 'bqckup history list --site %s --details' to inspect stored archives",
 			destination, site.Name), nil)
@@ -90,6 +95,23 @@ func (l *Lister) List(ctx context.Context, destination string, site config.Site,
 	default:
 		return Listing{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q has an unsupported backup mode %q", site.Name, site.BackupMode), nil)
 	}
+}
+
+// ListSiteSnapshots lists the live snapshots of an incremental site
+// directly from its repository, for any destination type. Unlike List it
+// never asserts a RemoteLister: local repositories are listed too. Non-
+// incremental sites (full mode, or the unset default that runs as full)
+// are a config error pointing at history, which stays the run ledger.
+func (l *Lister) ListSiteSnapshots(ctx context.Context, destination string, site config.Site, storageConfig config.Storage) (Listing, error) {
+	if err := ctx.Err(); err != nil {
+		return Listing{}, err
+	}
+	if site.BackupMode != "incremental" {
+		return Listing{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf(
+			"site %q uses full backup mode; use 'bqckup history list --site %s --details' to inspect stored archives",
+			site.Name, site.Name), nil)
+	}
+	return l.listSnapshots(ctx, destination, site, storageConfig)
 }
 
 func (l *Lister) listArtifacts(ctx context.Context, destination string, site config.Site, remote RemoteLister) (Listing, error) {

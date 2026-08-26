@@ -208,6 +208,34 @@ func (a *App) ListRemoteContents(ctx context.Context, siteName, destinationName 
 	return (&backup.Lister{Snapshots: a.snapshots}).List(ctx, destinationName, site, storageConfig, store)
 }
 
+// ListSiteSnapshots lists the live snapshots of one incremental site on
+// one of its destinations, read directly from the repository. The site
+// must exist, be enabled, use incremental mode, and actually send backups
+// to the destination. No storage.Store is resolved: the lister only needs
+// the storage document to build the repository configuration.
+func (a *App) ListSiteSnapshots(ctx context.Context, siteName, destinationName string) (backup.Listing, error) {
+	site, ok := a.configuration.Site(siteName)
+	if !ok {
+		return backup.Listing{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q was not found", siteName), nil)
+	}
+	if !site.Enabled {
+		return backup.Listing{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q is disabled", siteName), nil)
+	}
+	if site.BackupMode != "incremental" {
+		return backup.Listing{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf(
+			"site %q uses full backup mode; use 'bqckup history list --site %s --details' to inspect stored archives",
+			siteName, siteName), nil)
+	}
+	storageConfig, ok := a.configuration.Storages[destinationName]
+	if !ok {
+		return backup.Listing{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("storage destination %q was not found", destinationName), nil)
+	}
+	if !siteUsesDestination(site, destinationName) {
+		return backup.Listing{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q does not send backups to destination %q", siteName, destinationName), nil)
+	}
+	return (&backup.Lister{Snapshots: a.snapshots}).ListSiteSnapshots(ctx, destinationName, site, storageConfig)
+}
+
 func siteUsesDestination(site config.Site, destination string) bool {
 	for _, configured := range site.Destinations {
 		if configured.Storage == destination {

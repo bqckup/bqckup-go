@@ -3,6 +3,8 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -126,6 +128,35 @@ func TestStorageListLocalDestinationFailsWithHistoryPointer(t *testing.T) {
 	message := apperror.UserMessage(err)
 	assert.Contains(t, message, "history list")
 	assert.Contains(t, message, "--details")
+}
+
+func TestStorageListLocalDestinationIncrementalPointsToBackupSnapshots(t *testing.T) {
+	configDir, _ := writeCLIConfig(t)
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, "sites", "site-b.yaml"), []byte(`version: 2
+site:
+  name: site-b
+  enabled: true
+  backup_mode: incremental
+  incremental:
+    password_env: RESTIC_PASSWORD
+  sources:
+    files:
+      include: [/srv/example/data]
+      exclude: []
+      follow_symlinks: false
+    databases: []
+  destinations:
+    - storage: local-primary
+  policy:
+    minimum_interval: 1h
+`), 0o600))
+	root, _, _ := commandForTest(t, "--config-dir", configDir, "storage", "list", "local-primary", "--site", "site-b")
+	err := root.Execute()
+	require.Error(t, err)
+	assert.Equal(t, 2, ExitCode(err))
+	message := apperror.UserMessage(err)
+	assert.Contains(t, message, "backup snapshots")
+	assert.Contains(t, message, "--destination")
 }
 
 func TestStorageListUnknownSiteFailsWithConfigError(t *testing.T) {

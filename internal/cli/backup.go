@@ -106,6 +106,38 @@ func newBackupCommand(opts *options) *cobra.Command {
 			})
 		},
 	})
+
+	var destination string
+	snapshots := &cobra.Command{
+		Use:   "snapshots <site>",
+		Short: "List the live snapshots of one incremental site",
+		Args: func(_ *cobra.Command, args []string) error {
+			if len(args) != 1 {
+				return fmt.Errorf("%w: backup snapshots requires exactly one site", ErrInvalidInput)
+			}
+			return nil
+		},
+		PreRunE: func(_ *cobra.Command, _ []string) error {
+			if destination == "" {
+				return fmt.Errorf("%w: --destination is required", ErrInvalidInput)
+			}
+			return nil
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return withApplication(cmd, opts.configDir, func(application *app.App) error {
+				listing, err := application.ListSiteSnapshots(cmd.Context(), args[0], destination)
+				if err != nil {
+					return err
+				}
+				if opts.output == "json" {
+					return writeStorageJSON(cmd, listing)
+				}
+				return writeSnapshotText(cmd.OutOrStdout(), listing)
+			})
+		},
+	}
+	snapshots.Flags().StringVar(&destination, "destination", "", "storage destination of the site to list (required)")
+	command.AddCommand(snapshots)
 	return command
 }
 

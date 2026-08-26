@@ -145,7 +145,17 @@ func TestListIncrementalRequiresPasswordEnv(t *testing.T) {
 	assert.Equal(t, apperror.CategoryPreflight, apperror.CategoryOf(err))
 }
 
-func TestListRejectsLocalStore(t *testing.T) {
+func TestListRejectsLocalStoreIncrementalPointsToBackupSnapshots(t *testing.T) {
+	lister := &Lister{Snapshots: &fakeSnapshotLister{}}
+
+	_, err := lister.List(context.Background(), "local-primary", incrementalSite(), config.Storage{Type: "local"}, fakeLocalStore{})
+	require.Error(t, err)
+	assert.Equal(t, apperror.CategoryConfig, apperror.CategoryOf(err))
+	assert.Contains(t, err.Error(), "backup snapshots")
+	assert.Contains(t, err.Error(), "--destination")
+}
+
+func TestListRejectsLocalStoreFullModeKeepsHistoryPointer(t *testing.T) {
 	lister := &Lister{Snapshots: &fakeSnapshotLister{}}
 
 	_, err := lister.List(context.Background(), "local-primary", fullSite(), config.Storage{Type: "local"}, fakeLocalStore{})
@@ -161,6 +171,78 @@ func TestListRejectsUnknownBackupMode(t *testing.T) {
 	_, err := (&Lister{}).List(context.Background(), "s3-primary", site, config.Storage{Type: "s3"}, &fakeRemoteLister{})
 	require.Error(t, err)
 	assert.Equal(t, apperror.CategoryConfig, apperror.CategoryOf(err))
+}
+
+func incrementalSite() config.Site {
+	return config.Site{
+		Name: "site-b", Enabled: true, BackupMode: "incremental",
+		Incremental: config.Incremental{PasswordEnv: "RESTIC_PASSWORD"},
+	}
+}
+
+func TestListSiteSnapshotsLocalDestinationSucceeds(t *testing.T) {
+	snapshots := &fakeSnapshotLister{snapshots: []restic.Snapshot{
+		{ID: strings.Repeat("a", 64), Paths: []string{"/old"}, Size: 10, CreatedAt: time.Date(2026, 12, 10, 6, 0, 0, 0, time.UTC)},
+	}}
+	envLookup := func(key string) (string, bool) {
+		assert.Equal(t, "RESTIC_PASSWORD", key)
+		return "secret", true
+	}
+	lister := &Lister{Snapshots: snapshots, EnvLookup: envLookup}
+
+	listing, err := lister.ListSiteSnapshots(context.Background(), "local-primary", incrementalSite(), config.Storage{Type: "local", Directory: "/srv/repos"})
+	require.NoError(t, err)
+	require.Equal(t, "incremental", listing.Mode)
+	require.Len(t, listing.Snapshots, 1)
+	assert.Equal(t, strings.Repeat("a", 8), listing.Snapshots[0].ID)
+	assert.Equal(t, "/srv/repos/restic/site-b", snapshots.gotRepo.URL)
+	assert.Equal(t, "secret", snapshots.gotRepo.Password)
+}
+
+func TestListSiteSnapshotsRejectsFullMode(t *testing.T) {
+	site := fullSite()
+	_, err := (&Lister{Snapshots: &fakeSnapshotLister{}}).ListSiteSnapshots(context.Background(), "local-primary", site, config.Storage{Type: "local"})
+	require.Error(t, err)
+	assert.Equal(t, apperror.CategoryConfig, apperror.CategoryOf(err))
+	assert.Contains(t, err.Error(), "history list")
+	assert.Contains(t, err.Error(), "--details")
+}
+
+func TestListSiteSnapshotsRejectsUnknownMode(t *testing.T) {
+	site := incrementalSite()
+	site.BackupMode = "weird"
+	_, err := (&Lister{Snapshots: &fakeSnapshotLister{}}).ListSiteSnapshots(context.Background(), "local-primary", site, config.Storage{Type: "local"})
+	require.Error(t, err)
+	assert.Equal(t, apperror.CategoryConfig, apperror.CategoryOf(err))
+}
+
+func TestListSiteSnapshotsRequiresPasswordEnv(t *testing.T) {
+	site := incrementalSite()
+	site.Incremental.PasswordEnv = "MISSING_PASSWORD_ENV"
+	lister := &Lister{Snapshots: &fakeSnapshotLister{}, EnvLookup: func(string) (string, bool) { return "", false }}
+
+	_, err := lister.ListSiteSnapshots(context.Background(), "local-primary", site, config.Storage{Type: "local", Directory: "/srv/repos"})
+	require.Error(t, err)
+	assert.Equal(t, apperror.CategoryPreflight, apperror.CategoryOf(err))
+}
+
+func TestListSiteSnapshotsKeepsEngineFailureRedacted(t *testing.T) {
+	cause := errors.New("endpoint secret leaked here")
+	lister := &Lister{Snapshots: &fakeSnapshotLister{err: apperror.Hide("engine failure", cause)}, EnvLookup: func(string) (string, bool) { return "secret", true }}
+
+	_, err := lister.ListSiteSnapshots(context.Background(), "local-primary", incrementalSite(), config.Storage{Type: "local", Directory: "/srv/repos"})
+	require.Error(t, err)
+	assert.Equal(t, apperror.CategoryStorage, apperror.CategoryOf(err))
+	assert.NotContains(t, err.Error(), "secret")
+	assert.ErrorIs(t, err, cause)
+}
+
+func TestListSiteSnapshotsCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := (&Lister{Snapshots: &fakeSnapshotLister{}}).ListSiteSnapshots(ctx, "local-primary", incrementalSite(), config.Storage{Type: "local"})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.Canceled)
 }
 
 func TestListKeepsStorageFailureRedacted(t *testing.T) {

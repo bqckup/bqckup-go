@@ -292,6 +292,24 @@ green after prune.
 
 **Suggested commit:** `feat: add download link for remote storage artifacts`
 
+## M17 — Incremental snapshot listing
+
+**Status:** Delivered (2026-08-26). See `docs/superpowers/specs/2026-08-26-backup-snapshots.md`.
+
+**Objective:** `bqckup backup snapshots <site> --destination <name>` shows the live snapshots of one incremental site, read directly from the repository for local, S3, and R2 destinations. First half of issue #17; the legacy counterpart is `bqckup get-list <name>`.
+
+**Prerequisites:** M12–M14 delivered (engine facade with `ListSnapshots` and non-exclusive listing locks), M15 delivered (`storage list` whose incremental output shapes this command reuses).
+
+**In scope:** one `backup snapshots` subcommand, a new `backup.Lister` method that skips M15's remote-only assertion and reuses the existing snapshot listing path, app wiring for site/destination validation, text and JSON rendering reused from `storage list` (8-character IDs, no `--full-id`), README and guide updates, and one message change: `storage list` on a local destination of an incremental site points at `backup snapshots` instead of `history list --details`.
+
+**Out of scope:** restore (second half of issue #17, reserved as M18 with guardrails already locked in the M11 design), any history behavior change beyond that message, `--full-id`, full-mode sites (config error pointing at `history list --details`), any new config field or dependency.
+
+**Acceptance:** local and S3/R2 destinations list snapshots newest first; `--output json` emits the M15 incremental schema with `[]` on empty results; a `full`-mode site exits 2 pointing at `history list --details`; a missing password env exits 3; a broken repository exits 4 redacted; listing writes nothing to history and touches the repository only with the short-lived non-exclusive lock; `make verify` and `sh scripts/check-docs.sh` pass.
+
+**Required tests:** use-case mode branching and error mapping (local destination succeeds, full mode rejected, password and engine failures mapped), app validation matrix (unknown/disabled site, unknown or unused destination), CLI flags and table/JSON shape, updated `storage list` local-rejection message, exit codes.
+
+**Suggested commit:** `feat: add incremental snapshot listing command`
+
 ## Mentor review checklist
 
 - Assignment is exactly one milestone with prerequisites satisfied.
