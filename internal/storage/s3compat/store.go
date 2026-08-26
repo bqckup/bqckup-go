@@ -311,12 +311,11 @@ func (s *Store) ListBackupSets(ctx context.Context, sitePrefix string) ([]storag
 				continue
 			}
 			remainder := strings.TrimPrefix(key, requestPrefix)
-			timestamp, _, _ := strings.Cut(remainder, "/")
-			createdAt, parseErr := time.Parse(storage.TimestampLayout, timestamp)
-			if parseErr != nil || createdAt.Location() != time.UTC {
+			setName, createdAt, parseErr := parseBackupSetRemainder(remainder)
+			if parseErr != nil {
 				continue
 			}
-			setKey := path.Join(sitePrefix, timestamp)
+			setKey := path.Join(sitePrefix, setName)
 			setsByKey[setKey] = storage.BackupSet{Key: setKey, CreatedAt: createdAt}
 		}
 		if !aws.ToBool(output.IsTruncated) {
@@ -401,14 +400,29 @@ func validateBackupSetPrefix(prefix string) error {
 		return err
 	}
 	parts := strings.Split(prefix, "/")
-	if len(parts) != 3 || parts[0] != "bqckup" || !config.SafeName.MatchString(parts[1]) {
+	if (len(parts) != 3 && len(parts) != 4) || parts[0] != "bqckup" || !config.SafeName.MatchString(parts[1]) {
 		return errors.New("invalid backup set prefix")
 	}
-	createdAt, err := time.Parse(storage.TimestampLayout, parts[2])
-	if err != nil || createdAt.Location() != time.UTC || createdAt.Format(storage.TimestampLayout) != parts[2] {
+	if _, err := storage.ParseBackupSet(strings.Join(parts[2:], "/")); err != nil {
 		return errors.New("invalid backup set prefix")
 	}
 	return nil
+}
+
+func parseBackupSetRemainder(remainder string) (string, time.Time, error) {
+	parts := strings.Split(remainder, "/")
+	if len(parts) >= 3 {
+		setName := path.Join(parts[0], parts[1])
+		if createdAt, err := storage.ParseBackupSet(setName); err == nil {
+			return setName, createdAt, nil
+		}
+	}
+	if len(parts) >= 2 {
+		if createdAt, err := storage.ParseBackupSet(parts[0]); err == nil {
+			return parts[0], createdAt, nil
+		}
+	}
+	return "", time.Time{}, errors.New("invalid backup set object key")
 }
 
 func remoteOperationError(message string, err error) error {

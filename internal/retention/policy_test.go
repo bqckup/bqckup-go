@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/bqckup/bqckup-go/internal/storage"
 	"github.com/stretchr/testify/assert"
@@ -58,7 +57,7 @@ func (f *fakeStore) Delete(_ context.Context, key string) error {
 func backupSets(names ...string) []storage.BackupSet {
 	sets := make([]storage.BackupSet, 0, len(names))
 	for _, name := range names {
-		parsed, _ := time.Parse(storage.TimestampLayout, name)
+		parsed, _ := storage.ParseBackupSet(name)
 		sets = append(sets, storage.BackupSet{Key: "bqckup/site/" + name, CreatedAt: parsed})
 	}
 	return sets

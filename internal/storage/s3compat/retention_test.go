@@ -15,23 +15,25 @@ import (
 func TestListBackupSetsPaginatesAndFilters(t *testing.T) {
 	client := &fakeClient{listOutputs: []*s3.ListObjectsV2Output{
 		{
-			Contents:              []types.Object{{Key: aws.String("company/bqckup/site/2026-08-01T00-00-00.000000000Z/files.tar.gz")}},
+			Contents:              []types.Object{{Key: aws.String("company/bqckup/site/01-August-2026/00-00-00/files.tar.gz")}},
 			IsTruncated:           aws.Bool(true),
 			NextContinuationToken: aws.String("next"),
 		},
 		{Contents: []types.Object{
-			{Key: aws.String("company/bqckup/site/2026-08-02T00-00-00.000000000Z/files.tar.gz")},
+			{Key: aws.String("company/bqckup/site/02-August-2026/00-00-00/files.tar.gz")},
+			{Key: aws.String("company/bqckup/site/2026-07-31T00-00-00.000000000Z/files.tar.gz")},
 			{Key: aws.String("company/bqckup/site/not-a-date/files.tar.gz")},
-			{Key: aws.String("company/bqckup/other/2026-08-03T00-00-00.000000000Z/files.tar.gz")},
+			{Key: aws.String("company/bqckup/other/03-August-2026/00-00-00/files.tar.gz")},
 		}},
 	}}
 	store := newWithClients(Options{Bucket: "backups", Prefix: "company"}, &fakeUploader{}, client, nil)
 
 	sets, err := store.ListBackupSets(context.Background(), "bqckup/site")
 	require.NoError(t, err)
-	require.Len(t, sets, 2)
-	assert.Equal(t, "bqckup/site/2026-08-01T00-00-00.000000000Z", sets[0].Key)
-	assert.Equal(t, "bqckup/site/2026-08-02T00-00-00.000000000Z", sets[1].Key)
+	require.Len(t, sets, 3)
+	assert.Equal(t, "bqckup/site/2026-07-31T00-00-00.000000000Z", sets[0].Key)
+	assert.Equal(t, "bqckup/site/01-August-2026/00-00-00", sets[1].Key)
+	assert.Equal(t, "bqckup/site/02-August-2026/00-00-00", sets[2].Key)
 	require.Len(t, client.listInputs, 2)
 	assert.Equal(t, "company/bqckup/site/", aws.ToString(client.listInputs[0].Prefix))
 	assert.Equal(t, "next", aws.ToString(client.listInputs[1].ContinuationToken))
@@ -50,6 +52,15 @@ func TestDeletePaginatesAndBatchesAtOneThousand(t *testing.T) {
 	assert.Len(t, client.deleteObjectsInputs[0].Delete.Objects, 1000)
 	assert.Len(t, client.deleteObjectsInputs[1].Delete.Objects, 1)
 	assert.Equal(t, "company/bqckup/site/2026-08-01T00-00-00.000000000Z/", aws.ToString(client.listInputs[0].Prefix))
+}
+
+func TestDeleteAcceptsReadableBackupSetPrefix(t *testing.T) {
+	client := &fakeClient{listOutputs: []*s3.ListObjectsV2Output{{}}}
+	store := newWithClients(Options{Bucket: "backups", Prefix: "company"}, &fakeUploader{}, client, nil)
+
+	require.NoError(t, store.Delete(context.Background(), "bqckup/site/01-August-2026/00-00-00"))
+	require.Len(t, client.listInputs, 1)
+	assert.Equal(t, "company/bqckup/site/01-August-2026/00-00-00/", aws.ToString(client.listInputs[0].Prefix))
 }
 
 func TestDeleteRejectsUnsafeOrBroadPrefixes(t *testing.T) {

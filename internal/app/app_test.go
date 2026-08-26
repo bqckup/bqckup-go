@@ -180,7 +180,7 @@ func TestOpenWiresAWorkingLocalBackupApplication(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "success", string(result.Status))
 
-	matches, err := filepath.Glob(filepath.Join(backupRoot, "bqckup", "example", "*", "files.tar.gz"))
+	matches, err := filepath.Glob(filepath.Join(backupRoot, "bqckup", "example", "*", "*", "files.tar.gz"))
 	require.NoError(t, err)
 	assert.Len(t, matches, 1)
 	runs, err := application.ListRuns(context.Background(), "example", 10)

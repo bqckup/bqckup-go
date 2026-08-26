@@ -32,7 +32,7 @@ Use the examples in [`configs/`](configs/) and see [`docs/configuration-v2.md`](
 
 ## Backup modes & storage
 
-- **Full mode (default)**: Compresses files into `.tar.gz` archives and database dumps into `.sql.gz`.
+- **Full mode (default)**: Compresses files into `.tar.gz` archives and database dumps into `.sql.gz`. Backup sets use readable UTC paths such as `bqckup/example/20-August-2026/00-09-30/`.
 - **Incremental mode**: Uses the built-in pure-Go engine (`backup_mode: incremental`) for encrypted, content-defined chunking and deduplication. No external Restic binary is required.
 - **Destinations**: Local directory, AWS S3, Cloudflare R2, or any S3-compatible object store.
 

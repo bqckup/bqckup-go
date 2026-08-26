@@ -27,7 +27,7 @@ func TestRunnerCompletesBackupLifecycle(t *testing.T) {
 	assert.Equal(t, StatusSuccess, result.Status)
 	assert.Equal(t, history.StatusSuccess, deps.repository.finishedStatus)
 	require.Len(t, deps.repository.artifacts, 1)
-	assert.Equal(t, "bqckup/example/2026-07-23T03-45-00.000000000Z/files.tar.gz", deps.repository.artifacts[0].ObjectKey)
+	assert.Equal(t, "bqckup/example/23-July-2026/03-45-00/files.tar.gz", deps.repository.artifacts[0].ObjectKey)
 	assert.Equal(t, 1, deps.retainer.calls)
 	assert.Equal(t, 1, deps.lock.unlockCalls)
 	_, statErr := os.Stat(deps.archiver.workspace)
@@ -158,8 +158,8 @@ func TestRunnerExportsEnabledDatabasesToEveryDestination(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, StatusSuccess, result.Status)
 	assert.Len(t, store.keys, 3)
-	assert.Contains(t, store.keys, "bqckup/example/2026-07-23T03-45-00.000000000Z/databases/application-mysql.sql.gz")
-	assert.Contains(t, store.keys, "bqckup/example/2026-07-23T03-45-00.000000000Z/databases/application-postgres.sql.gz")
+	assert.Contains(t, store.keys, "bqckup/example/23-July-2026/03-45-00/databases/application-mysql.sql.gz")
+	assert.Contains(t, store.keys, "bqckup/example/23-July-2026/03-45-00/databases/application-postgres.sql.gz")
 	assert.Len(t, deps.repository.artifacts, 3)
 }
 

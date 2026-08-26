@@ -201,7 +201,7 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 		return result, operationErr
 	}
 
-	timestamp := now.Format(storage.TimestampLayout)
+	backupSet := storage.FormatBackupSet(now)
 	sitePrefix := path.Join("bqckup", site.Name)
 
 	if site.BackupMode == "incremental" {
@@ -264,7 +264,7 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 			return fail(apperror.Wrap(apperror.CategoryExecution, "could not create the file archive", err))
 		}
 
-		objectKey := path.Join(sitePrefix, timestamp, "files.tar.gz")
+		objectKey := path.Join(sitePrefix, backupSet, "files.tar.gz")
 		if err := r.storeArtifact(ctx, run.ID, archive, objectKey, site.Destinations); err != nil {
 			return fail(err)
 		}
@@ -290,7 +290,7 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 				return fail(apperror.Wrap(apperror.CategoryExecution, "could not prepare database export workspace", err))
 			}
 			databaseArtifact, exportErr := exporter.Export(ctx, source, destination)
-			databaseKey := path.Join(sitePrefix, timestamp, "databases", source.Name+".sql.gz")
+			databaseKey := path.Join(sitePrefix, backupSet, "databases", source.Name+".sql.gz")
 			if exportErr != nil {
 				recordErr := r.recordFailedArtifact(ctx, run.ID, Artifact{SourceKind: "database", SourceName: source.Name}, databaseKey, site.Destinations, "could not export database")
 				operationErr := apperror.Wrap(apperror.CategoryExecution, "could not export database", exportErr)

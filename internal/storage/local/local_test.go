@@ -57,20 +57,17 @@ func TestPutCancelledRemovesStagingFiles(t *testing.T) {
 	assert.Empty(t, files)
 }
 
-// TestPutSameSecondRunsDoNotCollide: two runs in the same second (--force
-// rerun, cron plus manual overlap) must not collide on the same object
-// key; the timestamp layout carries nanosecond resolution.
-func TestPutSameSecondRunsDoNotCollide(t *testing.T) {
+func TestPutSameSecondRunDoesNotOverwrite(t *testing.T) {
 	store, err := New(t.TempDir())
 	require.NoError(t, err)
 
-	for _, nsec := range []int{0, 123_456_789} {
-		timestamp := time.Date(2026, 7, 23, 3, 45, 0, nsec, time.UTC).Format(storage.TimestampLayout)
-		key := path.Join("bqckup", "site", timestamp, "files.tar.gz")
-		stored, putErr := store.Put(context.Background(), sourceArtifact(t, []byte("archive")), key)
-		require.NoError(t, putErr, "run at %s must be storable", timestamp)
-		assert.Equal(t, key, stored.Key)
-	}
+	timestamp := time.Date(2026, 7, 23, 3, 45, 0, 123_456_789, time.UTC).Format(storage.TimestampLayout)
+	key := path.Join("bqckup", "site", timestamp, "files.tar.gz")
+	_, err = store.Put(context.Background(), sourceArtifact(t, []byte("first")), key)
+	require.NoError(t, err)
+
+	_, err = store.Put(context.Background(), sourceArtifact(t, []byte("second")), key)
+	require.Error(t, err)
 }
 
 func TestPutDoesNotOverwriteExistingObject(t *testing.T) {
@@ -113,15 +110,16 @@ func TestPutPersistsVerifiedArtifactWithPrivatePermissions(t *testing.T) {
 	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
 }
 
-func TestListBackupSetsRecognizesOnlyUTCApplicationTimestamps(t *testing.T) {
+func TestListBackupSetsRecognizesReadableAndLegacyUTCApplicationTimestamps(t *testing.T) {
 	root := t.TempDir()
 	store, err := New(root)
 	require.NoError(t, err)
 	for _, name := range []string{
-		"2026-07-22T03-45-00.000000000Z",
-		"2026-07-23T03-45-00.000000000Z",
-		"2026-07-23T03:45:00Z",
-		"notes",
+		"22-July-2026/03-45-00",
+		"23-July-2026/03-45-00",
+		"2026-07-21T03-45-00.000000000Z",
+		"23-July-2026/03:45:00",
+		"notes/not-a-run",
 	} {
 		require.NoError(t, os.MkdirAll(filepath.Join(root, "bqckup", "site", name), 0o700))
 	}
@@ -129,9 +127,10 @@ func TestListBackupSetsRecognizesOnlyUTCApplicationTimestamps(t *testing.T) {
 
 	sets, err := store.ListBackupSets(context.Background(), "bqckup/site")
 	require.NoError(t, err)
-	require.Len(t, sets, 2)
-	assert.Equal(t, "bqckup/site/2026-07-22T03-45-00.000000000Z", sets[0].Key)
-	assert.Equal(t, "bqckup/site/2026-07-23T03-45-00.000000000Z", sets[1].Key)
+	require.Len(t, sets, 3)
+	assert.Equal(t, "bqckup/site/2026-07-21T03-45-00.000000000Z", sets[0].Key)
+	assert.Equal(t, "bqckup/site/22-July-2026/03-45-00", sets[1].Key)
+	assert.Equal(t, "bqckup/site/23-July-2026/03-45-00", sets[2].Key)
 }
 
 func sourceArtifact(t *testing.T, contents []byte) storage.Artifact {
