@@ -1,11 +1,17 @@
 package cli
 
 import (
+	"bufio"
 	"fmt"
+	"io"
+	"os"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/bqckup/bqckup-go/internal/app"
+	"github.com/bqckup/bqckup-go/internal/apperror"
+	"github.com/bqckup/bqckup-go/internal/backup"
 	"github.com/spf13/cobra"
 )
 
@@ -138,7 +144,118 @@ func newBackupCommand(opts *options) *cobra.Command {
 	}
 	snapshots.Flags().StringVar(&destination, "destination", "", "storage destination of the site to list (required)")
 	command.AddCommand(snapshots)
+
+	var snapshot, target string
+	var quiet bool
+	restore := &cobra.Command{
+		Use:   "restore <site>",
+		Short: "Restore one snapshot of an incremental site into a directory",
+		Args: func(_ *cobra.Command, args []string) error {
+			if len(args) != 1 {
+				return fmt.Errorf("%w: backup restore requires exactly one site", ErrInvalidInput)
+			}
+			return nil
+		},
+		PreRunE: func(_ *cobra.Command, _ []string) error {
+			if destination == "" {
+				return fmt.Errorf("%w: --destination is required", ErrInvalidInput)
+			}
+			if target == "" {
+				return fmt.Errorf("%w: --target is required", ErrInvalidInput)
+			}
+			return nil
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return withApplication(cmd, opts.configDir, func(application *app.App) error {
+				confirm := resticRestoreOverwrite{force: force, in: cmd.InOrStdin(), out: cmd.ErrOrStderr()}.confirm
+				result, err := application.RestoreSnapshot(cmd.Context(), args[0], destination, snapshot, target, confirm)
+				if err != nil {
+					return err
+				}
+				if quiet {
+					return nil
+				}
+				if opts.output == "json" {
+					return writeRestoreJSON(cmd, result)
+				}
+				return writeRestoreText(cmd.OutOrStdout(), result)
+			})
+		},
+	}
+	restore.Flags().StringVar(&destination, "destination", "", "storage destination of the site to restore from (required)")
+	restore.Flags().StringVar(&snapshot, "snapshot", "latest", "snapshot id or prefix, or 'latest'")
+	restore.Flags().StringVar(&target, "target", "", "directory to restore into (required)")
+	restore.Flags().BoolVar(&force, "force", false, "overwrite existing files without asking")
+	restore.Flags().BoolVar(&quiet, "quiet", false, "print nothing on success")
+	command.AddCommand(restore)
 	return command
+}
+
+// resticRestoreOverwrite implements the engine's conflict confirmation: it
+// lists every conflict, prompts once on stderr, and maps the outcome to
+// the established error categories (preflight for non-terminal stdin,
+// cancellation for a declined prompt).
+type resticRestoreOverwrite struct {
+	force bool
+	in    io.Reader
+	out   io.Writer
+	tty   func(io.Reader) bool // injectable for tests; defaults to isTerminalReader
+}
+
+func (c resticRestoreOverwrite) confirm(conflicts []string) error {
+	if c.force {
+		return nil
+	}
+	for _, path := range conflicts {
+		fmt.Fprintf(c.out, "  %s\n", path)
+	}
+	fmt.Fprintf(c.out, "Overwrite %d files? [y/N]\n", len(conflicts))
+	check := c.tty
+	if check == nil {
+		check = isTerminalReader
+	}
+	if !check(c.in) {
+		return apperror.Wrap(apperror.CategoryPreflight, fmt.Sprintf("restore would overwrite %d files; re-run with --force to overwrite them", len(conflicts)), nil)
+	}
+	line, _ := bufio.NewReader(c.in).ReadString('\n')
+	if answer := strings.TrimSpace(line); answer != "y" && answer != "Y" {
+		return apperror.Wrap(apperror.CategoryCancellation, "restore cancelled by user", nil)
+	}
+	return nil
+}
+
+// isTerminalReader reports whether r is a character device (a TTY).
+func isTerminalReader(r io.Reader) bool {
+	file, ok := r.(*os.File)
+	if !ok {
+		return false
+	}
+	info, err := file.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
+}
+
+// writeRestoreText renders the restore summary: the 8-character snapshot
+// ID like the listing, then one line per skipped path.
+func writeRestoreText(w io.Writer, result backup.RestoreResult) error {
+	id := result.SnapshotID
+	if len(id) > 8 {
+		id = id[:8]
+	}
+	if _, err := fmt.Fprintf(w, "restored snapshot %s to %s (%d files, %s, %.1fs)\n", id, result.Target, result.FilesRestored, humanBytes(result.BytesRestored), result.DurationSeconds); err != nil {
+		return err
+	}
+	for _, skipped := range result.SkippedPaths {
+		if _, err := fmt.Fprintf(w, "skipped %s (not in this snapshot)\n", skipped); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// writeRestoreJSON renders the restore summary in the JSON schema, with
+// the full snapshot ID.
+func writeRestoreJSON(cmd *cobra.Command, result backup.RestoreResult) error {
+	return writeJSON(cmd, result)
 }
 
 // humanBytes renders a byte count for run output.

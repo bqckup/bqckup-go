@@ -1,7 +1,7 @@
 # Spec: Pure-Go Restic Engine Rewrite (Phase 1 — L1 Core Engine)
 
 **Date:** 2026-08-20  
-**Status:** In Review  
+**Status:** Approved for implementation planning  
 **Target Package:** `internal/engine/restic/` in `github.com/bqckup/bqckup-go`  
 **Parent Initiative:** Zero-External-Dependency Incremental Backup for Bqckup Go  
 **Format Verification:** `docs/superpowers/notes/restic-format-verification.md` (all format claims verified against official restic source, commit `a80be14`, version 0.19.1-dev; that document wins on any conflict)  

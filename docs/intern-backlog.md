@@ -310,6 +310,24 @@ green after prune.
 
 **Suggested commit:** `feat: add incremental snapshot listing command`
 
+## M18 — Incremental snapshot restore
+
+**Status:** In progress (2026-08-26). See `docs/superpowers/specs/2026-08-26-restore.md`.
+
+**Objective:** `bqckup backup restore <site> --destination <name> --snapshot <id|latest> --target <path> [--force] [--quiet]` rebuilds the configured file paths of one snapshot into an explicit target directory (restic layout), from local, S3, or R2 repositories. Second half of issue #17; the legacy counterpart is `bqckup restore <site> --target <dir>`.
+
+**Prerequisites:** M12–M15 delivered (engine facade, non-exclusive locks, index/pack/decrypt/zstd read path), M17 delivered (snapshot listing the restore resolves against).
+
+**In scope:** an in-tree `internal/engine/restic/restorer` package (tree walk, blob loading, staging directory, conflict collection, single confirm callback, move into place), repository `LoadBlob`/`LoadTree`/`LoadSnapshot` exports, a facade `RestoreSnapshot` method, a new `backup.Restorer` use case (mode gate, password preflight, site-tag snapshot resolution, target preflight), app wiring sharing M17's validation matrix, the `backup restore` subcommand with `--destination --snapshot --target --force --quiet`, text and JSON summaries, README/guide/backlog/CONTEXT updates.
+
+**Out of scope:** restoring full-mode sites (config error pointing at `history list --details`), paths no longer configured in the site, uid/gid and xattr restoration, hardlink grouping, special node types (skipped), history writes, any new config field or dependency.
+
+**Acceptance:** byte-for-byte round trip with restic layout and symlinks/modes intact on all three destination types; conflicts prompt once on stderr with the exact list, a declined prompt exits 4 and writes nothing, `--force` skips the prompt, non-TTY conflicts without `--force` exit 3 naming `--force`; `latest` and ID prefixes resolve against the site tag only; skipped configured paths are reported, an empty intersection exits 4; cancellation removes staging and leaves the target untouched; `--output json` emits the summary schema, `--quiet` prints nothing on success; no credential ever appears; history unchanged; `make verify` and `sh scripts/check-docs.sh` pass.
+
+**Required tests:** engine round trip (bytes, modes, symlinks, empty dirs, filtering, skipped paths, conflicts, abort, cancellation, missing blobs, special nodes), facade restore and lock lifecycle, use-case snapshot resolution and error mapping (site tag, prefixes, full-mode rejection, password and target preflights, confirm pass-through, redaction), app validation matrix, CLI flags/prompt/summary/exit codes.
+
+**Suggested commit:** `feat: add incremental snapshot restore command`
+
 ## Mentor review checklist
 
 - Assignment is exactly one milestone with prerequisites satisfied.

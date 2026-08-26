@@ -12,6 +12,7 @@ import (
 	"github.com/bqckup/bqckup-go/internal/backup"
 	databaseexporter "github.com/bqckup/bqckup-go/internal/backup/database"
 	"github.com/bqckup/bqckup-go/internal/backup/files"
+	restic "github.com/bqckup/bqckup-go/internal/backup/restic"
 	"github.com/bqckup/bqckup-go/internal/clock"
 	"github.com/bqckup/bqckup-go/internal/config"
 	resticfacade "github.com/bqckup/bqckup-go/internal/engine/restic/facade"
@@ -30,6 +31,7 @@ type App struct {
 	repository    *history.Repository
 	stores        map[string]storage.Store
 	snapshots     backup.SnapshotLister
+	restorer      backup.SnapshotRestorer
 	closeOnce     sync.Once
 	closeErr      error
 	closeDatabase func() error
@@ -80,6 +82,7 @@ func Open(ctx context.Context, configDir string) (*App, error) {
 		repository:    repository,
 		stores:        stores,
 		snapshots:     engine,
+		restorer:      engine,
 		closeDatabase: closeDatabase,
 	}, nil
 }
@@ -243,6 +246,32 @@ func siteUsesDestination(site config.Site, destination string) bool {
 		}
 	}
 	return false
+}
+
+// RestoreSnapshot restores one snapshot of one incremental site into the
+// target directory. Validation mirrors ListSiteSnapshots; the confirm
+// callback is passed through to the engine unchanged.
+func (a *App) RestoreSnapshot(ctx context.Context, siteName, destinationName, snapshotRef, target string, confirm restic.RestoreOverwrite) (backup.RestoreResult, error) {
+	site, ok := a.configuration.Site(siteName)
+	if !ok {
+		return backup.RestoreResult{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q was not found", siteName), nil)
+	}
+	if !site.Enabled {
+		return backup.RestoreResult{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q is disabled", siteName), nil)
+	}
+	if site.BackupMode != "incremental" {
+		return backup.RestoreResult{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf(
+			"site %q uses full backup mode; use 'bqckup history list --site %s --details' to inspect stored archives",
+			siteName, siteName), nil)
+	}
+	storageConfig, ok := a.configuration.Storages[destinationName]
+	if !ok {
+		return backup.RestoreResult{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("storage destination %q was not found", destinationName), nil)
+	}
+	if !siteUsesDestination(site, destinationName) {
+		return backup.RestoreResult{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q does not send backups to destination %q", siteName, destinationName), nil)
+	}
+	return (&backup.Restorer{Snapshots: a.snapshots, Engine: a.restorer}).RestoreSiteSnapshot(ctx, destinationName, snapshotRef, target, site, storageConfig, confirm)
 }
 
 // parseSiteFromKey extracts the site name from a download-link key. Valid

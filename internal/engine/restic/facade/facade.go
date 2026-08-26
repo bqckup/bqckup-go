@@ -18,6 +18,7 @@ import (
 	"github.com/bqckup/bqckup-go/internal/engine/restic/crypto"
 	"github.com/bqckup/bqckup-go/internal/engine/restic/lock"
 	"github.com/bqckup/bqckup-go/internal/engine/restic/repository"
+	"github.com/bqckup/bqckup-go/internal/engine/restic/restorer"
 )
 
 // Engine is the pure-Go incremental engine. It never spawns processes and
@@ -168,9 +169,60 @@ func (e *Engine) ListSnapshots(ctx context.Context, repo backuprestic.RepoConfig
 			Paths:     entry.Snapshot.Paths,
 			Size:      size,
 			CreatedAt: entry.Snapshot.Time,
+			Tags:      entry.Snapshot.Tags,
 		})
 	}
 	return snapshots, nil
+}
+
+// RestoreSnapshot restores one snapshot's configured paths into the
+// target directory under a non-exclusive lock. The confirm callback is
+// invoked once, before anything is written, with every conflicting path;
+// its error aborts the restore.
+func (e *Engine) RestoreSnapshot(ctx context.Context, repo backuprestic.RepoConfig, snapshotID string, paths []string, target string, confirm backuprestic.RestoreOverwrite) (backuprestic.RestoreSummary, error) {
+	started := time.Now()
+	if err := ctx.Err(); err != nil {
+		return backuprestic.RestoreSummary{}, err
+	}
+	if err := e.rejectUnsupportedURL(repo.URL); err != nil {
+		return backuprestic.RestoreSummary{}, err
+	}
+	b, err := e.openBackend(ctx, repo)
+	if err != nil {
+		return backuprestic.RestoreSummary{}, err
+	}
+	r, err := repository.Open(ctx, b, repo.Password)
+	if err != nil {
+		return backuprestic.RestoreSummary{}, &restic.RedactedError{Category: "repository", Message: "could not open the repository", Err: err}
+	}
+	restoreLock, err := lock.New(ctx, b, r.MasterKey(), false)
+	if err != nil {
+		return backuprestic.RestoreSummary{}, err
+	}
+	defer func() { _ = restoreLock.Unlock(context.WithoutCancel(ctx), b) }()
+
+	id, err := restic.ParseID(snapshotID)
+	if err != nil {
+		return backuprestic.RestoreSummary{}, err
+	}
+	entry, err := r.LoadSnapshot(ctx, id)
+	if err != nil {
+		return backuprestic.RestoreSummary{}, &restic.RedactedError{Category: "repository", Message: "could not load the snapshot", Err: err}
+	}
+	summary, err := restorer.New(r).Restore(ctx, entry.Snapshot, paths, target, restorer.Overwrite(confirm))
+	if err != nil {
+		// The confirm callback's own error (with its apperror category)
+		// stays reachable through the unwrap chain.
+		return backuprestic.RestoreSummary{}, &restic.RedactedError{Category: "repository", Message: "could not restore the snapshot", Err: err}
+	}
+	return backuprestic.RestoreSummary{
+		SnapshotID:      snapshotID,
+		Target:          target,
+		FilesRestored:   summary.FilesRestored,
+		BytesRestored:   summary.BytesRestored,
+		SkippedPaths:    summary.SkippedPaths,
+		DurationSeconds: time.Since(started).Seconds(),
+	}, nil
 }
 
 // Unlock removes stale repository locks (restic unlock semantics: stale

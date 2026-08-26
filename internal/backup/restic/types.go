@@ -42,4 +42,20 @@ type Snapshot struct {
 	Paths     []string
 	Size      int64
 	CreatedAt time.Time
+	Tags      []string
 }
+
+// RestoreSummary is the result of one restore.
+type RestoreSummary struct {
+	SnapshotID      string   `json:"snapshot_id"`
+	Target          string   `json:"target"`
+	FilesRestored   int      `json:"files_restored"`
+	BytesRestored   int64    `json:"bytes_restored"`
+	SkippedPaths    []string `json:"skipped_paths,omitempty"`
+	DurationSeconds float64  `json:"duration_seconds"`
+}
+
+// RestoreOverwrite is called once, before anything is written, with every
+// existing path the restore would replace. A nil return means proceed; a
+// non-nil error aborts the restore and is propagated unchanged.
+type RestoreOverwrite func(conflicts []string) error
