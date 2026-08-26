@@ -65,6 +65,8 @@ destination and no silent overwrites.
 - `internal/storage`: adapter contract and portable object-key types.
 - `internal/storage/local`: path-safe, checksum-verified local writes and backup-set listing.
 - `internal/storage/s3compat`: shared S3/R2 verified uploads and prefix-scoped retention.
+- `internal/storage/remoteconfig`: bounded HTTPS retrieval and strict decoding
+  of S3/R2 configuration into process memory before adapters are constructed.
 - `internal/history`: GORM models, SQLite lifecycle, ordered recorded migrations, repository queries.
 - `internal/platform/lock`: Linux `flock` implementation (site-level
   mutual exclusion).

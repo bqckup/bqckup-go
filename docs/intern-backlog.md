@@ -84,17 +84,24 @@ binary remains an opt-in compatibility-test oracle, not a runtime adapter.
 
 ## M06 — Remote HTTP credential provider
 
+**Status:** Delivered (2026-08-26). Issue #21. The provider URL is referenced
+by `credentials.url`, which contains an environment-variable name; returned
+storage settings remain in memory only.
+
 **Objective:** Support the legacy `remote_url` use case through a constrained provider whose URL is itself supplied by an environment variable.
 
 **Prerequisites:** M04 merged; response schema, TLS policy, timeout, and refresh semantics approved in a short design note.
 
-**In scope:** `credentials.source: remote`, `url_env`, HTTPS client with timeout, bounded response, strict JSON decoding, in-memory expiry handling, redacted errors.
+**In scope:** `credentials.source: remote`, `credentials.url` environment
+reference, HTTPS client with timeout, bounded response, strict JSON decoding,
+in-memory storage settings, redacted errors.
 
 **Out of scope:** URL literal in YAML, credential persistence, arbitrary headers/scripts, retries without limits.
 
 **Acceptance:** Valid responses create short-lived SDK credentials; non-HTTPS endpoints are rejected except explicitly isolated tests; response bodies and URLs never appear in output/history.
 
-**Required tests:** Timeout, cancellation, status code, oversized/malformed response, expiry, missing URL env, URL and credential redaction.
+**Required tests:** Timeout, cancellation, status code, oversized/malformed
+response, missing URL env, URL and credential redaction.
 
 **Suggested commit:** `feat: add remote S3 credential provider`
 

@@ -57,11 +57,50 @@ storages:
     region: auto                                 # Cloudflare R2 uses 'auto'
     prefix: prod-backups                         # optional
     primary: false
+
+  # S3-compatible settings loaded from an HTTPS provider at startup.
+  # `url` names an environment variable; it is not a literal URL.
+  managed-s3:
+    type: s3
+    credentials:
+      source: remote
+      url: BQCKUP_MANAGED_S3_CREDENTIAL_URL
+    prefix: prod-backups                         # optional local override
+    primary: false
 ```
 
 - **Cloudflare R2**: Use `type: r2` with an HTTPS endpoint (`https://<account_id>.r2.cloudflarestorage.com`) and `region: auto`. Credentials must be dedicated **R2 API Tokens** with *Object Read & Write* permissions.
 - **AWS S3 / S3-Compatible**: Use `type: s3`. For custom endpoints (e.g. MinIO, Wasabi), set `endpoint` and standard `region`.
-- **Security**: Keep credential-bearing storage files as regular files with mode `0600`.
+- **Remote provider**: `credentials.source: remote` requires `credentials.url`
+  to contain a valid environment-variable name. That variable must hold an
+  absolute HTTPS URL. Remote credentials cannot be mixed with `bucket`,
+  `access_key_id`, `secret_access_key`, `region`, or `endpoint` in YAML.
+  `prefix` and `primary` remain local settings.
+- **Security**: Keep storage files containing inline credentials as regular
+  non-symlink files with mode `0600`. A remote provider response is retained
+  only in process memory and is never written back to YAML, logs, history, or
+  command output.
+
+The remote provider is called with `GET` when an application command opens the
+configuration. A successful response must be a small, strict JSON object:
+
+```json
+{
+  "bucket": "example-bucket",
+  "access_key_id": "REDACTED",
+  "secret_access_key": "REDACTED",
+  "endpoint": "https://s3-compatible.example",
+  "region": "example-region"
+}
+```
+
+Unknown fields, malformed or oversized JSON, non-success HTTP responses,
+timeouts, and invalid returned storage settings fail preflight with a redacted
+message. Provider URLs and response bodies are never included in errors.
+`bqckup config validate` validates the local declaration without contacting the
+provider; commands that open the application fetch and validate the response.
+Older Bqckup versions reject the new `credentials` block because configuration
+decoding is strict, so upgrade the binary before deploying this form.
 
 
 ## Site file

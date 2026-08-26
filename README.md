@@ -28,7 +28,7 @@ Configuration files:
 /etc/bqckup/sites/<site>.yaml
 ```
 
-Use the examples in [`configs/`](configs/) and see [`docs/configuration-v2.md`](docs/configuration-v2.md) for the full schema. Keep credential-bearing files at mode `0600` and never commit real credentials.
+Use the examples in [`configs/`](configs/) and see [`docs/configuration-v2.md`](docs/configuration-v2.md) for the full schema. S3-compatible settings may be inline or loaded at startup from a constrained HTTPS provider referenced through an environment variable. Keep files with inline credentials at mode `0600` and never commit real credentials.
 
 ## Backup modes & storage
 
@@ -85,4 +85,4 @@ make verify
 sh scripts/check-docs.sh
 ```
 
-Web UI and remote provider credentials are not implemented yet.
+Web UI is not implemented.
