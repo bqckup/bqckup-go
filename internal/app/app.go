@@ -165,6 +165,24 @@ func (a *App) RunBackup(ctx context.Context, siteName string, force bool) (backu
 	return a.runner.Run(ctx, site, force)
 }
 
+// RunEnabledBackups runs every enabled site in deterministic configuration
+// order. It stops at the first failure so the existing error category and
+// process exit-code contract remain intact.
+func (a *App) RunEnabledBackups(ctx context.Context, force bool) ([]backup.RunResult, error) {
+	results := make([]backup.RunResult, 0, len(a.configuration.Sites))
+	for _, site := range a.configuration.Sites {
+		if !site.Enabled {
+			continue
+		}
+		result, err := a.RunBackup(ctx, site.Name, force)
+		if err != nil {
+			return results, err
+		}
+		results = append(results, result)
+	}
+	return results, nil
+}
+
 func (a *App) LastSuccessful(ctx context.Context, siteName string) (*history.BackupRun, error) {
 	return a.repository.LastSuccessful(ctx, siteName)
 }

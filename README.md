@@ -17,7 +17,7 @@ make build && sudo make install
 sudo bqckup init
 sudo bqckup doctor
 sudo bqckup config validate
-sudo bqckup backup run <site>
+sudo bqckup backup run [site]
 ```
 
 Configuration files:
@@ -49,7 +49,7 @@ bqckup init
 bqckup config validate
 bqckup doctor [--site <name>]
 bqckup backup list
-bqckup backup run <site> [--force]
+bqckup backup run [site] [--force]
 bqckup backup snapshots <site> --destination <name>
 bqckup backup restore <site> --destination <name> --snapshot <id|latest> --target <path> [--force]
 bqckup history list [--site <name>] [--limit <n>] [--details]
@@ -68,6 +68,8 @@ and never uses the local history database.
 `bqckup backup snapshots` shows the live snapshots of one incremental site,
 read directly from its repository on any destination type (local, S3, or R2).
 It is read-only and never uses the local history database.
+`bqckup backup run` without a site runs every site with `enabled: true` in
+configuration order. Supplying a site name continues to run only that site.
 `bqckup backup restore` rebuilds the configured paths of one snapshot into
 the target directory in restic layout, and never overwrites existing files
 without asking (or `--force`). It writes nothing to history.

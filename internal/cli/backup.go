@@ -66,32 +66,40 @@ func newBackupCommand(opts *options) *cobra.Command {
 
 	var force bool
 	run := &cobra.Command{
-		Use:   "run <site>",
-		Short: "Run one configured backup site",
+		Use:   "run [site]",
+		Short: "Run one backup site or every enabled site",
 		Args: func(_ *cobra.Command, args []string) error {
-			if len(args) != 1 {
-				return fmt.Errorf("%w: backup run requires exactly one site", ErrInvalidInput)
+			if len(args) > 1 {
+				return fmt.Errorf("%w: backup run accepts at most one site", ErrInvalidInput)
 			}
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return withApplication(cmd, opts.configDir, func(application *app.App) error {
-				result, err := application.RunBackup(cmd.Context(), args[0], force)
+				if len(args) == 1 {
+					result, err := application.RunBackup(cmd.Context(), args[0], force)
+					if err != nil {
+						return err
+					}
+					if opts.output == "json" {
+						return writeJSON(cmd, result)
+					}
+					return writeRunResultText(cmd.OutOrStdout(), result)
+				}
+
+				results, err := application.RunEnabledBackups(cmd.Context(), force)
 				if err != nil {
 					return err
 				}
 				if opts.output == "json" {
-					return writeJSON(cmd, result)
+					return writeJSON(cmd, results)
 				}
-				if result.Status == "skipped" {
-					_, err = fmt.Fprintf(cmd.OutOrStdout(), "%s: skipped (%s)\n", result.SiteName, result.SkipReason)
-				} else {
-					_, err = fmt.Fprintf(cmd.OutOrStdout(), "%s: %s (run %s)\n", result.SiteName, result.Status, result.RunID)
+				for _, result := range results {
+					if err := writeRunResultText(cmd.OutOrStdout(), result); err != nil {
+						return err
+					}
 				}
-				if result.ReclaimedBytes > 0 {
-					_, err = fmt.Fprintf(cmd.OutOrStdout(), "%s: reclaimed %s\n", result.SiteName, humanBytes(result.ReclaimedBytes))
-				}
-				return err
+				return nil
 			})
 		},
 	}
@@ -189,6 +197,22 @@ func newBackupCommand(opts *options) *cobra.Command {
 	restore.Flags().BoolVar(&quiet, "quiet", false, "print nothing on success")
 	command.AddCommand(restore)
 	return command
+}
+
+func writeRunResultText(out io.Writer, result backup.RunResult) error {
+	var err error
+	if result.Status == backup.StatusSkipped {
+		_, err = fmt.Fprintf(out, "%s: skipped (%s)\n", result.SiteName, result.SkipReason)
+	} else {
+		_, err = fmt.Fprintf(out, "%s: %s (run %s)\n", result.SiteName, result.Status, result.RunID)
+	}
+	if err != nil {
+		return err
+	}
+	if result.ReclaimedBytes > 0 {
+		_, err = fmt.Fprintf(out, "%s: reclaimed %s\n", result.SiteName, humanBytes(result.ReclaimedBytes))
+	}
+	return err
 }
 
 // resticRestoreOverwrite implements the engine's conflict confirmation: it
