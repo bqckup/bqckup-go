@@ -431,7 +431,7 @@ func TestRunnerIncrementalBackupRetainsDatabaseArtifacts(t *testing.T) {
 	result, err := NewRunner(deps.dependencies()).Run(context.Background(), site, false)
 	require.NoError(t, err)
 	assert.Equal(t, StatusSuccess, result.Status)
-	assert.Contains(t, store.keys, "bqckup/example/2026-07-23T03-45-00.000000000Z/databases/application-mysql.sql.gz")
+	assert.Contains(t, store.keys, "bqckup/example/23-July-2026/03-45-00/databases/application-mysql.sql.gz")
 	assert.Equal(t, 1, deps.retainer.calls, "incremental runs must retain the bqckup/<site> database artifact sets")
 	assert.Equal(t, "bqckup/example", deps.retainer.lastSitePrefix)
 }
