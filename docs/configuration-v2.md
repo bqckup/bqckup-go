@@ -167,3 +167,64 @@ bqckup --config-dir /etc/bqckup --output json config validate
 ```
 
 Unknown keys, invalid paths, unsupported types, and explicit versions other than `2` are rejected.
+`bqckup config validate` additionally fails when an environment variable
+referenced by the `notifications` section is unset or empty; the backup
+command itself never fails for that reason (delivery warns instead).
+
+## Notifications
+
+Optional top-level `notifications:` section in the root file. Absent section
+means notifications are off.
+
+```yaml
+notifications:
+  channels:
+    email:
+      type: smtp
+      host: smtp.example.com
+      port: 587
+      username_env: BQCKUP_SMTP_USERNAME
+      password_env: BQCKUP_SMTP_PASSWORD
+      from: bqckup@example.com
+      to:
+        - ops@example.com
+
+    webhook:
+      type: webhook
+      url_env: BQCKUP_WEBHOOK_URL
+
+    discord:
+      type: discord
+      webhook_url_env: BQCKUP_DISCORD_WEBHOOK_URL
+
+  routes:
+    - events: [backup_failed, backup_cancelled]
+      channels: [email, discord]
+    - events: [backup_succeeded]
+      channels: [webhook]
+```
+
+- **Channels** are named, one of three types. `smtp` requires `host`,
+  `port`, `from`, and a non-empty `to`; `webhook` requires `url_env`;
+  `discord` requires `webhook_url_env`. Fields foreign to the channel type
+  are rejected, as are `username_env`/`password_env` provided one without
+  the other.
+- **Secrets and URLs are environment-variable references only**
+  (`username_env`, `password_env`, `url_env`, `webhook_url_env`). Plaintext
+  values are rejected by strict decoding. Names must match the valid
+  environment-variable pattern. Values are resolved at send time; a missing
+  value is a per-channel warning.
+- **Routes** map events to channels. Events are `backup_succeeded`,
+  `backup_failed`, and `backup_cancelled`; a route needs at least one event
+  and may fan out to several channels. A channel matched through several
+  routes is sent once per event. Duplicate channel names in the YAML map are
+  not detected: the last definition wins (yaml map semantics).
+- **Delivery**: after a run is recorded terminal in history, every channel of
+  every matching route is attempted, sequentially, with the same sanitized
+  payload (run id, site, status, timestamps, duration, artifact count and
+  size, and for failed/cancelled runs a redacted error category and message).
+  A failing channel never stops the others and never changes the run status
+  or history. Skipped runs and preflight failures send nothing. Webhook and
+  Discord use a 10-second HTTP timeout; SMTP uses a 30-second session
+  deadline. SMTP port 465 is implicit TLS; other ports use STARTTLS, and
+  PLAIN authentication is only attempted when the session is encrypted.

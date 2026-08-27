@@ -33,6 +33,10 @@ Dependencies point toward the use case. `backup.Runner` knows interfaces and dom
 9. Record each stored artifact.
 10. Apply retention after every required destination succeeds.
 11. Mark the run `success`; failures and cancellation get a terminal status with a redacted message.
+12. Notify the terminal status through the configured notification routes
+    (best effort; a failing channel warns and never changes the run result
+    or history). Only runs recorded in history notify: skipped runs and
+    preflight failures are silent.
 12. Remove temporary files and release the lock.
 
 Multiple destinations have all-required semantics. A destination failure fails the run and prevents retention. Previously successful backup sets are not removed after a failed current run.
@@ -71,6 +75,10 @@ overwrites.
 - `internal/storage/remoteconfig`: bounded HTTPS retrieval and strict decoding
   of S3/R2 configuration into process memory before adapters are constructed.
 - `internal/history`: GORM models, SQLite lifecycle, ordered recorded migrations, repository queries.
+- `internal/notify`: best-effort delivery of terminal run notifications over
+  SMTP, generic webhooks, and Discord webhooks; shared sanitized payload,
+  route dispatch, per-channel renders. Implements the consumer-owned
+  `backup.Notifier` interface; no secrets in payloads or errors.
 - `internal/platform/lock`: Linux `flock` implementation (site-level
   mutual exclusion).
 - Repository-level locking for the builtin engine lives in
@@ -93,10 +101,11 @@ Artifact keys use:
 bqckup/<site>/<DD-MMMM-YYYY>/<HH-mm-ss>/<artifact name>
 ```
 
-The date and run directories use UTC, with English month names. Archive sets
-have one-second name resolution; because stores are write-once, a second run
-for the same site and UTC second is rejected instead of overwriting data.
-Listing and retention also recognize the previous flat
+The date and run directories use UTC, with English month names. Run names
+carry nanosecond resolution so two runs of one site within the same UTC
+second get distinct backup sets; stores are write-once, and a same-second
+second run must not fail on its own first write. Listing and retention also
+recognize the previous readable second-resolution layout and the flat
 `2006-01-02T15-04-05.000000000Z` backup-set directory so existing archives
 remain manageable. Names come from validated configuration, not raw runtime
 input.
@@ -113,4 +122,4 @@ input.
 
 ## Deliberate exclusions
 
-The foundation has no web UI, auth, notifications, reporting, master API, webhook, restore, internal scheduler, or Rustic. Incremental backup is delivered only by the in-tree pure-Go engine for local and S3/R2 storage. The external Restic binary is limited to opt-in compatibility tests.
+The foundation has no web UI, auth, reporting, master API, restore, internal scheduler, or Rustic. Incremental backup is delivered only by the in-tree pure-Go engine for local and S3/R2 storage. The external Restic binary is limited to opt-in compatibility tests.

@@ -45,6 +45,42 @@ func TestLastSuccessfulReturnsNilWhenMissing(t *testing.T) {
 	assert.Nil(t, run)
 }
 
+func TestRunArtifactsReturnsOnlyStoredArtifacts(t *testing.T) {
+	repo := testRepository(t)
+	ctx := context.Background()
+	run := &BackupRun{SiteName: "example", Status: StatusRunning, StartedAt: time.Now()}
+	require.NoError(t, repo.CreateRun(ctx, run))
+
+	stored := []Artifact{
+		{RunID: run.ID, SourceKind: "files", SourceName: "files", Destination: "local-primary", ObjectKey: "k1", Size: 10, SHA256: "a", Status: ArtifactStored},
+		{RunID: run.ID, SourceKind: "files", SourceName: "files", Destination: "s3-primary", ObjectKey: "k2", Size: 10, SHA256: "b", Status: ArtifactStored},
+		{RunID: run.ID, SourceKind: "database", SourceName: "app", Destination: "local-primary", ObjectKey: "k3", Size: 20, SHA256: "c", Status: ArtifactStored},
+	}
+	for _, artifact := range stored {
+		require.NoError(t, repo.CreateArtifact(ctx, &artifact))
+	}
+	// A failed artifact of the same run must not be returned.
+	require.NoError(t, repo.CreateArtifact(ctx, &Artifact{
+		RunID: run.ID, SourceKind: "database", SourceName: "broken", Destination: "local-primary",
+		ObjectKey: "k4", Size: 99, SHA256: "d", Status: ArtifactFailed,
+	}))
+	// An artifact of another run must not be returned.
+	other := &BackupRun{SiteName: "example", Status: StatusRunning, StartedAt: time.Now()}
+	require.NoError(t, repo.CreateRun(ctx, other))
+	require.NoError(t, repo.CreateArtifact(ctx, &Artifact{
+		RunID: other.ID, SourceKind: "files", SourceName: "files", Destination: "local-primary",
+		ObjectKey: "k5", Size: 99, SHA256: "e", Status: ArtifactStored,
+	}))
+
+	artifacts, err := repo.RunArtifacts(ctx, run.ID)
+	require.NoError(t, err)
+	require.Len(t, artifacts, 3)
+	for _, artifact := range artifacts {
+		assert.Equal(t, run.ID, artifact.RunID)
+		assert.Equal(t, ArtifactStored, artifact.Status)
+	}
+}
+
 func testRepository(t *testing.T) *Repository {
 	t.Helper()
 	db, closeDB, err := Open(filepath.Join(t.TempDir(), "state.db"))

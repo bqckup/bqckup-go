@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -16,6 +17,7 @@ import (
 	databaseexporter "github.com/bqckup/bqckup-go/internal/backup/database"
 	restic "github.com/bqckup/bqckup-go/internal/backup/restic"
 	"github.com/bqckup/bqckup-go/internal/config"
+	"github.com/bqckup/bqckup-go/internal/notify"
 	"github.com/bqckup/bqckup-go/internal/process"
 	"github.com/bqckup/bqckup-go/internal/storage/s3compat"
 	"github.com/stretchr/testify/assert"
@@ -284,6 +286,64 @@ func TestOpenWiresAWorkingLocalBackupApplication(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, runs, 1)
 	assert.Len(t, runs[0].Artifacts, 1)
+}
+
+func TestBuildNotifierConstructsChannelsFromConfiguration(t *testing.T) {
+	configuration := validApplicationConfig(t)
+	configuration.Notifications = config.Notifications{
+		Channels: map[string]config.Channel{
+			"email":   {Type: "smtp", Host: "smtp.example.com", Port: 587, From: "bqckup@example.com", To: []string{"ops@example.com"}},
+			"webhook": {Type: "webhook", URLEnv: "BQCKUP_WEBHOOK_URL"},
+			"discord": {Type: "discord", WebhookURLEnv: "BQCKUP_DISCORD_WEBHOOK_URL"},
+		},
+		Routes: []config.Route{
+			{Events: []string{config.EventBackupSucceeded}, Channels: []string{"webhook"}},
+		},
+	}
+
+	notifier := buildNotifier(configuration.Notifications, os.LookupEnv)
+	require.NotNil(t, notifier)
+	assert.IsType(t, &notify.Dispatcher{}, notifier)
+}
+
+func TestBuildNotifierReturnsNilWithoutNotifications(t *testing.T) {
+	assert.Nil(t, buildNotifier(config.Notifications{}, os.LookupEnv))
+}
+
+func TestOpenDeliversBackupSucceededThroughConfiguredWebhook(t *testing.T) {
+	var received map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&received))
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(server.Close)
+	t.Setenv("BQCKUP_WEBHOOK_URL", server.URL)
+
+	configDir, _ := writeApplicationConfig(t)
+	rootPath := filepath.Join(configDir, "bqckup.yaml")
+	root, err := os.ReadFile(rootPath)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(rootPath, append(root, []byte(`notifications:
+  channels:
+    webhook:
+      type: webhook
+      url_env: BQCKUP_WEBHOOK_URL
+  routes:
+    - events: [backup_succeeded]
+      channels: [webhook]
+`)...), 0o600))
+
+	application, err := Open(context.Background(), configDir)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, application.Close()) })
+
+	result, err := application.RunBackup(context.Background(), "example", true)
+	require.NoError(t, err)
+	assert.Equal(t, "success", string(result.Status))
+	require.NotNil(t, received)
+	assert.Equal(t, "backup_succeeded", received["event"])
+	assert.Equal(t, "example", received["site"])
+	assert.EqualValues(t, 1, received["artifact_count"])
 }
 
 func writeApplicationConfig(t *testing.T) (string, string) {

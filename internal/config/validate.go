@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"os"
 	"path"
 	"path/filepath"
 	"regexp"
@@ -66,7 +67,181 @@ func (c Config) Validate() error {
 			return err
 		}
 	}
+	return c.validateNotifications()
+}
+
+// validateNotifications enforces the notifications contract. An absent
+// section (zero value) is valid and means notifications are off.
+func (c Config) validateNotifications() error {
+	notifications := c.Notifications
+	if len(notifications.Channels) == 0 && len(notifications.Routes) == 0 {
+		return nil
+	}
+	if len(notifications.Channels) == 0 {
+		return validationError("bqckup.yaml", "notifications.channels", "at least one channel is required")
+	}
+	if len(notifications.Routes) == 0 {
+		return validationError("bqckup.yaml", "notifications.routes", "at least one route is required")
+	}
+	for name, channel := range notifications.Channels {
+		if err := validateNotificationChannel(name, channel); err != nil {
+			return err
+		}
+	}
+	for index, route := range notifications.Routes {
+		field := fmt.Sprintf("notifications.routes[%d]", index)
+		if len(route.Events) == 0 {
+			return validationError("bqckup.yaml", field+".events", "at least one event is required")
+		}
+		for _, event := range route.Events {
+			switch event {
+			case EventBackupSucceeded, EventBackupFailed, EventBackupCancelled:
+			default:
+				return validationError("bqckup.yaml", field+".events", "must be one of backup_succeeded, backup_failed, or backup_cancelled")
+			}
+		}
+		for _, channelName := range route.Channels {
+			if _, ok := notifications.Channels[channelName]; !ok {
+				return validationError("bqckup.yaml", field+".channels", "references unknown channel %q", channelName)
+			}
+		}
+	}
 	return nil
+}
+
+func validateNotificationChannel(name string, channel Channel) error {
+	field := "notifications.channels." + name
+	if !SafeName.MatchString(name) {
+		return validationError("bqckup.yaml", field, "name contains unsupported characters")
+	}
+	envFields := []struct{ name, value string }{
+		{"username_env", channel.UsernameEnv},
+		{"password_env", channel.PasswordEnv},
+		{"url_env", channel.URLEnv},
+		{"webhook_url_env", channel.WebhookURLEnv},
+	}
+	for _, candidate := range envFields {
+		if candidate.value != "" && !validEnvName.MatchString(candidate.value) {
+			return validationError("bqckup.yaml", field+"."+candidate.name, "must be a valid environment variable name")
+		}
+	}
+	switch channel.Type {
+	case "smtp":
+		return validateSMTPChannel(field, channel)
+	case "webhook":
+		return validateWebhookChannel(field, channel)
+	case "discord":
+		return validateDiscordChannel(field, channel)
+	default:
+		return validationError("bqckup.yaml", field+".type", "type must be one of smtp, webhook, or discord")
+	}
+}
+
+// channelField describes one present field for foreign-field checks.
+type channelField struct {
+	name    string
+	present bool
+}
+
+func presentChannelFields(channel Channel) []channelField {
+	return []channelField{
+		{"host", channel.Host != ""},
+		{"port", channel.Port != 0},
+		{"username_env", channel.UsernameEnv != ""},
+		{"password_env", channel.PasswordEnv != ""},
+		{"from", channel.From != ""},
+		{"to", len(channel.To) > 0},
+		{"url_env", channel.URLEnv != ""},
+		{"webhook_url_env", channel.WebhookURLEnv != ""},
+	}
+}
+
+func validateNoForeignFields(field, channelType string, channel Channel, allowed ...string) error {
+	allowedSet := make(map[string]struct{}, len(allowed))
+	for _, name := range allowed {
+		allowedSet[name] = struct{}{}
+	}
+	for _, candidate := range presentChannelFields(channel) {
+		if !candidate.present {
+			continue
+		}
+		if _, ok := allowedSet[candidate.name]; !ok {
+			return validationError("bqckup.yaml", field+"."+candidate.name, "%s is not valid for %s channels", candidate.name, channelType)
+		}
+	}
+	return nil
+}
+
+func validateSMTPChannel(field string, channel Channel) error {
+	if channel.Host == "" {
+		return validationError("bqckup.yaml", field+".host", "host is required")
+	}
+	if channel.Port == 0 {
+		return validationError("bqckup.yaml", field+".port", "port is required")
+	}
+	if channel.Port < 1 || channel.Port > 65535 {
+		return validationError("bqckup.yaml", field+".port", "must be between 1 and 65535")
+	}
+	if channel.From == "" {
+		return validationError("bqckup.yaml", field+".from", "from is required")
+	}
+	if len(channel.To) == 0 {
+		return validationError("bqckup.yaml", field+".to", "at least one recipient is required")
+	}
+	if (channel.UsernameEnv == "") != (channel.PasswordEnv == "") {
+		return validationError("bqckup.yaml", field, "username_env and password_env must be provided together")
+	}
+	return validateNoForeignFields(field, "smtp", channel, "host", "port", "username_env", "password_env", "from", "to")
+}
+
+func validateWebhookChannel(field string, channel Channel) error {
+	if channel.URLEnv == "" {
+		return validationError("bqckup.yaml", field+".url_env", "url_env is required")
+	}
+	return validateNoForeignFields(field, "webhook", channel, "url_env")
+}
+
+func validateDiscordChannel(field string, channel Channel) error {
+	if channel.WebhookURLEnv == "" {
+		return validationError("bqckup.yaml", field+".webhook_url_env", "webhook_url_env is required")
+	}
+	return validateNoForeignFields(field, "discord", channel, "webhook_url_env")
+}
+
+// ValidateNotificationEnvironment reports every notification environment
+// variable referenced by the configuration that is unset or empty, one error
+// listing all of them. It is called only by the `config validate` command;
+// Config.Validate never checks environment presence, so a missing variable
+// can never hard-fail a backup run (delivery warns instead).
+func ValidateNotificationEnvironment(cfg Config, lookupEnv func(string) (string, bool)) error {
+	if lookupEnv == nil {
+		lookupEnv = os.LookupEnv
+	}
+	seen := make(map[string]struct{})
+	var missing []string
+	add := func(name string) {
+		if name == "" {
+			return
+		}
+		if _, ok := seen[name]; ok {
+			return
+		}
+		seen[name] = struct{}{}
+		if value, ok := lookupEnv(name); !ok || value == "" {
+			missing = append(missing, name)
+		}
+	}
+	for _, channel := range cfg.Notifications.Channels {
+		add(channel.UsernameEnv)
+		add(channel.PasswordEnv)
+		add(channel.URLEnv)
+		add(channel.WebhookURLEnv)
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	sort.Strings(missing)
+	return validationError("bqckup.yaml", "notifications", "environment variable(s) not set: %s", strings.Join(missing, ", "))
 }
 
 // ValidateStorage validates one storage document. It is the exported

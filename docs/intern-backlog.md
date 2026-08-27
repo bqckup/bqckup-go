@@ -416,6 +416,63 @@ empty config message), doc gates.
 
 **Suggested commit:** `feat: add backup summary command`
 
+## M21 — Global notifications (SMTP, webhook, Discord)
+
+**Status:** Planned (2026-08-29). Issue #15. Spec: `SPEC-notifications.md`
+(project root); plan: `tasks/plan-notifications.md`.
+
+**Objective:** `notifications:` in the root schema-v2 config: named
+channels (`smtp`, `webhook`, `discord`) and routes mapping the three events
+(`backup_succeeded`, `backup_failed`, `backup_cancelled`) to channels. After
+a run is recorded terminal in history, the runner notifies through every
+matching channel with one shared sanitized payload. Delivery is best effort:
+a failing channel warns on stderr and never changes run status or history.
+`bqckup config validate` flags referenced environment variables that are
+unset.
+
+**Prerequisites:** Delivered history recording (`RunArtifacts` query). No
+new dependencies (`net/smtp`, `net/http`), no history schema change,
+`RunResult` JSON contract unchanged.
+
+**In scope:** config types, strict decode and validation (per-type fields,
+`*_env` references only, both-or-neither SMTP auth, route/channel
+references); `internal/notify` package (dispatcher, shared payload with
+distinct-source artifact aggregation, webhook, Discord embed, SMTP with
+STARTTLS and implicit TLS on 465, PLAIN auth only over encrypted sessions);
+runner hook after terminal `FinishRun` (including the success-path
+`FinishRun` failure notifying `backup_failed`/`persistence`); app wiring;
+`config validate` environment check; docs and example config.
+
+**Out of scope:** notification persistence, dedupe, retry, cross-channel
+fallback, parallel fan-out, monthly reports, an event for `skipped` runs,
+and notifications for preflight failures (no run row exists). The legacy
+`bqckup` notification model (flat channel CSV, no routes, webhook→Discord
+fallback) is not ported; the issue is the contract.
+
+**Acceptance:** every invalid notification form fails validation with a
+specific error; a recorded terminal run delivers the exact spec payload to
+every channel of every matching route; failed/cancelled payloads carry
+redacted `error_category`/`error_message`; skipped and preflight runs send
+nothing; a failing channel does not stop others and does not change the run
+result or history; `config validate` names each missing environment
+variable while `bqckup backup` still runs; email/webhook/Discord renders
+contain no credential, endpoint, source path, or raw error; `make verify`
+and `sh scripts/check-docs.sh` pass; no new dependencies in `go.mod`.
+
+**Required tests:** config validation table (every rule), strict-decode
+rejection of plaintext credentials, aggregation (distinct source counting,
+incremental recorded size), payload marshal schema, dispatch (fan-out,
+unmatched event, dedupe across routes, one-failure-doesn't-stop), webhook
+and Discord via `httptest` (method, content type, exact body, non-2xx,
+network error, timeout), SMTP against a loopback fake (plain, STARTTLS with
+self-signed injected roots, implicit TLS, no-STARTTLS auth refusal, no
+credentials in body), runner hook (per-outcome event, category and redacted
+message, nothing for skipped/preflight, `RunResult` unchanged, notifier
+error is a warning), app wiring (dispatcher from config, nil without), CLI
+(`config validate` env flags, backup still runs with unset env), doc gates.
+
+**Suggested commit:** `feat: add global notifications (SMTP, webhook, Discord)`
+
 ## Mentor review checklist
 
 - Assignment is exactly one milestone with prerequisites satisfied.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/bqckup/bqckup-go/internal/config"
 	resticfacade "github.com/bqckup/bqckup-go/internal/engine/restic/facade"
 	"github.com/bqckup/bqckup-go/internal/history"
+	"github.com/bqckup/bqckup-go/internal/notify"
 	"github.com/bqckup/bqckup-go/internal/platform/lock"
 	"github.com/bqckup/bqckup-go/internal/process"
 	"github.com/bqckup/bqckup-go/internal/retention"
@@ -82,6 +84,7 @@ func Open(ctx context.Context, configDir string) (*App, error) {
 		Storages:           configuration.Storages,
 		Retainer:           retentionAdapter{},
 		Locker:             lock.New(configuration.App.LockDirectory),
+		Notifier:           buildNotifier(configuration.Notifications, os.LookupEnv),
 		Clock:              clock.System{},
 		TemporaryDirectory: configuration.App.TemporaryDirectory,
 	})
@@ -94,6 +97,27 @@ func Open(ctx context.Context, configDir string) (*App, error) {
 		restorer:      engine,
 		closeDatabase: closeDatabase,
 	}, nil
+}
+
+// buildNotifier constructs the notification dispatcher from the configured
+// channels and routes. A config without a notifications section yields nil,
+// which the runner treats as a no-op.
+func buildNotifier(notifications config.Notifications, lookupEnv func(string) (string, bool)) backup.Notifier {
+	if len(notifications.Channels) == 0 {
+		return nil
+	}
+	channels := make(map[string]notify.Channel, len(notifications.Channels))
+	for name, channel := range notifications.Channels {
+		switch channel.Type {
+		case "smtp":
+			channels[name] = notify.NewSMTP(name, channel, lookupEnv, nil)
+		case "webhook":
+			channels[name] = notify.NewWebhook(name, channel.URLEnv, lookupEnv)
+		case "discord":
+			channels[name] = notify.NewDiscord(name, channel.WebhookURLEnv, lookupEnv)
+		}
+	}
+	return notify.NewDispatcher(channels, notifications.Routes)
 }
 
 func resolveRemoteStorageConfiguration(ctx context.Context, configuration config.Config, resolver remoteStorageResolver) (config.Config, error) {

@@ -15,8 +15,9 @@ import (
 )
 
 type rootDocument struct {
-	Version *int `mapstructure:"version"`
-	App     App  `mapstructure:"app"`
+	Version       *int          `mapstructure:"version"`
+	App           App           `mapstructure:"app"`
+	Notifications Notifications `mapstructure:"notifications"`
 }
 
 type storageDocument struct {
@@ -106,10 +107,11 @@ func Load(ctx context.Context, dir string) (Config, error) {
 	}
 
 	cfg := Config{
-		Version:  versionOrDefault(root.Version),
-		App:      root.App,
-		Storages: stores.Storages,
-		Sites:    sites,
+		Version:       versionOrDefault(root.Version),
+		App:           root.App,
+		Storages:      stores.Storages,
+		Sites:         sites,
+		Notifications: root.Notifications,
 	}
 	if primary, ok := cfg.PrimaryStorage(); ok {
 		for index := range cfg.Sites {

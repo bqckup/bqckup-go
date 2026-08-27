@@ -53,6 +53,29 @@ type RunRepository interface {
 	FinishRun(ctx context.Context, id string, status history.RunStatus, finished time.Time, errorCategory, errorMessage string) error
 	CreateArtifact(ctx context.Context, artifact *history.Artifact) error
 	LastSuccessful(ctx context.Context, site string) (*history.BackupRun, error)
+	RunArtifacts(ctx context.Context, runID string) ([]history.Artifact, error)
+}
+
+// NotifyInput carries one terminal run's facts to the notifier. The event
+// name is one of the config notification events; payload stats are computed
+// from Artifacts by the notifier, so RunResult stays untouched.
+type NotifyInput struct {
+	Event         string
+	RunID         string
+	SiteName      string
+	Status        Status
+	StartedAt     time.Time
+	FinishedAt    time.Time
+	ErrorCategory string
+	ErrorMessage  string
+	Artifacts     []history.Artifact
+}
+
+// Notifier delivers terminal run notifications. It is consumer-owned: the
+// concrete dispatcher lives in internal/notify and is wired in internal/app.
+// Delivery is best effort; an error is a warning, never a run failure.
+type Notifier interface {
+	Notify(ctx context.Context, input NotifyInput) error
 }
 
 type Retainer interface {
@@ -72,6 +95,7 @@ type Dependencies struct {
 	Storages           map[string]config.Storage
 	Retainer           Retainer
 	Locker             Locker
+	Notifier           Notifier
 	Clock              clock.Clock
 	TemporaryDirectory string
 	EnvLookup          func(string) (string, bool)
@@ -182,10 +206,12 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 	fail := func(operationErr error) (RunResult, error) {
 		category := apperror.CategoryOf(operationErr)
 		status := history.StatusFailed
+		event := config.EventBackupFailed
 		result.Status = StatusFailed
 		if errors.Is(operationErr, context.Canceled) || errors.Is(operationErr, context.DeadlineExceeded) {
 			category = apperror.CategoryCancellation
 			status = history.StatusCancelled
+			event = config.EventBackupCancelled
 			result.Status = StatusCancelled
 			operationErr = apperror.Wrap(category, "backup was cancelled", operationErr)
 		}
@@ -198,6 +224,11 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 			result.Status = StatusFailed
 			return result, errors.Join(operationErr, apperror.Wrap(apperror.CategoryPersistence, "could not finalize backup history", finishErr))
 		}
+		r.notify(context.WithoutCancel(ctx), NotifyInput{
+			Event: event, RunID: run.ID, SiteName: site.Name, Status: result.Status,
+			StartedAt: now, FinishedAt: finished,
+			ErrorCategory: string(category), ErrorMessage: apperror.UserMessage(operationErr),
+		})
 		return result, operationErr
 	}
 
@@ -241,9 +272,13 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 				SourceName:  "files",
 				Destination: destination.Storage,
 				ObjectKey:   summary.SnapshotID,
-				Size:        summary.DataAdded,
-				SHA256:      summary.SnapshotID,
-				Status:      history.ArtifactStored,
+				// The snapshot's logical size, not the dedup delta: a fully
+				// deduplicated run adds 0 bytes but still holds data. There
+				// is no single artifact file to hash, so SHA256 stays empty
+				// rather than claiming the snapshot ID is a content hash.
+				Size:   summary.TotalBytesProcessed,
+				SHA256: "",
+				Status: history.ArtifactStored,
 			}); err != nil {
 				return fail(apperror.Wrap(apperror.CategoryPersistence, "could not record incremental backup artifact", err))
 			}
@@ -339,11 +374,37 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 	if err := r.dependencies.Repository.FinishRun(context.WithoutCancel(ctx), run.ID, history.StatusSuccess, finished, "", ""); err != nil {
 		result.Status = StatusFailed
 		result.FinishedAt = finished
+		r.notify(context.WithoutCancel(ctx), NotifyInput{
+			Event: config.EventBackupFailed, RunID: run.ID, SiteName: site.Name, Status: result.Status,
+			StartedAt: now, FinishedAt: finished,
+			ErrorCategory: string(apperror.CategoryPersistence), ErrorMessage: "could not finalize backup history",
+		})
 		return result, apperror.Wrap(apperror.CategoryPersistence, "could not finalize backup history", err)
 	}
 	result.Status = StatusSuccess
 	result.FinishedAt = finished
+	r.notify(context.WithoutCancel(ctx), NotifyInput{
+		Event: config.EventBackupSucceeded, RunID: run.ID, SiteName: site.Name, Status: StatusSuccess,
+		StartedAt: now, FinishedAt: finished,
+	})
 	return result, nil
+}
+
+// notify delivers one terminal notification after the run is recorded in
+// history. Delivery is best effort: errors are warnings on stderr and never
+// alter the run result. Runs without a notifier skip the work entirely.
+func (r *Runner) notify(ctx context.Context, input NotifyInput) {
+	if r.dependencies.Notifier == nil {
+		return
+	}
+	artifacts, err := r.dependencies.Repository.RunArtifacts(ctx, input.RunID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not load run artifacts for notification: %v\n", err)
+	}
+	input.Artifacts = artifacts
+	if err := r.dependencies.Notifier.Notify(ctx, input); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: notification delivery failed: %v\n", err)
+	}
 }
 
 // Unlock removes stale repository locks for every destination of a site

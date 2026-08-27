@@ -14,6 +14,7 @@ import (
 	"github.com/bqckup/bqckup-go/internal/config"
 	"github.com/bqckup/bqckup-go/internal/history"
 	"github.com/bqckup/bqckup-go/internal/storage"
+	"github.com/bqckup/bqckup-go/internal/storage/local"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -27,7 +28,7 @@ func TestRunnerCompletesBackupLifecycle(t *testing.T) {
 	assert.Equal(t, StatusSuccess, result.Status)
 	assert.Equal(t, history.StatusSuccess, deps.repository.finishedStatus)
 	require.Len(t, deps.repository.artifacts, 1)
-	assert.Equal(t, "bqckup/example/23-July-2026/03-45-00/files.tar.gz", deps.repository.artifacts[0].ObjectKey)
+	assert.Equal(t, "bqckup/example/23-July-2026/03-45-00.000000000/files.tar.gz", deps.repository.artifacts[0].ObjectKey)
 	assert.Equal(t, 1, deps.retainer.calls)
 	assert.Equal(t, 1, deps.lock.unlockCalls)
 	_, statErr := os.Stat(deps.archiver.workspace)
@@ -158,8 +159,8 @@ func TestRunnerExportsEnabledDatabasesToEveryDestination(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, StatusSuccess, result.Status)
 	assert.Len(t, store.keys, 3)
-	assert.Contains(t, store.keys, "bqckup/example/23-July-2026/03-45-00/databases/application-mysql.sql.gz")
-	assert.Contains(t, store.keys, "bqckup/example/23-July-2026/03-45-00/databases/application-postgres.sql.gz")
+	assert.Contains(t, store.keys, "bqckup/example/23-July-2026/03-45-00.000000000/databases/application-mysql.sql.gz")
+	assert.Contains(t, store.keys, "bqckup/example/23-July-2026/03-45-00.000000000/databases/application-postgres.sql.gz")
 	assert.Len(t, deps.repository.artifacts, 3)
 }
 
@@ -193,6 +194,7 @@ type dependencyFakes struct {
 	tempRoot          string
 	databaseExporters map[string]Exporter
 	envLookup         func(string) (string, bool)
+	notifier          *fakeNotifier
 }
 
 func successfulDependencies(t *testing.T) *dependencyFakes {
@@ -200,7 +202,7 @@ func successfulDependencies(t *testing.T) *dependencyFakes {
 	return &dependencyFakes{
 		repository:  &fakeRepository{},
 		archiver:    &fakeArchiver{},
-		incremental: &fakeIncrementalEngine{summary: restic.SnapshotSummary{SnapshotID: "snap-001", DataAdded: 2048}},
+		incremental: &fakeIncrementalEngine{summary: restic.SnapshotSummary{SnapshotID: "snap-001", DataAdded: 2048, TotalBytesProcessed: 5_000_000}},
 		stores:      map[string]storage.Store{"local-primary": &fakeStore{}},
 		storages:    map[string]config.Storage{"local-primary": {Type: "local", Directory: "/var/backups/bqckup"}},
 		retainer:    &fakeRetainer{},
@@ -217,6 +219,12 @@ func successfulDependencies(t *testing.T) *dependencyFakes {
 }
 
 func (d *dependencyFakes) dependencies() Dependencies {
+	// A nil *fakeNotifier must stay a nil interface, or the runner's
+	// nil-notifier check misses it and calls a nil pointer.
+	var notifier Notifier
+	if d.notifier != nil {
+		notifier = d.notifier
+	}
 	return Dependencies{
 		Repository:         d.repository,
 		Archiver:           d.archiver,
@@ -225,6 +233,7 @@ func (d *dependencyFakes) dependencies() Dependencies {
 		Storages:           d.storages,
 		Retainer:           d.retainer,
 		Locker:             d.lock,
+		Notifier:           notifier,
 		Clock:              d.clock,
 		TemporaryDirectory: d.tempRoot,
 		DatabaseExporters:  d.databaseExporters,
@@ -245,17 +254,18 @@ func validSite() config.Site {
 }
 
 type fakeRepository struct {
-	createdRuns    []history.BackupRun
-	artifacts      []history.Artifact
-	lastSuccessful *history.BackupRun
-	finishedStatus history.RunStatus
-	finishCtxErr   error
-	errorCategory  string
-	errorMessage   string
-	createErr      error
-	artifactErr    error
-	finishErr      error
-	finishCalls    int
+	createdRuns     []history.BackupRun
+	artifacts       []history.Artifact
+	lastSuccessful  *history.BackupRun
+	finishedStatus  history.RunStatus
+	finishCtxErr    error
+	errorCategory   string
+	errorMessage    string
+	createErr       error
+	artifactErr     error
+	finishErr       error
+	finishCalls     int
+	runArtifactsErr error
 }
 
 func (f *fakeRepository) CreateRun(_ context.Context, run *history.BackupRun) error {
@@ -286,6 +296,19 @@ func (f *fakeRepository) CreateArtifact(_ context.Context, artifact *history.Art
 
 func (f *fakeRepository) LastSuccessful(context.Context, string) (*history.BackupRun, error) {
 	return f.lastSuccessful, nil
+}
+
+func (f *fakeRepository) RunArtifacts(_ context.Context, runID string) ([]history.Artifact, error) {
+	if f.runArtifactsErr != nil {
+		return nil, f.runArtifactsErr
+	}
+	var artifacts []history.Artifact
+	for _, artifact := range f.artifacts {
+		if artifact.RunID == runID && artifact.Status == history.ArtifactStored {
+			artifacts = append(artifacts, artifact)
+		}
+	}
+	return artifacts, nil
 }
 
 type fakeArchiver struct {
@@ -431,9 +454,54 @@ func TestRunnerIncrementalBackupRetainsDatabaseArtifacts(t *testing.T) {
 	result, err := NewRunner(deps.dependencies()).Run(context.Background(), site, false)
 	require.NoError(t, err)
 	assert.Equal(t, StatusSuccess, result.Status)
-	assert.Contains(t, store.keys, "bqckup/example/23-July-2026/03-45-00/databases/application-mysql.sql.gz")
+	assert.Contains(t, store.keys, "bqckup/example/23-July-2026/03-45-00.000000000/databases/application-mysql.sql.gz")
 	assert.Equal(t, 1, deps.retainer.calls, "incremental runs must retain the bqckup/<site> database artifact sets")
 	assert.Equal(t, "bqckup/example", deps.retainer.lastSitePrefix)
+}
+
+// TestRunnerTwoForcedRunsInSameSecond: two forced runs started within the
+// same wall-clock second must both succeed. The second run used to get the
+// same backup-set key as the first (bqckup/<site>/<date>/<hh-mm-ss>/...) and
+// the storage collision rejected the overwrite, failing the whole run.
+func TestRunnerTwoForcedRunsInSameSecond(t *testing.T) {
+	deps := successfulDependencies(t)
+	store, err := local.New(t.TempDir())
+	require.NoError(t, err)
+	deps.stores["local-primary"] = store
+	site := validSite()
+
+	first, err := NewRunner(deps.dependencies()).Run(context.Background(), site, true)
+	require.NoError(t, err)
+	assert.Equal(t, StatusSuccess, first.Status)
+
+	deps.clock.now = deps.clock.now.Add(500 * time.Millisecond) // still the same second
+	second, err := NewRunner(deps.dependencies()).Run(context.Background(), site, true)
+	require.NoError(t, err)
+	assert.Equal(t, StatusSuccess, second.Status)
+	require.Len(t, deps.repository.artifacts, 2)
+	assert.NotEqual(t, deps.repository.artifacts[0].ObjectKey, deps.repository.artifacts[1].ObjectKey)
+}
+
+// TestRunnerIncrementalArtifactRecordsSnapshotSize: the incremental artifact
+// row must carry the snapshot's logical size, not the dedup delta (0 on a
+// fully deduplicated run), and must not claim a SHA-256 it does not have.
+func TestRunnerIncrementalArtifactRecordsSnapshotSize(t *testing.T) {
+	deps := successfulDependencies(t)
+	deps.incremental.summary = restic.SnapshotSummary{SnapshotID: "snap-001", TotalBytesProcessed: 5_000_000, DataAdded: 2048}
+	runner := NewRunner(deps.dependencies())
+
+	site := validSite()
+	site.BackupMode = "incremental"
+	site.Incremental = config.Incremental{PasswordEnv: "RESTIC_PASSWORD"}
+
+	result, err := runner.Run(context.Background(), site, false)
+	require.NoError(t, err)
+	assert.Equal(t, StatusSuccess, result.Status)
+	require.Len(t, deps.repository.artifacts, 1)
+	artifact := deps.repository.artifacts[0]
+	assert.Equal(t, "snap-001", artifact.ObjectKey)
+	assert.Equal(t, int64(5_000_000), artifact.Size)
+	assert.Empty(t, artifact.SHA256)
 }
 
 func TestRunnerIncrementalBackupSuccess(t *testing.T) {
@@ -456,7 +524,8 @@ func TestRunnerIncrementalBackupSuccess(t *testing.T) {
 
 	require.Len(t, deps.repository.artifacts, 1)
 	assert.Equal(t, "snap-001", deps.repository.artifacts[0].ObjectKey)
-	assert.Equal(t, int64(2048), deps.repository.artifacts[0].Size)
+	assert.Equal(t, int64(5_000_000), deps.repository.artifacts[0].Size)
+	assert.Empty(t, deps.repository.artifacts[0].SHA256)
 }
 
 func TestRunnerIncrementalBackupMissingPasswordEnv(t *testing.T) {
@@ -529,4 +598,126 @@ func TestRunnerSuccessFinishRunSurvivesLateCancellation(t *testing.T) {
 	assert.Equal(t, StatusSuccess, result.Status)
 	assert.Equal(t, history.StatusSuccess, deps.repository.finishedStatus)
 	assert.NoError(t, deps.repository.finishCtxErr, "FinishRun must not observe the cancelled context")
+}
+
+func TestRunnerNotifiesSuccessAfterTerminalRecord(t *testing.T) {
+	deps := successfulDependencies(t)
+	deps.notifier = &fakeNotifier{}
+
+	result, err := NewRunner(deps.dependencies()).Run(context.Background(), validSite(), false)
+	require.NoError(t, err)
+	assert.Equal(t, StatusSuccess, result.Status)
+
+	require.Len(t, deps.notifier.calls, 1)
+	call := deps.notifier.calls[0]
+	assert.Equal(t, config.EventBackupSucceeded, call.Event)
+	assert.Equal(t, StatusSuccess, call.Status)
+	assert.Equal(t, "run-1", call.RunID)
+	assert.Equal(t, "example", call.SiteName)
+	assert.Equal(t, deps.clock.now, call.StartedAt)
+	assert.Equal(t, deps.clock.now, call.FinishedAt)
+	assert.Empty(t, call.ErrorCategory)
+	require.Len(t, call.Artifacts, 1, "success notification carries the run's stored artifacts")
+}
+
+func TestRunnerNotifiesFailureWithCategoryAndRedactedMessage(t *testing.T) {
+	deps := successfulDependencies(t)
+	deps.notifier = &fakeNotifier{}
+	deps.archiver.err = errors.New("source vanished")
+
+	result, err := NewRunner(deps.dependencies()).Run(context.Background(), validSite(), false)
+	require.Error(t, err)
+	assert.Equal(t, StatusFailed, result.Status)
+
+	require.Len(t, deps.notifier.calls, 1)
+	call := deps.notifier.calls[0]
+	assert.Equal(t, config.EventBackupFailed, call.Event)
+	assert.Equal(t, "execution", call.ErrorCategory)
+	assert.Equal(t, "could not create the file archive", call.ErrorMessage)
+	assert.NotContains(t, call.ErrorMessage, "source vanished")
+}
+
+func TestRunnerNotifiesCancellation(t *testing.T) {
+	deps := successfulDependencies(t)
+	deps.notifier = &fakeNotifier{}
+	deps.archiver.err = context.Canceled
+
+	result, err := NewRunner(deps.dependencies()).Run(context.Background(), validSite(), false)
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Equal(t, StatusCancelled, result.Status)
+
+	require.Len(t, deps.notifier.calls, 1)
+	call := deps.notifier.calls[0]
+	assert.Equal(t, config.EventBackupCancelled, call.Event)
+	assert.Equal(t, "cancellation", call.ErrorCategory)
+}
+
+func TestRunnerNotifiesPersistenceWhenSuccessFinishRunFails(t *testing.T) {
+	deps := successfulDependencies(t)
+	deps.notifier = &fakeNotifier{}
+	deps.repository.finishErr = errors.New("database unavailable")
+
+	result, err := NewRunner(deps.dependencies()).Run(context.Background(), validSite(), false)
+	require.ErrorIs(t, err, deps.repository.finishErr)
+	assert.Equal(t, StatusFailed, result.Status)
+
+	require.Len(t, deps.notifier.calls, 1)
+	call := deps.notifier.calls[0]
+	assert.Equal(t, config.EventBackupFailed, call.Event)
+	assert.Equal(t, "persistence", call.ErrorCategory)
+	assert.Equal(t, "could not finalize backup history", call.ErrorMessage)
+}
+
+func TestRunnerDoesNotNotifyForSkippedRuns(t *testing.T) {
+	deps := successfulDependencies(t)
+	deps.notifier = &fakeNotifier{}
+	deps.repository.lastSuccessful = &history.BackupRun{StartedAt: deps.clock.now.Add(-30 * time.Minute)}
+
+	_, err := NewRunner(deps.dependencies()).Run(context.Background(), validSite(), false)
+	require.NoError(t, err)
+	assert.Empty(t, deps.notifier.calls)
+
+	deps.repository.lastSuccessful = nil
+	deps.lock.acquired = false
+	_, err = NewRunner(deps.dependencies()).Run(context.Background(), validSite(), false)
+	require.NoError(t, err)
+	assert.Empty(t, deps.notifier.calls)
+}
+
+func TestRunnerDoesNotNotifyWhenRunIsNeverCreated(t *testing.T) {
+	deps := successfulDependencies(t)
+	deps.notifier = &fakeNotifier{}
+	deps.repository.createErr = errors.New("database unavailable")
+
+	_, err := NewRunner(deps.dependencies()).Run(context.Background(), validSite(), false)
+	require.Error(t, err)
+	assert.Empty(t, deps.notifier.calls)
+}
+
+func TestRunnerNotifierErrorDoesNotChangeRunResult(t *testing.T) {
+	deps := successfulDependencies(t)
+	deps.notifier = &fakeNotifier{err: errors.New("webhook down")}
+
+	result, err := NewRunner(deps.dependencies()).Run(context.Background(), validSite(), false)
+	require.NoError(t, err)
+	assert.Equal(t, StatusSuccess, result.Status)
+	assert.Equal(t, history.StatusSuccess, deps.repository.finishedStatus)
+}
+
+func TestRunnerNotifierWithoutWiringIsANoOp(t *testing.T) {
+	deps := successfulDependencies(t)
+
+	result, err := NewRunner(deps.dependencies()).Run(context.Background(), validSite(), false)
+	require.NoError(t, err)
+	assert.Equal(t, StatusSuccess, result.Status)
+}
+
+type fakeNotifier struct {
+	calls []NotifyInput
+	err   error
+}
+
+func (f *fakeNotifier) Notify(_ context.Context, input NotifyInput) error {
+	f.calls = append(f.calls, input)
+	return f.err
 }

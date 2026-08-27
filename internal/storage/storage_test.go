@@ -11,11 +11,29 @@ import (
 func TestFormatBackupSetUsesReadableEnglishUTCDateAndUniqueRunTime(t *testing.T) {
 	createdAt := time.Date(2026, time.August, 20, 8, 9, 30, 123456789, time.FixedZone("WITA", 8*60*60))
 
-	assert.Equal(t, "20-August-2026/00-09-30", FormatBackupSet(createdAt))
+	assert.Equal(t, "20-August-2026/00-09-30.123456789", FormatBackupSet(createdAt))
+}
+
+// TestFormatBackupSetDistinguishesRunsInTheSameSecond: two runs of one
+// site in the same wall-clock second must produce distinct backup-set
+// keys. With second resolution, the second run collides with the first
+// (local store Lstat / S3 IfNoneMatch reject overwrites) and fails
+// entirely: `bqckup backup --force` twice in a row is the repro.
+func TestFormatBackupSetDistinguishesRunsInTheSameSecond(t *testing.T) {
+	base := time.Date(2026, time.July, 23, 3, 45, 0, 0, time.UTC)
+	first := FormatBackupSet(base)
+	second := FormatBackupSet(base.Add(500 * time.Millisecond))
+	assert.NotEqual(t, first, second, "same-second runs must not share a backup-set key")
+	for _, value := range []string{first, second} {
+		parsed, err := ParseBackupSet(value)
+		require.NoError(t, err, value)
+		assert.Equal(t, value, FormatBackupSet(parsed), value)
+	}
 }
 
 func TestParseBackupSetAcceptsCurrentAndLegacyLayouts(t *testing.T) {
 	for _, value := range []string{
+		"20-August-2026/00-09-30.123456789",
 		"20-August-2026/00-09-30",
 		"2026-08-20T00-09-30.123456789Z",
 	} {

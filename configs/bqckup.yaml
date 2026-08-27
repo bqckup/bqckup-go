@@ -3,3 +3,29 @@ app:
   temporary_directory: tmp
   lock_directory: locks
   log_level: info
+
+# Optional: notify operators when a run reaches a terminal state.
+# Secrets and URLs are environment-variable references only; plaintext
+# values are rejected. See docs/configuration-v2.md for all rules.
+# notifications:
+#   channels:
+#     email:
+#       type: smtp
+#       host: smtp.example.com
+#       port: 587
+#       username_env: BQCKUP_SMTP_USERNAME
+#       password_env: BQCKUP_SMTP_PASSWORD
+#       from: bqckup@example.com
+#       to:
+#         - ops@example.com
+#     webhook:
+#       type: webhook
+#       url_env: BQCKUP_WEBHOOK_URL
+#     discord:
+#       type: discord
+#       webhook_url_env: BQCKUP_DISCORD_WEBHOOK_URL
+#   routes:
+#     - events: [backup_failed, backup_cancelled]
+#       channels: [email, discord]
+#     - events: [backup_succeeded]
+#       channels: [webhook]

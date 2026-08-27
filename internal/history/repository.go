@@ -79,6 +79,20 @@ func (r *Repository) LastSuccessful(ctx context.Context, site string) (*BackupRu
 	return &run, nil
 }
 
+// RunArtifacts returns the stored artifacts of one run, in deterministic
+// source order. Failed artifact rows are excluded: notification payloads
+// aggregate only what actually reached a destination.
+func (r *Repository) RunArtifacts(ctx context.Context, runID string) ([]Artifact, error) {
+	var artifacts []Artifact
+	err := r.db.WithContext(ctx).
+		Where("run_id = ? AND status = ?", runID, ArtifactStored).
+		Order("source_kind, source_name, destination").Find(&artifacts).Error
+	if err != nil {
+		return nil, fmt.Errorf("load artifacts for run %s: %w", runID, err)
+	}
+	return artifacts, nil
+}
+
 func (r *Repository) ListRuns(ctx context.Context, filter RunFilter) ([]BackupRun, error) {
 	query := r.db.WithContext(ctx).Preload("Artifacts").Order("started_at DESC")
 	if filter.Site != "" {
