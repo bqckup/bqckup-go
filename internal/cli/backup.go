@@ -64,6 +64,37 @@ func newBackupCommand(opts *options) *cobra.Command {
 		},
 	})
 
+	var site string
+	summary := &cobra.Command{
+		Use:   "summary",
+		Short: "Show a per-site backup report from configuration and history",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return withApplication(cmd, opts.configDir, func(application *app.App) error {
+				if site != "" {
+					if _, ok := application.Configuration().Site(site); !ok {
+						return apperror.Wrap(apperror.CategoryConfig,
+							fmt.Sprintf("site %q was not found", site), nil)
+					}
+				}
+				runs, err := application.ListRuns(cmd.Context(), "", 0)
+				if err != nil {
+					return err
+				}
+				summaries := buildSummaries(application.Configuration(), runs, site)
+				if opts.output == "json" {
+					if site != "" {
+						return writeJSON(cmd, summaries[0])
+					}
+					return writeJSON(cmd, summaries)
+				}
+				return writeSummaryText(cmd.OutOrStdout(), summaries)
+			})
+		},
+	}
+	summary.Flags().StringVar(&site, "site", "", "show only this site")
+	command.AddCommand(summary)
+
 	var force bool
 	run := &cobra.Command{
 		Use:   "run [site]",

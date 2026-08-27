@@ -380,6 +380,42 @@ same-second overwrite rejection, and safe retention prefix validation.
 
 **Suggested commit:** `feat: use readable archive backup paths`
 
+## M20 — Backup summary command
+
+**Status:** Planned (2026-08-27). Issue #14.
+
+**Objective:** `bqckup backup summary [--site <name>]` prints a read-only
+per-site report, text panel or JSON, built from the active configuration and
+SQLite history. It never runs a backup and never reads a destination. The
+legacy counterpart is `bqckup summary`.
+
+**Prerequisites:** Delivered history recording and the `backup list`
+composition pattern. No new schema, config field, or dependency.
+
+**In scope:** every configured site including disabled ones, sorted by name;
+status disabled/running/idle from the latest run; successful-run counters
+with the logical dedup size rule of `history list`; destinations rendered
+with storage type and primary marker; retention `keep last N`; JSON object
+with `--site`, array without; `No backup sites configured.` for an empty
+configuration.
+
+**Out of scope:** any destination access, snapshot or repository stats for
+incremental sites, Schedule/Next Backup rows, watch mode, stale running-row
+cleanup (future doctor work), history schema changes.
+
+**Acceptance:** text and JSON contracts as locked in
+tasks/plan-backup-summary.md; unknown `--site` exits 2; disabled sites are
+shown; orphan history runs are ignored; no credential appears in output;
+`make verify` and `sh scripts/check-docs.sh` pass.
+
+**Required tests:** pure aggregation tests (status semantics, logical dedup,
+orphan runs, empty values, incremental sizes as recorded, primary marker,
+filter, sorting, empty config), command tests (text panel for
+successful/disabled/never-run sites, JSON object and array, exit code 2,
+empty config message), doc gates.
+
+**Suggested commit:** `feat: add backup summary command`
+
 ## Mentor review checklist
 
 - Assignment is exactly one milestone with prerequisites satisfied.

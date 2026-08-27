@@ -49,6 +49,7 @@ bqckup init
 bqckup config validate
 bqckup doctor [--site <name>]
 bqckup backup list
+bqckup backup summary [--site <name>]
 bqckup backup run [site] [--force]
 bqckup backup snapshots <site> --destination <name>
 bqckup backup restore <site> --destination <name> --snapshot <id|latest> --target <path> [--force]
@@ -70,6 +71,8 @@ read directly from its repository on any destination type (local, S3, or R2).
 It is read-only and never uses the local history database.
 `bqckup backup run` without a site runs every site with `enabled: true` in
 configuration order. Supplying a site name continues to run only that site.
+`bqckup backup summary` prints a read-only per-site report from the active
+configuration and history, and never reads destinations.
 `bqckup backup restore` rebuilds the configured paths of one snapshot into
 the target directory in restic layout, and never overwrites existing files
 without asking (or `--force`). It writes nothing to history.
