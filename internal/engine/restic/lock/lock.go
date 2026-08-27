@@ -12,13 +12,12 @@
 // of the sealed blob. Restic decrypts these files with the repo key, so
 // locks and repos interoperate in both directions.
 //
-// Policy (L4 decisions, tasks/plan-l3-l4-l2.md D5): exclusive locks for
-// backup and retention, non-exclusive for listing; stale non-exclusive
-// locks are removed automatically; a stale exclusive lock is reported as
-// ErrStaleExclusive instead of being silently dropped — the user runs
-// `bqckup backup unlock` to remove it. (Restic itself auto-removes stale
-// locks of any kind; the deviation is deliberate and documented in the
-// L4 design note.)
+// Policy: backup and retention use exclusive locks, while listing uses
+// non-exclusive locks. Stale non-exclusive locks are removed automatically;
+// a stale exclusive lock is reported as ErrStaleExclusive instead of being
+// silently dropped, and the user runs `bqckup backup unlock` to remove it.
+// Restic itself removes stale locks of either kind; this stricter behavior is
+// deliberate so Bqckup never discards a writer lock without operator intent.
 package lock
 
 import (

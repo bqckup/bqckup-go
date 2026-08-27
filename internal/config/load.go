@@ -29,7 +29,7 @@ type siteDocument struct {
 	Site    Site `mapstructure:"site"`
 }
 
-// Load reads a complete schema-v2 config tree from dir.
+// Load reads a complete configuration tree from dir.
 func Load(ctx context.Context, dir string) (Config, error) {
 	if err := ctx.Err(); err != nil {
 		return Config{}, err

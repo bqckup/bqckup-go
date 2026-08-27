@@ -2,14 +2,11 @@
 set -eu
 
 failed=0
+
 required_files="
 README.md
-docs/architecture.md
-docs/configuration-v2.md
-docs/development.md
-docs/testing.md
-docs/migration-from-python.md
-docs/intern-backlog.md
+USER-GUIDE.md
+CHANGELOG.md
 "
 
 for file in $required_files; do
@@ -19,33 +16,60 @@ for file in $required_files; do
     fi
 done
 
-if [ "$failed" -ne 0 ]; then
-    exit 1
-fi
-
-for command in "bqckup init" "bqckup config validate" "bqckup backup list" "bqckup backup run" "bqckup history list" "bqckup version"; do
+for command in \
+    "bqckup init" \
+    "bqckup config validate" \
+    "bqckup doctor" \
+    "bqckup backup list" \
+    "bqckup backup run" \
+    "bqckup backup unlock" \
+    "bqckup history list" \
+    "bqckup version"; do
     if ! grep -Fq "$command" README.md; then
         echo "README is missing command: $command" >&2
         failed=1
     fi
 done
 
-for milestone in M01 M02 M03 M04 M05 M06 M07 M08 M09 M10 M11; do
-    if ! grep -Fq "## $milestone" docs/intern-backlog.md; then
-        echo "intern backlog is missing milestone: $milestone" >&2
+for contract in \
+    "backup_mode: incremental" \
+    "password_env:" \
+    "engine: mysql" \
+    "engine: postgres" \
+    "MYSQL_PWD" \
+    "PGPASSWORD" \
+    "databases/application-mysql.sql.gz" \
+    "mode \`0600\`"; do
+    if ! grep -Fq "$contract" USER-GUIDE.md; then
+        echo "user guide is missing contract: $contract" >&2
         failed=1
     fi
 done
 
-if ! grep -qs '^app:' configs/bqckup.yaml || ! grep -qs '^site:' configs/sites/*.yaml; then
-    echo "example configuration is missing the root or site document" >&2
+if ! grep -Fq '(USER-GUIDE.md)' README.md; then
+    echo "README must link to USER-GUIDE.md" >&2
+    failed=1
+fi
+
+if ! grep -Fq '(CHANGELOG.md)' README.md; then
+    echo "README must link to CHANGELOG.md" >&2
+    failed=1
+fi
+
+if grep -RniE 'docs/(architecture|configuration-v2|development|testing|migration-from-python|intern-backlog|guides|superpowers)|tasks/(plan|todo)' \
+    README.md USER-GUIDE.md scripts .agents internal; then
+    echo "repository still references removed documentation" >&2
     failed=1
 fi
 
 if grep -nE '^[[:space:]]*version:[[:space:]]*2[[:space:]]*$' \
-    USER-GUIDE.md docs/configuration-v2.md docs/guides/incremental-backup-step-by-step.md \
-    configs/bqckup.yaml configs/sites/*.yaml; then
+    USER-GUIDE.md configs/bqckup.yaml configs/sites/*.yaml; then
     echo "active YAML examples must omit the implicit version field" >&2
+    failed=1
+fi
+
+if ! grep -qs '^app:' configs/bqckup.yaml || ! grep -qs '^site:' configs/sites/*.yaml; then
+    echo "example configuration is missing the root or site document" >&2
     failed=1
 fi
 
@@ -54,30 +78,14 @@ if grep -RniE '^[[:space:]]*(password|access_key|secret_key):[[:space:]]*[^[:spa
     failed=1
 fi
 
-if grep -RniE '^[[:space:]]*(access_key_id|secret_access_key):[[:space:]]*[^[:space:]]' configs | grep -vE ':[[:space:]]*EXAMPLE_[A-Z0-9_]+[[:space:]]*$'; then
+if grep -RniE '^[[:space:]]*(access_key_id|secret_access_key):[[:space:]]*[^[:space:]]' configs \
+    | grep -vE ':[[:space:]]*EXAMPLE_[A-Z0-9_]+[[:space:]]*$'; then
     echo "storage examples may contain only EXAMPLE_ credential placeholders" >&2
     failed=1
 fi
 
 if find internal cmd -name '*.go' -type f -exec grep -liE 'rustic' {} + | grep -q .; then
-    echo "Rustic implementation is outside the scope" >&2
-    failed=1
-fi
-
-if ! grep -Fq 'one in-tree pure-Go' docs/intern-backlog.md; then
-    echo "intern backlog must state the single-engine runtime boundary" >&2
-    failed=1
-fi
-
-for database_contract in 'engine: mysql' 'engine: postgres' 'MYSQL_PWD' 'PGPASSWORD' 'databases/application-mysql.sql.gz'; do
-    if ! grep -Rqs "$database_contract" README.md docs; then
-        echo "database documentation is missing: $database_contract" >&2
-        failed=1
-    fi
-done
-
-if grep -RniE '^[[:space:]]*password:[[:space:]]*[^<[:space:]][^[:space:]]*' configs; then
-    echo "tracked configuration contains a non-placeholder database password" >&2
+    echo "Rustic implementation is outside the project scope" >&2
     failed=1
 fi
 

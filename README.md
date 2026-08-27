@@ -1,26 +1,77 @@
-# Bqckup Go
+# Bqckup
 
-CLI backup tool for files and MySQL/PostgreSQL databases. Supports full archive (`.tar.gz`) and incremental deduplicated snapshots (powered by Restic). Destinations can be local filesystem, AWS S3, or Cloudflare R2. Backup history is stored in SQLite.
+**Fast, simple, and reliable backups for files and databases.**
+
+Bqckup is a self-hosted command-line backup tool for Linux servers. It backs
+up files, MySQL/MariaDB, and PostgreSQL databases to local storage, Amazon S3,
+Cloudflare R2, or another S3-compatible service.
+
+> **Backup and forget.** Configure each site once, run Bqckup from your system
+> scheduler, and keep control of your data, credentials, and storage provider.
+
+## Features
+
+- File and directory backups
+- MySQL/MariaDB and PostgreSQL database exports
+- Full `.tar.gz` archives and compressed SQL dumps
+- Encrypted, deduplicated incremental file snapshots
+- Local, Amazon S3, Cloudflare R2, and S3-compatible storage
+- Multiple required destinations per site
+- Local SQLite history for every backup run
+- Configuration validation and environment diagnostics
+- Text and JSON command output
+- No external Restic binary required
+
+## Installation
+
+### From a clone
+
+```bash
+git clone https://github.com/bqckup/bqckup-go.git
+cd bqckup-go
+sudo make setup
+```
+
+### With the installer
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/bqckup/bqckup-go/main/scripts/install.sh | sudo bash
+```
+
+### Build manually
+
+```bash
+make build
+sudo make install
+```
+
+Building from source requires Linux, Go 1.26, GCC, and CGO. Install
+`mysqldump` or `pg_dump` only for the database types you back up.
 
 ## Quick start
 
+Initialize the default configuration tree:
+
 ```bash
-# Automated setup (from repository clone)
-sudo make setup
-# or: sudo ./scripts/install.sh
-
-# Standalone setup (downloads pre-built release binary + verifies SHA-256)
-curl -fsSL https://raw.githubusercontent.com/bqckup/bqckup-go/main/scripts/install.sh | sudo bash
-
-# Or manual setup
-make build && sudo make install
 sudo bqckup init
-sudo bqckup doctor
-sudo bqckup config validate
-sudo bqckup backup run [site]
+sudoedit /etc/bqckup/config/storages.yaml
+sudoedit /etc/bqckup/sites/example.yaml
+sudo chmod 600 /etc/bqckup/config/storages.yaml /etc/bqckup/sites/*.yaml
 ```
 
-Configuration files:
+Set the example site's source paths and destination, change `enabled` to
+`true`, then validate and run it:
+
+```bash
+sudo bqckup config validate
+sudo bqckup doctor
+sudo bqckup backup run example --force
+sudo bqckup history list --details
+```
+
+## Configuration
+
+The default configuration directory is `/etc/bqckup`:
 
 ```text
 /etc/bqckup/bqckup.yaml
@@ -28,19 +79,26 @@ Configuration files:
 /etc/bqckup/sites/<site>.yaml
 ```
 
-Use the examples in [`configs/`](configs/) and see [`docs/configuration-v2.md`](docs/configuration-v2.md) for the full schema. S3-compatible settings may be inline or loaded at startup from a constrained HTTPS provider referenced through an environment variable. Keep files with inline credentials at mode `0600` and never commit real credentials.
+Ready-to-edit examples are in [`configs/`](configs/). Use
+`--config-dir <directory>` to load a different configuration tree.
 
-## Backup modes & storage
+Credential-bearing YAML files must be regular files, not symbolic links, and
+must have mode `0600`. Never commit real passwords or storage keys.
 
-- **Full mode (default)**: Compresses files into `.tar.gz` archives and database dumps into `.sql.gz`. Backup sets use readable UTC paths such as `bqckup/example/20-August-2026/00-09-30/`.
-- **Incremental mode**: Uses the built-in pure-Go engine (`backup_mode: incremental`) for encrypted, content-defined chunking and deduplication. No external Restic binary is required.
-- **Destinations**: Local directory, AWS S3, Cloudflare R2, or any S3-compatible object store.
+## Backup modes
 
-For a step-by-step walkthrough, see [`docs/guides/incremental-backup-step-by-step.md`](docs/guides/incremental-backup-step-by-step.md).
+### Full backup
 
-## Database backups
+Full mode is the default. It creates portable `.tar.gz` file archives and
+compressed `.sql.gz` database dumps below
+`bqckup/<site>/<UTC timestamp>/` in each destination.
 
-Enabled MySQL/MariaDB (`engine: mysql`) and PostgreSQL (`engine: postgres`) sources use `mysqldump` and `pg_dump`. Compressed artifacts use names such as `databases/application-mysql.sql.gz`. Passwords are passed through `MYSQL_PWD` or `PGPASSWORD`.
+### Incremental backup
+
+Incremental mode stores encrypted, deduplicated file snapshots below
+`restic/<site>/` in each destination. Set `backup_mode: incremental` and set
+`incremental.password_env` to the name of an environment variable containing
+the repository password. The built-in engine is always used.
 
 ## Commands
 
@@ -49,37 +107,14 @@ bqckup init
 bqckup config validate
 bqckup doctor [--site <name>]
 bqckup backup list
-bqckup backup summary [--site <name>]
-bqckup backup run [site] [--force]
-bqckup backup snapshots <site> --destination <name>
-bqckup backup restore <site> --destination <name> --snapshot <id|latest> --target <path> [--force]
+bqckup backup run <site> [--force]
+bqckup backup unlock <site>
 bqckup history list [--site <name>] [--limit <n>] [--details]
-bqckup storage list <destination> --site <site>
-bqckup storage link <destination> --key <key> [--expires <n>h]
 bqckup version
 ```
 
-Use `--output json` for machine-readable output and `--config-dir` for a custom configuration directory.
-Text history reports logical artifact and destination counts without counting
-the same artifact once per destination. Add `--details` to inspect each stored
-artifact copy and its object key; JSON remains the raw history format.
-`bqckup storage list` shows the live remote contents of one destination: archive
-artifacts for full-mode sites, snapshots for incremental sites. It is read-only
-and never uses the local history database.
-`bqckup backup snapshots` shows the live snapshots of one incremental site,
-read directly from its repository on any destination type (local, S3, or R2).
-It is read-only and never uses the local history database.
-`bqckup backup run` without a site runs every site with `enabled: true` in
-configuration order. Supplying a site name continues to run only that site.
-`bqckup backup summary` prints a read-only per-site report from the active
-configuration and history, and never reads destinations.
-`bqckup backup restore` rebuilds the configured paths of one snapshot into
-the target directory in restic layout, and never overwrites existing files
-without asking (or `--force`). It writes nothing to history.
-`bqckup storage link` creates a temporary download link for one full-mode
-archive artifact, using the key exactly as `storage list` prints it. Expiry is
-in whole hours, 1 to 24, default 24h. The command is read-only on the remote
-and never writes history.
+Use `--output json` for machine-readable output. Run `bqckup --help` or any
+subcommand with `--help` to see all available options.
 
 ## Notifications
 
@@ -94,11 +129,20 @@ preflight failures send nothing. `bqckup config validate` reports
 notification environment variables that are not set. See
 [`docs/configuration-v2.md`](docs/configuration-v2.md) for the full schema.
 
-## Development
+## Scheduling
 
-```bash
-make verify
-sh scripts/check-docs.sh
+Run Bqckup with cron, systemd timers, or another scheduler. A daily cron job
+for one site could look like this:
+
+```cron
+0 2 * * * root /usr/local/bin/bqckup backup run example
 ```
 
-Web UI is not implemented.
+## Help and contributing
+
+The [User Guide](USER-GUIDE.md) covers complete configuration examples, daily
+operations, troubleshooting, and security guidance. Report bugs or propose
+features through this repository's GitHub issues and pull requests.
+
+See [CHANGELOG.md](CHANGELOG.md) for release notes. Bqckup is released under
+the [MIT License](LICENSE).

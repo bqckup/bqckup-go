@@ -12,7 +12,7 @@ func newConfigCommand(opts *options) *cobra.Command {
 	command := &cobra.Command{Use: "config", Short: "Inspect configuration"}
 	command.AddCommand(&cobra.Command{
 		Use:   "validate",
-		Short: "Strictly validate the schema-v2 configuration",
+		Short: "Strictly validate configuration",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			configuration, err := appconfig.Load(cmd.Context(), opts.configDir)

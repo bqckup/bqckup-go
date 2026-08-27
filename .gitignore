@@ -9,3 +9,4 @@ docs/guides/
 docs/ideas/
 tasks/
 *.md
+/native/rusticbridge/target/
