@@ -126,8 +126,7 @@ only (`username_env`, `password_env`, `url_env`, `webhook_url_env`), never
 plaintext in YAML. Delivery is best effort: a failing channel prints a
 warning and never changes the run result or history. Skipped runs and
 preflight failures send nothing. `bqckup config validate` reports
-notification environment variables that are not set. See
-[`docs/configuration-v2.md`](docs/configuration-v2.md) for the full schema.
+notification environment variables that are not set.
 
 ## Scheduling
 
