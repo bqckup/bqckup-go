@@ -3,7 +3,7 @@ package buildinfo
 // Values are replaced by release builds through -ldflags.
 var (
 	version = "v0.0.3"
-	commit  = "local"
+	commit  = ""
 )
 
 // Info identifies a built bqckup binary.
