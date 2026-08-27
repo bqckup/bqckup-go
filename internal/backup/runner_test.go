@@ -323,6 +323,8 @@ func (f *fakeStore) Put(_ context.Context, artifact storage.Artifact, key string
 	return storage.StoredArtifact{Key: key, Size: artifact.Size, SHA256: artifact.SHA256}, nil
 }
 
+func (f *fakeStore) Probe(context.Context) error { return nil }
+
 type fakeExporter struct {
 	err        error
 	sourceKind string
@@ -344,10 +346,14 @@ func (*fakeStore) ListBackupSets(context.Context, string) ([]storage.BackupSet, 
 	return nil, nil
 }
 
-type fakeRetainer struct{ calls int }
+type fakeRetainer struct {
+	calls          int
+	lastSitePrefix string
+}
 
-func (f *fakeRetainer) Apply(_ context.Context, _ storage.Store, _ string, _ int) error {
+func (f *fakeRetainer) Apply(_ context.Context, _ storage.Store, sitePrefix string, _ int) error {
 	f.calls++
+	f.lastSitePrefix = sitePrefix
 	return nil
 }
 
@@ -401,6 +407,33 @@ func (f *fakeIncrementalEngine) ApplyRetention(_ context.Context, repo restic.Re
 
 func (f *fakeIncrementalEngine) Unlock(_ context.Context, _ restic.RepoConfig) error {
 	return nil
+}
+
+// TestRunnerIncrementalBackupRetainsDatabaseArtifacts: incremental sites
+// store database dumps under bqckup/<site>/<timestamp>/databases/ on every
+// run, but retention only ran for full mode, so those sets grew without
+// bound. The run must apply set retention to the bqckup/<site> prefix in
+// incremental mode too.
+func TestRunnerIncrementalBackupRetainsDatabaseArtifacts(t *testing.T) {
+	deps := successfulDependencies(t)
+	store := deps.stores["local-primary"].(*fakeStore)
+	deps.databaseExporters = map[string]Exporter{
+		"mysql": &fakeExporter{sourceKind: "database"},
+	}
+
+	site := validSite()
+	site.BackupMode = "incremental"
+	site.Incremental = config.Incremental{PasswordEnv: "RESTIC_PASSWORD"}
+	site.Sources.Databases = []config.DatabaseSource{
+		{Name: "application-mysql", Enabled: true, Engine: "mysql"},
+	}
+
+	result, err := NewRunner(deps.dependencies()).Run(context.Background(), site, false)
+	require.NoError(t, err)
+	assert.Equal(t, StatusSuccess, result.Status)
+	assert.Contains(t, store.keys, "bqckup/example/23-July-2026/03-45-00/databases/application-mysql.sql.gz")
+	assert.Equal(t, 1, deps.retainer.calls, "incremental runs must retain the bqckup/<site> database artifact sets")
+	assert.Equal(t, "bqckup/example", deps.retainer.lastSitePrefix)
 }
 
 func TestRunnerIncrementalBackupSuccess(t *testing.T) {
@@ -478,6 +511,8 @@ func (s *cancelAfterPutStore) Put(ctx context.Context, artifact storage.Artifact
 	s.cancel()
 	return stored, nil
 }
+
+func (s *cancelAfterPutStore) Probe(context.Context) error { return nil }
 
 // TestRunnerSuccessFinishRunSurvivesLateCancellation: a cancellation that
 // arrives after the last storage write must not abort the success-path

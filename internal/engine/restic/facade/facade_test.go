@@ -272,6 +272,60 @@ func TestListSnapshotsTakesANonExclusiveLockDuringListing(t *testing.T) {
 	}
 }
 
+// TestEnsureRepositoryRefusesToInitWhileAnotherMachineHoldsTheInitLock:
+// first-run init is stat-then-write; without serialization, two machines
+// starting the first backup of one site simultaneously would each write a
+// config with its own random master key and the loser's data would be
+// undecryptable.
+func TestEnsureRepositoryRefusesToInitWhileAnotherMachineHoldsTheInitLock(t *testing.T) {
+	ctx := context.Background()
+	repo := testRepo(t)
+	b := backend.NewLocal(repo.URL)
+	if err := b.CreateLayout(); err != nil {
+		t.Fatal(err)
+	}
+
+	other, err := lock.New(ctx, b, initLockKey(repo.Password), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = other.Unlock(ctx, b) }()
+
+	err = NewEngine().EnsureRepository(ctx, repo)
+	var locked *lock.ErrLocked
+	if !errors.As(err, &locked) {
+		t.Fatalf("EnsureRepository under a concurrent init lock: got %v, want ErrLocked", err)
+	}
+	// The losing machine must not have written a competing config.
+	if _, statErr := b.Stat(ctx, restic.Handle{Type: restic.ConfigFile}); !b.IsNotExist(statErr) {
+		t.Fatalf("refused init wrote a config: %v", statErr)
+	}
+}
+
+// TestEnsureRepositoryLeavesNoInitLockBehind guards the success and error
+// paths: a completed (or refused) initialization must not leave lock files
+// that block the first real backup.
+func TestEnsureRepositoryLeavesNoInitLockBehind(t *testing.T) {
+	ctx := context.Background()
+	engine := NewEngine()
+	repo := testRepo(t)
+	if err := engine.EnsureRepository(ctx, repo); err != nil {
+		t.Fatal(err)
+	}
+
+	b := backend.NewLocal(repo.URL)
+	var locks []restic.Handle
+	if err := b.List(ctx, restic.LockFile, func(handle restic.Handle, _ int64) error {
+		locks = append(locks, handle)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(locks) != 0 {
+		t.Fatalf("EnsureRepository left %d lock files behind", len(locks))
+	}
+}
+
 func TestRestoreRoundTripLocalRepository(t *testing.T) {
 	ctx := context.Background()
 	engine := NewEngine()

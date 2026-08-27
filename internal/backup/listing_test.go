@@ -38,6 +38,8 @@ func (f *fakeRemoteLister) Put(context.Context, storage.Artifact, string) (stora
 
 func (f *fakeRemoteLister) Delete(context.Context, string) error { return errors.New("unused") }
 
+func (f *fakeRemoteLister) Probe(context.Context) error { return nil }
+
 type fakeSnapshotLister struct {
 	snapshots []restic.Snapshot
 	err       error
@@ -60,6 +62,7 @@ func (fakeLocalStore) Delete(context.Context, string) error { return errors.New(
 func (fakeLocalStore) ListBackupSets(context.Context, string) ([]storage.BackupSet, error) {
 	return nil, errors.New("unused")
 }
+func (fakeLocalStore) Probe(context.Context) error { return nil }
 func (fakeLocalStore) LocalPath(key string) (string, error) {
 	return "/srv/backups/" + key, nil
 }

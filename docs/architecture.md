@@ -52,8 +52,11 @@ format v2 before being configured in Bqckup.
 Retention (keep_last per site tag) forgets old snapshots and prunes
 unreachable pack data with a mark-and-sweep pass (no repack): the new
 index is written before any pack is deleted, so a crash at any point
-leaves `restic check` green. Restore is a future phase with an explicit
-destination and no silent overwrites.
+leaves `restic check` green. Set retention also prunes the
+`bqckup/<site>/<timestamp>/` artifact sets in every mode, so database
+dumps stored there by incremental runs are kept for `keep_last` runs
+too. Restore is a future phase with an explicit destination and no silent
+overwrites.
 
 ## Boundaries
 

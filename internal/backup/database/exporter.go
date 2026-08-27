@@ -5,9 +5,12 @@ import (
 	"compress/gzip"
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/bqckup/bqckup-go/internal/apperror"
 	"github.com/bqckup/bqckup-go/internal/backup"
@@ -125,6 +128,86 @@ func (e *ProcessExporter) arguments(source config.DatabaseSource) []string {
 		"--no-privileges",
 		source.Database,
 	}
+}
+
+// Probe verifies the database connection with the dump binary in read-only
+// mode (--no-data / --schema-only), discarding stdout and passing the
+// password only through the child environment. Nothing is written to disk.
+// The returned error text is the first non-empty stderr line, truncated to
+// 200 bytes, so it is safe to print as a check message.
+func (e *ProcessExporter) Probe(ctx context.Context, source config.DatabaseSource) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if source.Engine != e.engine {
+		return errors.New("database exporter does not match source engine")
+	}
+	if err := e.Preflight(); err != nil {
+		return err
+	}
+	var stderr bytes.Buffer
+	processErr := e.process.Run(ctx, process.ProcessSpec{
+		Command: e.command,
+		Args:    e.probeArguments(source),
+		Env:     []string{e.passwordEnv + "=" + source.Password},
+		Stdout:  io.Discard,
+		Stderr:  &stderr,
+	})
+	if processErr != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
+		if message := firstStderrLine(stderr.String()); message != "" {
+			return errors.New(message)
+		}
+		return errors.New("database connection check failed")
+	}
+	return nil
+}
+
+func (e *ProcessExporter) probeArguments(source config.DatabaseSource) []string {
+	port := strconv.Itoa(source.Port)
+	if e.engine == "mysql" {
+		return []string{
+			"--host=" + source.Host,
+			"--port=" + port,
+			"--user=" + source.Username,
+			"--no-data",
+			source.Database,
+		}
+	}
+	return []string{
+		"--host=" + source.Host,
+		"--port=" + port,
+		"--username=" + source.Username,
+		"--schema-only",
+		source.Database,
+	}
+}
+
+// firstStderrLine returns the first non-empty stderr line, trimmed and
+// truncated to 200 bytes without splitting a rune.
+func firstStderrLine(output string) string {
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if len(line) <= 200 {
+			return line
+		}
+		runes := []rune(line)
+		total := 0
+		for i, r := range runes {
+			size := utf8.RuneLen(r)
+			if total+size > 200 {
+				return string(runes[:i])
+			}
+			total += size
+		}
+		return line
+	}
+	return ""
 }
 
 var _ backup.Exporter = (*ProcessExporter)(nil)

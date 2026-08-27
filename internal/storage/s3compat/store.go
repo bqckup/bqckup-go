@@ -221,6 +221,34 @@ func (s *Store) PresignLink(ctx context.Context, key string, expires time.Durati
 
 var _ storage.Store = (*Store)(nil)
 
+// Probe verifies read access to the destination with a single one-object
+// list call under the storage prefix. Error text is sanitized: only the API
+// error code surfaces, never provider messages, endpoints, or keys.
+// ponytail: only ListObjectsV2 permission is verified; PutObject write
+// access is not checked. Add a write probe if read-only credentials start
+// masking backup failures.
+func (s *Store) Probe(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	_, err := s.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+		Bucket:  aws.String(s.bucket),
+		Prefix:  aws.String(s.prefix), // may be ""
+		MaxKeys: aws.Int32(1),
+	})
+	if err != nil {
+		var apiErr smithy.APIError
+		if errors.As(err, &apiErr) {
+			return errors.New(apiErr.ErrorCode())
+		}
+		if errors.Is(err, context.DeadlineExceeded) {
+			return errors.New("timed out")
+		}
+		return errors.New("request failed")
+	}
+	return nil
+}
+
 func (s *Store) Delete(ctx context.Context, backupSetPrefix string) error {
 	if err := ctx.Err(); err != nil {
 		return err

@@ -100,7 +100,7 @@ func TestBackupRunWithoutSiteRunsEveryEnabledSite(t *testing.T) {
 	assert.Equal(t, backup.StatusSuccess, results[1].Status)
 
 	for _, siteName := range []string{"example", "site-b"} {
-		matches, err := filepath.Glob(filepath.Join(backupRoot, "bqckup", siteName, "*", "files.tar.gz"))
+		matches, err := filepath.Glob(filepath.Join(backupRoot, "bqckup", siteName, "*", "*", "files.tar.gz"))
 		require.NoError(t, err)
 		assert.Len(t, matches, 1)
 	}
