@@ -104,7 +104,7 @@ jobs:
           export PATH="/usr/local/go/bin:$PATH"
           mkdir -p dist
           LDFLAGS="-X github.com/bqckup/bqckup-go/internal/buildinfo.version=${{ needs.prepare-release.outputs.version }} -X github.com/bqckup/bqckup-go/internal/buildinfo.commit=${{ needs.prepare-release.outputs.short_commit }}"
-          go build -ldflags "$LDFLAGS" -o dist/bqckup ./cmd/bqckup
+          go build -buildvcs=false -ldflags "$LDFLAGS" -o dist/bqckup ./cmd/bqckup
           tar -czf "bqckup_${{ needs.prepare-release.outputs.version }}_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz" -C dist bqckup
       - uses: actions/upload-artifact@v4
         with:
