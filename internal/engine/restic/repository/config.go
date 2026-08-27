@@ -20,7 +20,7 @@ type Config struct {
 // official restic binary verifies when loading a config.
 func (c Config) Validate() error {
 	if c.Version != 2 {
-		return fmt.Errorf("repository: unsupported repository version %d (this engine writes and reads version 2)", c.Version)
+		return fmt.Errorf("repository: unsupported repository format %d", c.Version)
 	}
 	if c.ID.IsNull() {
 		return fmt.Errorf("repository: config is missing its repository id")

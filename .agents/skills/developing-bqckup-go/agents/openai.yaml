@@ -1,5 +1,5 @@
 interface:
   display_name: "Developing Bqckup Go"
-  short_description: "Build and review Bqckup Go safely"
+  short_description: "Develop and review Bqckup Go safely"
   brand_color: "#2563EB"
-  default_prompt: "Use $developing-bqckup-go to implement one Bqckup Go milestone with tests and documentation."
+  default_prompt: "Use $developing-bqckup-go to implement or review one scoped Bqckup Go change using current code, tests, and repository invariants."
