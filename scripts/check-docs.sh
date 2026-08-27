@@ -56,9 +56,7 @@ if ! grep -Fq '(CHANGELOG.md)' README.md; then
     failed=1
 fi
 
-# architecture.md, configuration-v2.md, and intern-backlog.md were restored
-# after fa56df6 removed them; only genuinely absent docs stay banned.
-if grep -RniE 'docs/(development|testing|migration-from-python|guides|superpowers)|tasks/(plan|todo)' \
+if grep -RniE 'docs/(architecture|configuration-v2|development|testing|migration-from-python|intern-backlog|guides|superpowers)|tasks/(plan|todo)' \
     README.md USER-GUIDE.md scripts .agents internal; then
     echo "repository still references removed documentation" >&2
     failed=1
