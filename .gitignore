@@ -1,3 +1,4 @@
 .worktrees/
 /bqckup
 coverage.out
+/native/rusticbridge/target/

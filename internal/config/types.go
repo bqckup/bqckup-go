@@ -23,15 +23,21 @@ type App struct {
 }
 
 type Storage struct {
-	Type            string `mapstructure:"type" yaml:"type"`
-	Directory       string `mapstructure:"directory" yaml:"directory"`
-	Bucket          string `mapstructure:"bucket" yaml:"bucket"`
-	AccessKeyID     string `mapstructure:"access_key_id" yaml:"access_key_id"`
-	SecretAccessKey string `mapstructure:"secret_access_key" yaml:"secret_access_key"`
-	Region          string `mapstructure:"region" yaml:"region"`
-	Endpoint        string `mapstructure:"endpoint" yaml:"endpoint"`
-	Prefix          string `mapstructure:"prefix" yaml:"prefix"`
-	Primary         bool   `mapstructure:"primary" yaml:"primary"`
+	Type            string             `mapstructure:"type" yaml:"type"`
+	Directory       string             `mapstructure:"directory" yaml:"directory"`
+	Bucket          string             `mapstructure:"bucket" yaml:"bucket"`
+	AccessKeyID     string             `mapstructure:"access_key_id" yaml:"access_key_id"`
+	SecretAccessKey string             `mapstructure:"secret_access_key" yaml:"secret_access_key"`
+	Region          string             `mapstructure:"region" yaml:"region"`
+	Endpoint        string             `mapstructure:"endpoint" yaml:"endpoint"`
+	Prefix          string             `mapstructure:"prefix" yaml:"prefix"`
+	Primary         bool               `mapstructure:"primary" yaml:"primary"`
+	Credentials     StorageCredentials `mapstructure:"credentials" yaml:"credentials"`
+}
+
+type StorageCredentials struct {
+	Source string `mapstructure:"source" yaml:"source"`
+	URL    string `mapstructure:"url" yaml:"url"`
 }
 
 type Site struct {
@@ -39,9 +45,15 @@ type Site struct {
 	SourceFile    string        `mapstructure:"-" yaml:"-"`
 	Name          string        `mapstructure:"name" yaml:"name"`
 	Enabled       bool          `mapstructure:"enabled" yaml:"enabled"`
+	BackupMode    string        `mapstructure:"backup_mode" yaml:"backup_mode"`
+	Incremental   Incremental   `mapstructure:"incremental" yaml:"incremental"`
 	Sources       Sources       `mapstructure:"sources" yaml:"sources"`
 	Destinations  []Destination `mapstructure:"destinations" yaml:"destinations"`
 	Policy        Policy        `mapstructure:"policy" yaml:"policy"`
+}
+
+type Incremental struct {
+	PasswordEnv string `mapstructure:"password_env" yaml:"password_env"`
 }
 
 type Sources struct {

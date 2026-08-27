@@ -49,6 +49,59 @@ func TestValidateStorageTypes(t *testing.T) {
 	}
 }
 
+func TestValidateRemoteStorageCredentials(t *testing.T) {
+	tests := []struct {
+		name    string
+		storage Storage
+		wantErr string
+	}{
+		{name: "s3 remote", storage: Storage{Type: "s3", Credentials: StorageCredentials{Source: "remote", URL: "BQCKUP_STORAGE_URL"}}},
+		{name: "r2 remote", storage: Storage{Type: "r2", Credentials: StorageCredentials{Source: "remote", URL: "BQCKUP_STORAGE_URL"}}},
+		{name: "rejects missing source", storage: Storage{Type: "s3", Credentials: StorageCredentials{URL: "BQCKUP_STORAGE_URL"}}, wantErr: "credentials.source"},
+		{name: "rejects unsupported source", storage: Storage{Type: "s3", Credentials: StorageCredentials{Source: "file", URL: "BQCKUP_STORAGE_URL"}}, wantErr: "credentials.source"},
+		{name: "rejects missing url env", storage: Storage{Type: "s3", Credentials: StorageCredentials{Source: "remote"}}, wantErr: "credentials.url"},
+		{name: "rejects invalid url env", storage: Storage{Type: "s3", Credentials: StorageCredentials{Source: "remote", URL: "https://provider.invalid"}}, wantErr: "environment variable name"},
+		{name: "rejects mixed inline values", storage: Storage{Type: "s3", Bucket: "inline", Credentials: StorageCredentials{Source: "remote", URL: "BQCKUP_STORAGE_URL"}}, wantErr: "bucket must not be set"},
+		{name: "rejects local remote credentials", storage: Storage{Type: "local", Directory: "/var/backups", Credentials: StorageCredentials{Source: "remote", URL: "BQCKUP_STORAGE_URL"}}, wantErr: "credentials"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := validConfig(t)
+			cfg.Storages = map[string]Storage{"testing": test.storage}
+			cfg.Sites[0].Destinations = []Destination{{Storage: "testing"}}
+			err := cfg.Validate()
+			if test.wantErr == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), test.wantErr)
+		})
+	}
+}
+
+func TestLoadAcceptsRemoteCredentialDocumentWithoutSecretFileMode(t *testing.T) {
+	dir := writeConfigTree(t, `app:
+  state_database: data/bqckup.db
+  temporary_directory: tmp
+  lock_directory: locks
+`, `storages:
+  remote:
+    type: s3
+    credentials:
+      source: remote
+      url: BQCKUP_STORAGE_URL
+`, siteYAMLWithDestination(t, "remote"))
+	storageFile := filepath.Join(dir, "config", "storages.yaml")
+	require.NoError(t, os.Chmod(storageFile, 0o644))
+
+	cfg, err := Load(context.Background(), dir)
+	require.NoError(t, err)
+	assert.Equal(t, "remote", cfg.Storages["remote"].Credentials.Source)
+	assert.Equal(t, "BQCKUP_STORAGE_URL", cfg.Storages["remote"].Credentials.URL)
+}
+
 func TestValidateStorageEndpointsAndPrefixes(t *testing.T) {
 	tests := []struct {
 		name     string

@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/bqckup/bqckup-go/internal/fileexclude"
 )
 
 const (
@@ -17,7 +19,12 @@ const (
 	defaultKeepLast        = 7
 )
 
-var safeName = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
+var (
+	// SafeName matches names safe to use as site names, storage names,
+	// and file-system path segments.
+	SafeName     = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
+	validEnvName = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
+)
 
 func (c Config) Validate() error {
 	if c.Version != SchemaVersion {
@@ -62,9 +69,16 @@ func (c Config) Validate() error {
 	return nil
 }
 
+// ValidateStorage validates one storage document. It is the exported
+// single-entry form of validateStorage, used by callers that validate
+// provider-resolved storages without re-validating the whole configuration.
+func ValidateStorage(name string, value Storage) error {
+	return validateStorage(name, value)
+}
+
 func validateStorage(name string, value Storage) error {
 	field := "storages." + name
-	if !safeName.MatchString(name) {
+	if !SafeName.MatchString(name) {
 		return validationError("config/storages.yaml", field, "name contains unsupported characters")
 	}
 	switch value.Type {
@@ -102,12 +116,22 @@ func validateLocalStorage(field string, value Storage) error {
 			return validationError("config/storages.yaml", field+"."+candidate.name, "%s is not valid for local storage", candidate.name)
 		}
 	}
+	if value.Credentials.Source != "" || value.Credentials.URL != "" {
+		return validationError("config/storages.yaml", field+".credentials", "credentials are not valid for local storage")
+	}
 	return nil
 }
 
 func validateS3Storage(field string, value Storage) error {
 	if value.Directory != "" {
 		return validationError("config/storages.yaml", field+".directory", "directory is not valid for s3 storage")
+	}
+	remote, err := validateCredentialSource(field, value)
+	if err != nil {
+		return err
+	}
+	if remote {
+		return validateRemotePlaceholders(field, value)
 	}
 	if err := validateRemoteRequiredFields(field, value); err != nil {
 		return err
@@ -125,6 +149,13 @@ func validateR2Storage(field string, value Storage) error {
 	if value.Directory != "" {
 		return validationError("config/storages.yaml", field+".directory", "directory is not valid for r2 storage")
 	}
+	remote, err := validateCredentialSource(field, value)
+	if err != nil {
+		return err
+	}
+	if remote {
+		return validateRemotePlaceholders(field, value)
+	}
 	if err := validateRemoteRequiredFields(field, value); err != nil {
 		return err
 	}
@@ -137,6 +168,42 @@ func validateR2Storage(field string, value Storage) error {
 	parsed, _ := url.Parse(value.Endpoint)
 	if !strings.EqualFold(parsed.Scheme, "https") {
 		return validationError("config/storages.yaml", field+".endpoint", "endpoint must use HTTPS for r2 storage")
+	}
+	return validatePrefix(field+".prefix", value.Prefix)
+}
+
+func validateCredentialSource(field string, value Storage) (bool, error) {
+	credentials := value.Credentials
+	if credentials.Source == "" && credentials.URL == "" {
+		return false, nil
+	}
+	if credentials.Source != "remote" {
+		return false, validationError("config/storages.yaml", field+".credentials.source", "source must be remote")
+	}
+	if credentials.URL == "" {
+		return false, validationError("config/storages.yaml", field+".credentials.url", "url environment variable is required")
+	}
+	if !validEnvName.MatchString(credentials.URL) {
+		return false, validationError("config/storages.yaml", field+".credentials.url", "must be a valid environment variable name")
+	}
+	return true, nil
+}
+
+func validateRemotePlaceholders(field string, value Storage) error {
+	fields := []struct {
+		name  string
+		value string
+	}{
+		{"bucket", value.Bucket},
+		{"access_key_id", value.AccessKeyID},
+		{"secret_access_key", value.SecretAccessKey},
+		{"region", value.Region},
+		{"endpoint", value.Endpoint},
+	}
+	for _, candidate := range fields {
+		if candidate.value != "" {
+			return validationError("config/storages.yaml", field+"."+candidate.name, "%s must not be set when credentials.source is remote", candidate.name)
+		}
 	}
 	return validatePrefix(field+".prefix", value.Prefix)
 }
@@ -216,7 +283,7 @@ func (c Config) validateSite(site Site, seen map[string]struct{}) error {
 	if site.SchemaVersion != SchemaVersion {
 		return validationError(file, "version", "must equal %d", SchemaVersion)
 	}
-	if !safeName.MatchString(site.Name) {
+	if !SafeName.MatchString(site.Name) {
 		return validationError(file, baseField+".name", "contains unsupported characters")
 	}
 	if _, exists := seen[site.Name]; exists {
@@ -231,6 +298,17 @@ func (c Config) validateSite(site Site, seen map[string]struct{}) error {
 	if !site.Enabled {
 		return nil
 	}
+	if site.BackupMode != "" && site.BackupMode != "full" && site.BackupMode != "incremental" {
+		return validationError(file, baseField+".backup_mode", "must be 'full' or 'incremental'")
+	}
+	if site.BackupMode == "incremental" {
+		if site.Incremental.PasswordEnv == "" {
+			return validationError(file, baseField+".incremental.password_env", "is required")
+		}
+		if !validEnvName.MatchString(site.Incremental.PasswordEnv) {
+			return validationError(file, baseField+".incremental.password_env", "must be a valid environment variable name")
+		}
+	}
 	if len(site.Sources.Files.Include) == 0 {
 		return validationError(file, baseField+".sources.files.include", "at least one path is required")
 	}
@@ -240,8 +318,8 @@ func (c Config) validateSite(site Site, seen map[string]struct{}) error {
 		}
 	}
 	for index, exclude := range site.Sources.Files.Exclude {
-		if !filepath.IsAbs(exclude) {
-			return validationError(file, fmt.Sprintf("%s.sources.files.exclude[%d]", baseField, index), "must be an absolute path")
+		if err := fileexclude.Validate(exclude); err != nil {
+			return validationError(file, fmt.Sprintf("%s.sources.files.exclude[%d]", baseField, index), "invalid pattern: %v", err)
 		}
 	}
 	databaseNames := make(map[string]struct{}, len(site.Sources.Databases))
@@ -276,7 +354,7 @@ func (c Config) validateSite(site Site, seen map[string]struct{}) error {
 }
 
 func validateDatabaseSource(file, field string, source DatabaseSource) error {
-	if !safeName.MatchString(source.Name) {
+	if !SafeName.MatchString(source.Name) {
 		return validationError(file, field+".name", "must be a safe source name")
 	}
 	if source.Engine != "mysql" && source.Engine != "postgres" {

@@ -1,23 +1,37 @@
-# Architecture routing
+# Architecture boundaries
 
-The canonical source is [`docs/architecture.md`](../../../../docs/architecture.md). Read it before changing package responsibilities.
+Read current package contracts and their tests before changing responsibilities.
 
-## Dependency decisions
+## Ownership
 
-- `internal/cli` parses and renders; it does not execute backup logic.
-- `internal/app` constructs concrete adapters and owns their lifecycle.
-- `internal/backup` owns orchestration and the interfaces it consumes.
-- `internal/config` is the only Viper boundary.
+- `internal/cli` parses commands and renders text or JSON. It does not execute
+  backup logic.
+- `internal/app` loads configuration, creates concrete adapters, and owns their
+  lifecycle.
+- `internal/backup` orchestrates runs and owns the narrow interfaces it uses.
+- `internal/config` is the only Viper boundary and produces validated,
+  immutable configuration.
 - `internal/history` is the only GORM boundary.
-- `internal/storage/<adapter>` implements the storage contract without leaking SDK types into the runner.
-- Database exporters belong below `internal/backup/database` and execute external tools through an injected process boundary.
+- `internal/storage/<adapter>` implements storage without leaking SDK types
+  into orchestration.
+- `internal/backup/database` runs exporters through an injected process
+  boundary.
+- `internal/engine/restic` owns the built-in Restic-compatible repository
+  implementation. Its concrete facade is wired in `internal/app`.
 
-Add an abstraction only when the selected vertical slice has a real consumer. Prefer extending an existing narrow contract over creating a generic framework.
+Add an abstraction only for a real consumer. Prefer extending an existing
+consumer-owned interface over creating a generic framework.
 
-## Invariants
+## Run invariants
 
-- One site lock, one running record, and exactly one attempted terminal update per started run.
-- Every produced artifact goes to every configured destination.
-- Retention begins only after all required operations succeed.
-- Temporary and staging files are owner-only and removed on failure/cancellation.
-- UTC object keys remain `bqckup/<site>/<timestamp>/<artifact>`.
+- Acquire one site lock before starting work.
+- Create at most one running history record and attempt one terminal update.
+- Send every artifact to every configured destination.
+- Apply retention only after export, snapshot, and all storage operations
+  succeed.
+- Keep temporary and staging files owner-only and remove incomplete output on
+  error or cancellation.
+- Preserve write-once full-backup keys under
+  `bqckup/<site>/<UTC timestamp>/<artifact>`.
+- Keep incremental repositories isolated under `restic/<site>/` for each
+  destination.

@@ -5,20 +5,23 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"io"
+	"fmt"
 	"os"
 	"path"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	signerv4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	"github.com/aws/aws-sdk-go-v2/feature/s3/transfermanager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/smithy-go"
+	"github.com/bqckup/bqckup-go/internal/apperror"
+	"github.com/bqckup/bqckup-go/internal/config"
+	"github.com/bqckup/bqckup-go/internal/ctxcopy"
 	"github.com/bqckup/bqckup-go/internal/storage"
 )
 
@@ -40,15 +43,20 @@ type objectAPI interface {
 	DeleteObjects(context.Context, *s3.DeleteObjectsInput, ...func(*s3.Options)) (*s3.DeleteObjectsOutput, error)
 }
 
-type Store struct {
-	bucket   string
-	prefix   string
-	uploader uploaderAPI
-	client   objectAPI
+type presignerAPI interface {
+	PresignGetObject(context.Context, *s3.GetObjectInput, ...func(*s3.PresignOptions)) (*signerv4.PresignedHTTPRequest, error)
 }
 
-func newWithClients(options Options, uploader uploaderAPI, client objectAPI) *Store {
-	return &Store{bucket: options.Bucket, prefix: options.Prefix, uploader: uploader, client: client}
+type Store struct {
+	bucket    string
+	prefix    string
+	uploader  uploaderAPI
+	client    objectAPI
+	presigner presignerAPI
+}
+
+func newWithClients(options Options, uploader uploaderAPI, client objectAPI, presigner presignerAPI) *Store {
+	return &Store{bucket: options.Bucket, prefix: options.Prefix, uploader: uploader, client: client, presigner: presigner}
 }
 
 func (s *Store) Put(ctx context.Context, artifact storage.Artifact, key string) (storage.StoredArtifact, error) {
@@ -66,7 +74,7 @@ func (s *Store) Put(ctx context.Context, artifact storage.Artifact, key string) 
 
 	file, err := os.Open(artifact.Path)
 	if err != nil {
-		return storage.StoredArtifact{}, hiddenError("could not open backup artifact", err)
+		return storage.StoredArtifact{}, apperror.Hide("could not open backup artifact", err)
 	}
 	defer file.Close()
 	_, err = s.uploader.UploadObject(ctx, &transfermanager.UploadObjectInput{
@@ -85,9 +93,9 @@ func (s *Store) Put(ctx context.Context, artifact storage.Artifact, key string) 
 			return storage.StoredArtifact{}, err
 		}
 		if isCollision(err) {
-			return storage.StoredArtifact{}, hiddenError(ErrObjectExists.Error(), ErrObjectExists)
+			return storage.StoredArtifact{}, apperror.Hide(ErrObjectExists.Error(), ErrObjectExists)
 		}
-		return storage.StoredArtifact{}, hiddenError("S3-compatible upload failed", err)
+		return storage.StoredArtifact{}, apperror.Hide("S3-compatible upload failed", err)
 	}
 
 	head, err := s.client.HeadObject(ctx, &s3.HeadObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(finalKey)})
@@ -99,11 +107,11 @@ func (s *Store) Put(ctx context.Context, artifact storage.Artifact, key string) 
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			verificationErr = err
 		} else {
-			verificationErr = hiddenError("remote artifact verification failed", err)
+			verificationErr = apperror.Hide("remote artifact verification failed", err)
 		}
 		_, cleanupErr := s.client.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(finalKey)})
 		if cleanupErr != nil {
-			verificationErr = hiddenError(verificationErr.Error(), errors.Join(verificationErr, cleanupErr))
+			verificationErr = apperror.Hide(verificationErr.Error(), errors.Join(verificationErr, cleanupErr))
 		}
 		return storage.StoredArtifact{}, verificationErr
 	}
@@ -120,11 +128,11 @@ func inspectArtifact(ctx context.Context, artifact storage.Artifact) (string, in
 	}
 	file, err := os.Open(artifact.Path)
 	if err != nil {
-		return "", 0, hiddenError("could not inspect backup artifact", err)
+		return "", 0, apperror.Hide("could not inspect backup artifact", err)
 	}
 	defer file.Close()
 	hash := sha256.New()
-	size, err := copyWithContext(ctx, hash, file)
+	size, err := ctxcopy.Copy(ctx, hash, file)
 	if err != nil {
 		return "", size, err
 	}
@@ -133,33 +141,6 @@ func inspectArtifact(ctx context.Context, artifact storage.Artifact) (string, in
 		return "", size, errors.New("local artifact verification failed")
 	}
 	return checksum, size, nil
-}
-
-func copyWithContext(ctx context.Context, destination io.Writer, source io.Reader) (int64, error) {
-	buffer := make([]byte, 128*1024)
-	var written int64
-	for {
-		if err := ctx.Err(); err != nil {
-			return written, err
-		}
-		read, readErr := source.Read(buffer)
-		if read > 0 {
-			count, writeErr := destination.Write(buffer[:read])
-			written += int64(count)
-			if writeErr != nil {
-				return written, hiddenError("could not inspect backup artifact", writeErr)
-			}
-			if count != read {
-				return written, io.ErrShortWrite
-			}
-		}
-		if errors.Is(readErr, io.EOF) {
-			return written, nil
-		}
-		if readErr != nil {
-			return written, hiddenError("could not inspect backup artifact", readErr)
-		}
-	}
 }
 
 func verifyRemote(output *s3.HeadObjectOutput, size int64, checksum string) error {
@@ -193,21 +174,80 @@ func isCollision(err error) bool {
 	return errors.As(err, &statusError) && statusError.HTTPStatusCode() == 412
 }
 
-type redactedError struct {
-	message string
-	cause   error
+func isNotFound(err error) bool {
+	var apiError smithy.APIError
+	if errors.As(err, &apiError) && (apiError.ErrorCode() == "NotFound" || apiError.ErrorCode() == "NoSuchKey") {
+		return true
+	}
+	var statusError interface{ HTTPStatusCode() int }
+	return errors.As(err, &statusError) && statusError.HTTPStatusCode() == 404
 }
 
-func (e *redactedError) Error() string { return e.message }
-func (e *redactedError) Unwrap() error { return e.cause }
-
-func hiddenError(message string, cause error) error {
-	return &redactedError{message: message, cause: cause}
+// PresignLink checks that the object exists, then returns a temporary signed
+// download URL for it. Key is relative to the storage document prefix. The
+// only network call is the existence HEAD; presigning is client-side.
+func (s *Store) PresignLink(ctx context.Context, key string, expires time.Duration) (storage.DownloadLink, error) {
+	if err := ctx.Err(); err != nil {
+		return storage.DownloadLink{}, err
+	}
+	finalKey, err := storage.JoinPrefix(s.prefix, key)
+	if err != nil {
+		return storage.DownloadLink{}, err
+	}
+	if _, err := s.client.HeadObject(ctx, &s3.HeadObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(finalKey)}); err != nil {
+		if isNotFound(err) {
+			return storage.DownloadLink{}, fmt.Errorf("object %q was not found in the destination", key)
+		}
+		return storage.DownloadLink{}, remoteOperationError("could not check the remote object", err)
+	}
+	if s.presigner == nil {
+		return storage.DownloadLink{}, errors.New("presigning is unavailable")
+	}
+	request, err := s.presigner.PresignGetObject(ctx, &s3.GetObjectInput{
+		Bucket:                     aws.String(s.bucket),
+		Key:                        aws.String(finalKey),
+		ResponseContentDisposition: aws.String("attachment; filename=" + path.Base(key)),
+	}, func(options *s3.PresignOptions) {
+		options.Expires = expires
+	})
+	if err != nil {
+		return storage.DownloadLink{}, apperror.Hide("could not create the download link", err)
+	}
+	if request == nil {
+		return storage.DownloadLink{}, errors.New("presigning produced no result")
+	}
+	return storage.DownloadLink{URL: request.URL, Key: key, ExpiresAt: time.Now().UTC().Add(expires)}, nil
 }
 
 var _ storage.Store = (*Store)(nil)
 
-var safeSiteName = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
+// Probe verifies read access to the destination with a single one-object
+// list call under the storage prefix. Error text is sanitized: only the API
+// error code surfaces, never provider messages, endpoints, or keys.
+// ponytail: only ListObjectsV2 permission is verified; PutObject write
+// access is not checked. Add a write probe if read-only credentials start
+// masking backup failures.
+func (s *Store) Probe(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	_, err := s.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+		Bucket:  aws.String(s.bucket),
+		Prefix:  aws.String(s.prefix), // may be ""
+		MaxKeys: aws.Int32(1),
+	})
+	if err != nil {
+		var apiErr smithy.APIError
+		if errors.As(err, &apiErr) {
+			return errors.New(apiErr.ErrorCode())
+		}
+		if errors.Is(err, context.DeadlineExceeded) {
+			return errors.New("timed out")
+		}
+		return errors.New("request failed")
+	}
+	return nil
+}
 
 func (s *Store) Delete(ctx context.Context, backupSetPrefix string) error {
 	if err := ctx.Err(); err != nil {
@@ -299,12 +339,11 @@ func (s *Store) ListBackupSets(ctx context.Context, sitePrefix string) ([]storag
 				continue
 			}
 			remainder := strings.TrimPrefix(key, requestPrefix)
-			timestamp, _, _ := strings.Cut(remainder, "/")
-			createdAt, parseErr := time.Parse(storage.TimestampLayout, timestamp)
-			if parseErr != nil || createdAt.Location() != time.UTC {
+			setName, createdAt, parseErr := parseBackupSetRemainder(remainder)
+			if parseErr != nil {
 				continue
 			}
-			setKey := path.Join(sitePrefix, timestamp)
+			setKey := path.Join(sitePrefix, setName)
 			setsByKey[setKey] = storage.BackupSet{Key: setKey, CreatedAt: createdAt}
 		}
 		if !aws.ToBool(output.IsTruncated) {
@@ -323,12 +362,62 @@ func (s *Store) ListBackupSets(ctx context.Context, sitePrefix string) ([]storag
 	return sets, nil
 }
 
+func (s *Store) ListArtifacts(ctx context.Context, setPrefix string) ([]storage.RemoteArtifact, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := validateBackupSetPrefix(setPrefix); err != nil {
+		return nil, err
+	}
+	finalPrefix, err := storage.JoinPrefix(s.prefix, setPrefix)
+	if err != nil {
+		return nil, err
+	}
+	requestPrefix := finalPrefix + "/"
+	var artifacts []storage.RemoteArtifact
+	var continuation *string
+	for {
+		output, listErr := s.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+			Bucket:            aws.String(s.bucket),
+			Prefix:            aws.String(requestPrefix),
+			ContinuationToken: continuation,
+		})
+		if listErr != nil {
+			return nil, remoteOperationError("could not list remote backup artifacts", listErr)
+		}
+		if output == nil {
+			return nil, errors.New("remote object listing returned no result")
+		}
+		for _, object := range output.Contents {
+			key := aws.ToString(object.Key)
+			if !strings.HasPrefix(key, requestPrefix) {
+				continue
+			}
+			artifacts = append(artifacts, storage.RemoteArtifact{
+				Key:       setPrefix + "/" + strings.TrimPrefix(key, requestPrefix),
+				Size:      aws.ToInt64(object.Size),
+				CreatedAt: aws.ToTime(object.LastModified),
+			})
+		}
+		if !aws.ToBool(output.IsTruncated) {
+			return artifacts, nil
+		}
+		if output.NextContinuationToken == nil || aws.ToString(output.NextContinuationToken) == "" {
+			return nil, errors.New("remote object listing omitted its continuation token")
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		continuation = output.NextContinuationToken
+	}
+}
+
 func validateSitePrefix(sitePrefix string) error {
 	if err := storage.ValidateKey(sitePrefix); err != nil {
 		return err
 	}
 	parts := strings.Split(sitePrefix, "/")
-	if len(parts) != 2 || parts[0] != "bqckup" || !safeSiteName.MatchString(parts[1]) {
+	if len(parts) != 2 || parts[0] != "bqckup" || !config.SafeName.MatchString(parts[1]) {
 		return errors.New("invalid backup site prefix")
 	}
 	return nil
@@ -339,19 +428,34 @@ func validateBackupSetPrefix(prefix string) error {
 		return err
 	}
 	parts := strings.Split(prefix, "/")
-	if len(parts) != 3 || parts[0] != "bqckup" || !safeSiteName.MatchString(parts[1]) {
+	if (len(parts) != 3 && len(parts) != 4) || parts[0] != "bqckup" || !config.SafeName.MatchString(parts[1]) {
 		return errors.New("invalid backup set prefix")
 	}
-	createdAt, err := time.Parse(storage.TimestampLayout, parts[2])
-	if err != nil || createdAt.Location() != time.UTC || createdAt.Format(storage.TimestampLayout) != parts[2] {
+	if _, err := storage.ParseBackupSet(strings.Join(parts[2:], "/")); err != nil {
 		return errors.New("invalid backup set prefix")
 	}
 	return nil
+}
+
+func parseBackupSetRemainder(remainder string) (string, time.Time, error) {
+	parts := strings.Split(remainder, "/")
+	if len(parts) >= 3 {
+		setName := path.Join(parts[0], parts[1])
+		if createdAt, err := storage.ParseBackupSet(setName); err == nil {
+			return setName, createdAt, nil
+		}
+	}
+	if len(parts) >= 2 {
+		if createdAt, err := storage.ParseBackupSet(parts[0]); err == nil {
+			return parts[0], createdAt, nil
+		}
+	}
+	return "", time.Time{}, errors.New("invalid backup set object key")
 }
 
 func remoteOperationError(message string, err error) error {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return err
 	}
-	return hiddenError(message, err)
+	return apperror.Hide(message, err)
 }

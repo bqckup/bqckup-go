@@ -5,8 +5,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"os"
+	"path"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/bqckup/bqckup-go/internal/storage"
 	"github.com/stretchr/testify/assert"
@@ -41,7 +43,7 @@ func TestPutCancelledRemovesStagingFiles(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err = store.Put(ctx, artifact, "bqckup/site/2026-07-23T03-45-00Z/files.tar.gz")
+	_, err = store.Put(ctx, artifact, "bqckup/site/2026-07-23T03-45-00.000000000Z/files.tar.gz")
 	require.ErrorIs(t, err, context.Canceled)
 
 	var files []string
@@ -55,12 +57,25 @@ func TestPutCancelledRemovesStagingFiles(t *testing.T) {
 	assert.Empty(t, files)
 }
 
+func TestPutSameSecondRunDoesNotOverwrite(t *testing.T) {
+	store, err := New(t.TempDir())
+	require.NoError(t, err)
+
+	timestamp := time.Date(2026, 7, 23, 3, 45, 0, 123_456_789, time.UTC).Format(storage.TimestampLayout)
+	key := path.Join("bqckup", "site", timestamp, "files.tar.gz")
+	_, err = store.Put(context.Background(), sourceArtifact(t, []byte("first")), key)
+	require.NoError(t, err)
+
+	_, err = store.Put(context.Background(), sourceArtifact(t, []byte("second")), key)
+	require.Error(t, err)
+}
+
 func TestPutDoesNotOverwriteExistingObject(t *testing.T) {
 	root := t.TempDir()
 	store, err := New(root)
 	require.NoError(t, err)
 	artifact := sourceArtifact(t, []byte("new"))
-	key := "bqckup/site/2026-07-23T03-45-00Z/files.tar.gz"
+	key := "bqckup/site/2026-07-23T03-45-00.000000000Z/files.tar.gz"
 	finalPath := filepath.Join(root, filepath.FromSlash(key))
 	require.NoError(t, os.MkdirAll(filepath.Dir(finalPath), 0o700))
 	require.NoError(t, os.WriteFile(finalPath, []byte("existing"), 0o600))
@@ -78,7 +93,7 @@ func TestPutPersistsVerifiedArtifactWithPrivatePermissions(t *testing.T) {
 	require.NoError(t, err)
 	contents := []byte("verified backup")
 	artifact := sourceArtifact(t, contents)
-	key := "bqckup/site/2026-07-23T03-45-00Z/files.tar.gz"
+	key := "bqckup/site/2026-07-23T03-45-00.000000000Z/files.tar.gz"
 
 	stored, err := store.Put(context.Background(), artifact, key)
 	require.NoError(t, err)
@@ -95,25 +110,27 @@ func TestPutPersistsVerifiedArtifactWithPrivatePermissions(t *testing.T) {
 	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
 }
 
-func TestListBackupSetsRecognizesOnlyUTCApplicationTimestamps(t *testing.T) {
+func TestListBackupSetsRecognizesReadableAndLegacyUTCApplicationTimestamps(t *testing.T) {
 	root := t.TempDir()
 	store, err := New(root)
 	require.NoError(t, err)
 	for _, name := range []string{
-		"2026-07-22T03-45-00Z",
-		"2026-07-23T03-45-00Z",
-		"2026-07-23T03:45:00Z",
-		"notes",
+		"22-July-2026/03-45-00",
+		"23-July-2026/03-45-00",
+		"2026-07-21T03-45-00.000000000Z",
+		"23-July-2026/03:45:00",
+		"notes/not-a-run",
 	} {
 		require.NoError(t, os.MkdirAll(filepath.Join(root, "bqckup", "site", name), 0o700))
 	}
-	require.NoError(t, os.WriteFile(filepath.Join(root, "bqckup", "site", "2026-07-24T03-45-00Z"), []byte("file"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "bqckup", "site", "2026-07-24T03-45-00.000000000Z"), []byte("file"), 0o600))
 
 	sets, err := store.ListBackupSets(context.Background(), "bqckup/site")
 	require.NoError(t, err)
-	require.Len(t, sets, 2)
-	assert.Equal(t, "bqckup/site/2026-07-22T03-45-00Z", sets[0].Key)
-	assert.Equal(t, "bqckup/site/2026-07-23T03-45-00Z", sets[1].Key)
+	require.Len(t, sets, 3)
+	assert.Equal(t, "bqckup/site/2026-07-21T03-45-00.000000000Z", sets[0].Key)
+	assert.Equal(t, "bqckup/site/22-July-2026/03-45-00", sets[1].Key)
+	assert.Equal(t, "bqckup/site/23-July-2026/03-45-00", sets[2].Key)
 }
 
 func sourceArtifact(t *testing.T, contents []byte) storage.Artifact {
@@ -126,4 +143,38 @@ func sourceArtifact(t *testing.T, contents []byte) storage.Artifact {
 		Size:   int64(len(contents)),
 		SHA256: hex.EncodeToString(sum[:]),
 	}
+}
+
+func TestLocalPathJoinsKeyUnderRoot(t *testing.T) {
+	store, err := New(t.TempDir())
+	require.NoError(t, err)
+
+	resolved, err := store.LocalPath("bqckup/site-a/2026-08-05T00-00-00Z/files.tar.gz")
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(store.root, "bqckup", "site-a", "2026-08-05T00-00-00Z", "files.tar.gz"), resolved)
+}
+
+func TestLocalPathRejectsUnsafeKeys(t *testing.T) {
+	store, err := New(t.TempDir())
+	require.NoError(t, err)
+
+	_, err = store.LocalPath("../outside/files.tar.gz")
+	require.Error(t, err)
+}
+
+func TestLocalStoreProbe(t *testing.T) {
+	root := t.TempDir()
+	store, err := New(root)
+	require.NoError(t, err)
+
+	require.NoError(t, store.Probe(context.Background()))
+	entries, readErr := os.ReadDir(root)
+	require.NoError(t, readErr)
+	assert.Empty(t, entries, "probe must leave the storage root empty")
+
+	require.NoError(t, os.Chmod(root, 0o500))
+	t.Cleanup(func() { _ = os.Chmod(root, 0o700) })
+	probeErr := store.Probe(context.Background())
+	require.Error(t, probeErr)
+	assert.Contains(t, probeErr.Error(), "not writable")
 }

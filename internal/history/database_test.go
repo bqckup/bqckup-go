@@ -17,9 +17,9 @@ func TestMigrateIsIdempotent(t *testing.T) {
 	require.NoError(t, Migrate(context.Background(), db))
 	require.NoError(t, Migrate(context.Background(), db))
 
-	var count int64
-	require.NoError(t, db.Table("schema_migrations").Count(&count).Error)
-	assert.EqualValues(t, 1, count)
+	for _, table := range []string{"backup_runs", "artifacts"} {
+		assert.True(t, db.Migrator().HasTable(table), "missing table %s", table)
+	}
 }
 
 func TestOpenUsesSQLiteSafetyPragmas(t *testing.T) {

@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bqckup/bqckup-go/internal/ctxcopy"
 	"github.com/bqckup/bqckup-go/internal/storage"
 	"golang.org/x/sys/unix"
 )
@@ -82,7 +83,7 @@ func (s *Store) Put(ctx context.Context, artifact storage.Artifact, key string) 
 	}
 	defer source.Close()
 	hash := sha256.New()
-	size, err := copyWithContext(ctx, io.MultiWriter(staging, hash), source)
+	size, err := ctxcopy.Copy(ctx, io.MultiWriter(staging, hash), source)
 	if err != nil {
 		return stored, err
 	}
@@ -128,6 +129,29 @@ func (s *Store) Delete(ctx context.Context, key string) error {
 	return syncDirectory(filepath.Dir(target))
 }
 
+// Probe verifies the destination is writable by creating and immediately
+// removing a temporary file. The error text is safe to print (local paths
+// only).
+func (s *Store) Probe(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	file, err := os.CreateTemp(s.root, ".bqckup-probe-*")
+	if err != nil {
+		return fmt.Errorf("destination not writable: %w", err)
+	}
+	name := file.Name()
+	_ = file.Close()
+	_ = os.Remove(name) // best effort; never return an error from Remove
+	return nil
+}
+
+// LocalPath resolves an object key to its path on the local filesystem.
+// Used by the download-link command to explain where a local file lives.
+func (s *Store) LocalPath(key string) (string, error) {
+	return s.resolve(key)
+}
+
 func (s *Store) ListBackupSets(ctx context.Context, sitePrefix string) ([]storage.BackupSet, error) {
 	directory, err := s.resolve(sitePrefix)
 	if err != nil {
@@ -148,14 +172,39 @@ func (s *Store) ListBackupSets(ctx context.Context, sitePrefix string) ([]storag
 		if !entry.IsDir() {
 			continue
 		}
-		createdAt, err := time.Parse(storage.TimestampLayout, entry.Name())
-		if err != nil || createdAt.Location() != time.UTC {
+		if createdAt, parseErr := storage.ParseBackupSet(entry.Name()); parseErr == nil {
+			sets = append(sets, storage.BackupSet{
+				Key:       path.Join(sitePrefix, entry.Name()),
+				CreatedAt: createdAt,
+			})
 			continue
 		}
-		sets = append(sets, storage.BackupSet{
-			Key:       path.Join(sitePrefix, entry.Name()),
-			CreatedAt: createdAt,
-		})
+
+		date, dateErr := time.Parse(storage.BackupDateLayout, entry.Name())
+		if dateErr != nil || date.Format(storage.BackupDateLayout) != entry.Name() {
+			continue
+		}
+		runs, readErr := os.ReadDir(filepath.Join(directory, entry.Name()))
+		if readErr != nil {
+			return nil, fmt.Errorf("list backup runs %q: %w", path.Join(sitePrefix, entry.Name()), readErr)
+		}
+		for _, run := range runs {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			if !run.IsDir() {
+				continue
+			}
+			setName := path.Join(entry.Name(), run.Name())
+			createdAt, parseErr := storage.ParseBackupSet(setName)
+			if parseErr != nil {
+				continue
+			}
+			sets = append(sets, storage.BackupSet{
+				Key:       path.Join(sitePrefix, setName),
+				CreatedAt: createdAt,
+			})
+		}
 	}
 	sort.Slice(sets, func(i, j int) bool { return sets[i].CreatedAt.Before(sets[j].CreatedAt) })
 	return sets, nil
@@ -171,33 +220,6 @@ func (s *Store) resolve(key string) (string, error) {
 		return "", fmt.Errorf("storage key %q escapes its root", key)
 	}
 	return resolved, nil
-}
-
-func copyWithContext(ctx context.Context, destination io.Writer, source io.Reader) (int64, error) {
-	buffer := make([]byte, 128*1024)
-	var written int64
-	for {
-		if err := ctx.Err(); err != nil {
-			return written, err
-		}
-		read, readErr := source.Read(buffer)
-		if read > 0 {
-			count, writeErr := destination.Write(buffer[:read])
-			written += int64(count)
-			if writeErr != nil {
-				return written, fmt.Errorf("write storage staging file: %w", writeErr)
-			}
-			if count != read {
-				return written, io.ErrShortWrite
-			}
-		}
-		if errors.Is(readErr, io.EOF) {
-			return written, nil
-		}
-		if readErr != nil {
-			return written, fmt.Errorf("read artifact: %w", readErr)
-		}
-	}
 }
 
 func syncDirectory(directory string) error {

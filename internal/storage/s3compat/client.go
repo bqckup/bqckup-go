@@ -10,6 +10,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/feature/s3/transfermanager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/bqckup/bqckup-go/internal/apperror"
 )
 
 type Provider string
@@ -55,7 +56,7 @@ func New(ctx context.Context, options Options) (*Store, error) {
 		}),
 	)
 	if err != nil {
-		return nil, hiddenError("could not initialize S3-compatible storage", err)
+		return nil, apperror.Hide("could not initialize S3-compatible storage", err)
 	}
 
 	client := s3.NewFromConfig(sdkConfig, func(clientOptions *s3.Options) {
@@ -65,5 +66,5 @@ func New(ctx context.Context, options Options) (*Store, error) {
 		}
 	})
 	uploader := transfermanager.New(client)
-	return newWithClients(options, uploader, client), nil
+	return newWithClients(options, uploader, client, s3.NewPresignClient(client)), nil
 }

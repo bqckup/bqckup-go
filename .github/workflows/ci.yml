@@ -2,6 +2,7 @@ name: ci
 
 on:
   pull_request:
+    branches: [main]
   push:
     branches: [main]
 
@@ -15,7 +16,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.26.x'
+          go-version: '1.26.5'
           cache: true
       - name: Install SQLite build dependency
         run: sudo apt-get update && sudo apt-get install -y gcc
@@ -23,3 +24,20 @@ jobs:
         run: make verify
       - name: Verify documentation contract
         run: sh scripts/check-docs.sh
+
+  restic-compat:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.5'
+          cache: true
+      - name: Install restic (>= 0.17.0, repository format v2)
+        run: |
+          curl -sL -o restic.bz2 https://github.com/restic/restic/releases/download/v0.19.1/restic_0.19.1_linux_amd64.bz2
+          bunzip2 restic.bz2
+          chmod +x restic
+          sudo mv restic /usr/local/bin/restic
+      - name: Compat tests against the official restic binary
+        run: go test -race -tags=restic_compat ./internal/engine/restic/...

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/bqckup/bqckup-go/internal/backup"
 	"github.com/bqckup/bqckup-go/internal/buildinfo"
 	"github.com/bqckup/bqckup-go/internal/history"
 	"github.com/spf13/cobra"
@@ -60,17 +61,52 @@ func TestBackupRunAndHistoryListEndToEnd(t *testing.T) {
 	require.NoError(t, json.Unmarshal(stdout.Bytes(), &result))
 	assert.Equal(t, "success", result["status"])
 
-	matches, err := filepath.Glob(filepath.Join(backupRoot, "bqckup", "example", "*", "files.tar.gz"))
+	matches, err := filepath.Glob(filepath.Join(backupRoot, "bqckup", "example", "*", "*", "files.tar.gz"))
 	require.NoError(t, err)
 	assert.Len(t, matches, 1)
 
 	root, stdout, _ = commandForTest(t, "--config-dir", configDir, "--output", "json", "history", "list", "--site", "example", "--limit", "1")
 	require.NoError(t, root.Execute())
+	rawJSON := stdout.String()
 	var runs []history.BackupRun
-	require.NoError(t, json.Unmarshal(stdout.Bytes(), &runs))
+	require.NoError(t, json.Unmarshal([]byte(rawJSON), &runs))
 	require.Len(t, runs, 1)
 	assert.Equal(t, history.StatusSuccess, runs[0].Status)
 	assert.Len(t, runs[0].Artifacts, 1)
+
+	root, stdout, _ = commandForTest(t, "--config-dir", configDir, "--output", "json", "history", "list", "--details", "--site", "example", "--limit", "1")
+	require.NoError(t, root.Execute())
+	assert.JSONEq(t, rawJSON, stdout.String(), "--details must not change raw JSON history output")
+
+	root, stdout, _ = commandForTest(t, "--config-dir", configDir, "history", "list", "--details", "--site", "example", "--limit", "1")
+	require.NoError(t, root.Execute())
+	assert.Contains(t, stdout.String(), "Artifacts for run "+runs[0].ID)
+	assert.Contains(t, stdout.String(), runs[0].Artifacts[0].ObjectKey)
+}
+
+func TestBackupRunWithoutSiteRunsEveryEnabledSite(t *testing.T) {
+	configDir, backupRoot := writeCLIConfig(t)
+	writeCLISite(t, configDir, "site-b", true)
+	writeCLISite(t, configDir, "site-disabled", false)
+
+	root, stdout, _ := commandForTest(t, "--config-dir", configDir, "--output", "json", "backup", "run", "--force")
+	require.NoError(t, root.Execute())
+
+	var results []backup.RunResult
+	require.NoError(t, json.Unmarshal(stdout.Bytes(), &results))
+	require.Len(t, results, 2)
+	assert.Equal(t, []string{"example", "site-b"}, []string{results[0].SiteName, results[1].SiteName})
+	assert.Equal(t, backup.StatusSuccess, results[0].Status)
+	assert.Equal(t, backup.StatusSuccess, results[1].Status)
+
+	for _, siteName := range []string{"example", "site-b"} {
+		matches, err := filepath.Glob(filepath.Join(backupRoot, "bqckup", siteName, "*", "*", "files.tar.gz"))
+		require.NoError(t, err)
+		assert.Len(t, matches, 1)
+	}
+	disabledMatches, err := filepath.Glob(filepath.Join(backupRoot, "bqckup", "site-disabled", "*", "files.tar.gz"))
+	require.NoError(t, err)
+	assert.Empty(t, disabledMatches)
 }
 
 func TestExitCodeMapping(t *testing.T) {
@@ -130,4 +166,27 @@ site:
     keep_last: 3
 `, source)), 0o600))
 	return configDir, backupRoot
+}
+
+func writeCLISite(t *testing.T, configDir, siteName string, enabled bool) {
+	t.Helper()
+	source := filepath.Join(filepath.Dir(configDir), "source-"+siteName)
+	require.NoError(t, os.MkdirAll(source, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(source, "data.txt"), []byte("important"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, "sites", siteName+".yaml"), []byte(fmt.Sprintf(`version: 2
+site:
+  name: %s
+  enabled: %t
+  sources:
+    files:
+      include: [%s]
+      exclude: []
+      follow_symlinks: false
+    databases: []
+  destinations:
+    - storage: local-primary
+  policy:
+    minimum_interval: 1h
+    keep_last: 3
+`, siteName, enabled, source)), 0o600))
 }

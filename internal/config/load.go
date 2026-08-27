@@ -28,7 +28,7 @@ type siteDocument struct {
 	Site    Site `mapstructure:"site"`
 }
 
-// Load reads a complete schema-v2 config tree from dir.
+// Load reads a complete configuration tree from dir.
 func Load(ctx context.Context, dir string) (Config, error) {
 	if err := ctx.Err(); err != nil {
 		return Config{}, err
@@ -54,7 +54,7 @@ func Load(ctx context.Context, dir string) (Config, error) {
 		return Config{}, err
 	}
 	for name, storage := range stores.Storages {
-		if storage.Type == "r2" && storage.Region == "" {
+		if storage.Type == "r2" && storage.Region == "" && storage.Credentials.Source != "remote" {
 			storage.Region = "auto"
 			stores.Storages[name] = storage
 		}

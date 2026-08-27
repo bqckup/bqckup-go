@@ -22,3 +22,11 @@ storages:
     endpoint: https://example-account.r2.cloudflarestorage.com
     prefix: company-archive
     primary: false
+
+  managed-s3:
+    type: s3
+    credentials:
+      source: remote
+      url: BQCKUP_MANAGED_S3_CREDENTIAL_URL
+    prefix: company-managed
+    primary: false

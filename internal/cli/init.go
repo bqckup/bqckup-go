@@ -12,13 +12,13 @@ import (
 func newInitCommand(opts *options) *cobra.Command {
 	return &cobra.Command{
 		Use:   "init",
-		Short: "Create a schema-v2 configuration tree",
+		Short: "Create a configuration tree",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if err := initializeConfig(opts.configDir); err != nil {
 				return err
 			}
-			_, err := fmt.Fprintf(cmd.OutOrStdout(), "initialized schema-v2 configuration in %s\n", opts.configDir)
+			_, err := fmt.Fprintf(cmd.OutOrStdout(), "initialized configuration in %s\n", opts.configDir)
 			return err
 		},
 	}
