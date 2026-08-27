@@ -141,6 +141,7 @@ response, missing URL env, URL and credential redaction.
 - [x] Missing dependency maps to exit code 3; `--site` unknown or disabled maps to exit code 2.
 - [x] Checks honor context cancellation; every connectivity probe runs under a 10 s timeout child context.
 - [x] Probes are non-mutating: DB probe uses `--no-data`/`--schema-only` with stdout discarded; local probe creates and removes one temp file; S3/R2 probe lists with `MaxKeys=1`. Known ceiling: S3 probe verifies list access, not `PutObject`.
+- [x] Remote storages (`credentials.source: remote`) are resolved per-storage before probing; provider or validation failures surface as failing `storage:<name>` checks.
 
 **Required tests:**
 - [x] Healthy/unhealthy matrices (unit fakes in `internal/doctor`, no real connections).

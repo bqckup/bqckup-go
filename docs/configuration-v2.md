@@ -82,7 +82,10 @@ storages:
   command output.
 
 The remote provider is called with `GET` when an application command opens the
-configuration. A successful response must be a small, strict JSON object:
+configuration. `bqckup doctor` resolves remote storages one at a time before
+probing them; a provider or validation failure becomes a failing
+`storage:<name>` check instead of a hard error. A successful response must be a
+small, strict JSON object:
 
 ```json
 {
