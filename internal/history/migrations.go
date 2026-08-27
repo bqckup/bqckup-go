@@ -8,7 +8,7 @@ import (
 )
 
 // Migrate brings the database schema up to date. Today that is a single
-// idempotent AutoMigrate; add a recorded version table when schema v2
+// idempotent AutoMigrate; add a recorded version table when migrations require it
 // arrives.
 func Migrate(ctx context.Context, db *gorm.DB) error {
 	if err := db.WithContext(ctx).AutoMigrate(&BackupRun{}, &Artifact{}); err != nil {

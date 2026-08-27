@@ -4,8 +4,8 @@
 // not match byte-for-byte for compatibility, but the properties do).
 //
 // Algorithm ported from github.com/restic/chunker v0.5.0 (MIT, commit
-// 2e8f53f), rewritten in this package's style. Verified against that source
-// in docs/superpowers/notes/restic-format-verification.md §2.10.
+// 2e8f53f), rewritten in this package's style and covered by compatibility
+// and chunk-boundary tests in this package.
 package chunker
 
 import "io"

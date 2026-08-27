@@ -3,9 +3,8 @@
 // filesystems). Repositories written here are readable by the official
 // restic binary >= 0.17.0 (restic check / snapshots / restore).
 //
-// The format contract is documented in
-// docs/superpowers/notes/restic-format-verification.md, which was verified
-// against the official restic source and wins on any conflict.
+// Compatibility is verified by the restic_compat test suite against the
+// official restic binary. Those executable checks are the format contract.
 //
 // Layout:
 //
