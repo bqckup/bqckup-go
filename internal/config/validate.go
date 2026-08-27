@@ -69,6 +69,13 @@ func (c Config) Validate() error {
 	return nil
 }
 
+// ValidateStorage validates one storage document. It is the exported
+// single-entry form of validateStorage, used by callers that validate
+// provider-resolved storages without re-validating the whole configuration.
+func ValidateStorage(name string, value Storage) error {
+	return validateStorage(name, value)
+}
+
 func validateStorage(name string, value Storage) error {
 	field := "storages." + name
 	if !SafeName.MatchString(name) {

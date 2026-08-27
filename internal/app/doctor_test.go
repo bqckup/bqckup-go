@@ -3,10 +3,14 @@ package app
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/bqckup/bqckup-go/internal/storage/s3compat"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -48,4 +52,124 @@ site:
 	require.NoError(t, err)
 	assert.Contains(t, checker.StoreErrs, "local-primary")
 	assert.NotContains(t, checker.Stores, "local-primary")
+}
+
+// writeRemoteStorageFixture writes a config tree whose only storage is a
+// remote S3 entry (empty bucket/keys: an unresolved remote entry must have
+// those fields empty or config.Load rejects it) and whose site sends backups
+// to it.
+func writeRemoteStorageFixture(t *testing.T) (string, string) {
+	t.Helper()
+	configDir, backupRoot := writeApplicationConfig(t)
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, "config", "storages.yaml"), []byte(`storages:
+  remote:
+    type: s3
+    credentials:
+      source: remote
+      url: BQCKUP_REMOTE_URL
+`), 0o600))
+	sitePath := filepath.Join(configDir, "sites", "example.yaml")
+	siteBody, err := os.ReadFile(sitePath)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(sitePath, []byte(strings.Replace(string(siteBody), "local-primary", "remote", 1)), 0o600))
+	return configDir, backupRoot
+}
+
+func TestOpenDoctorResolvesRemoteStorage(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"bucket":"remote-bucket","access_key_id":"remote-key","secret_access_key":"remote-secret","endpoint":"https://s3.example.com","region":"us-east-1"}`))
+	}))
+	t.Cleanup(server.Close)
+	t.Setenv("BQCKUP_REMOTE_URL", server.URL)
+	configDir, _ := writeRemoteStorageFixture(t)
+
+	checker, err := OpenDoctor(t.Context(), configDir)
+	require.NoError(t, err)
+	storage := checker.Cfg.Storages["remote"]
+	assert.Equal(t, "remote-bucket", storage.Bucket)
+	assert.Equal(t, "remote-key", storage.AccessKeyID)
+	assert.Equal(t, "remote-secret", storage.SecretAccessKey)
+	assert.Empty(t, storage.Credentials) // resolver clears credentials
+	assert.NotContains(t, checker.StoreErrs, "remote")
+	assert.IsType(t, &s3compat.Store{}, checker.Stores["remote"]) // s3compat.New is network-free
+}
+
+func TestOpenDoctorRemoteProviderUnavailable(t *testing.T) {
+	t.Run("empty env", func(t *testing.T) {
+		t.Setenv("BQCKUP_REMOTE_URL", "") // empty → unset branch, no dial
+		configDir, _ := writeRemoteStorageFixture(t)
+
+		checker, err := OpenDoctor(t.Context(), configDir)
+		require.NoError(t, err)
+		require.Contains(t, checker.StoreErrs, "remote")
+		assert.Equal(t, "remote storage configuration is unavailable", checker.StoreErrs["remote"].Error())
+	})
+	t.Run("invalid url never leaks", func(t *testing.T) {
+		t.Setenv("BQCKUP_REMOTE_URL", "ht!tp://bad url") // fails url.Parse/validateProviderURL, no dial
+		configDir, _ := writeRemoteStorageFixture(t)
+
+		checker, err := OpenDoctor(t.Context(), configDir)
+		require.NoError(t, err)
+		require.Contains(t, checker.StoreErrs, "remote")
+		assert.Equal(t, "remote storage configuration is unavailable", checker.StoreErrs["remote"].Error())
+		assert.NotContains(t, checker.StoreErrs["remote"].Error(), "bad url")
+	})
+}
+
+func TestOpenDoctorRemoteProviderGarbage(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		// Response missing bucket → validation must fail.
+		_, _ = w.Write([]byte(`{"access_key_id":"garbage-key","secret_access_key":"garbage-secret","region":"us-east-1"}`))
+	}))
+	t.Cleanup(server.Close)
+	t.Setenv("BQCKUP_REMOTE_URL", server.URL)
+	configDir, _ := writeRemoteStorageFixture(t)
+
+	checker, err := OpenDoctor(t.Context(), configDir)
+	require.NoError(t, err)
+	errMsg := checker.StoreErrs["remote"].Error()
+	assert.Contains(t, errMsg, "remote storage configuration is invalid")
+	assert.Contains(t, errMsg, "bucket is required") // from validateRemoteRequiredFields
+	assert.NotContains(t, errMsg, "garbage-key")
+	assert.NotContains(t, errMsg, "garbage-secret")
+}
+
+func TestOpenDoctorMixedLocalAndRemote(t *testing.T) {
+	t.Setenv("BQCKUP_REMOTE_URL", "") // unset → remote fails fast, no dial
+	configDir, backupRoot := writeApplicationConfig(t)
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, "config", "storages.yaml"), fmt.Appendf(nil, `storages:
+  local-primary:
+    type: local
+    directory: %s
+  remote:
+    type: s3
+    credentials:
+      source: remote
+      url: BQCKUP_REMOTE_URL
+`, backupRoot), 0o600))
+	sitePath := filepath.Join(configDir, "sites", "example.yaml")
+	siteBody, err := os.ReadFile(sitePath)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(sitePath, []byte(strings.Replace(string(siteBody), "    - storage: local-primary", "    - storage: local-primary\n    - storage: remote", 1)), 0o600))
+
+	checker, err := OpenDoctor(t.Context(), configDir)
+	require.NoError(t, err)
+	assert.Contains(t, checker.Stores, "local-primary")
+	require.Contains(t, checker.StoreErrs, "remote")
+	assert.Equal(t, "remote storage configuration is unavailable", checker.StoreErrs["remote"].Error())
+
+	report, err := checker.Run(t.Context(), "")
+	require.NoError(t, err)
+	assert.False(t, report.Passed)
+	localOK, remoteFail := false, false
+	for _, check := range report.Checks {
+		if check.Name == "storage:local-primary" {
+			localOK = check.Status == "ok"
+		}
+		if check.Name == "storage:remote" {
+			remoteFail = check.Status == "fail" && check.Message == "remote storage configuration is unavailable"
+		}
+	}
+	assert.True(t, localOK, "local storage must still probe")
+	assert.True(t, remoteFail, "remote storage must fail with the safe message")
 }

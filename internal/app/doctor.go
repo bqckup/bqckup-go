@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	databaseexporter "github.com/bqckup/bqckup-go/internal/backup/database"
 	"github.com/bqckup/bqckup-go/internal/config"
@@ -10,6 +11,7 @@ import (
 	"github.com/bqckup/bqckup-go/internal/process"
 	"github.com/bqckup/bqckup-go/internal/storage"
 	localstorage "github.com/bqckup/bqckup-go/internal/storage/local"
+	"github.com/bqckup/bqckup-go/internal/storage/remoteconfig"
 	"github.com/bqckup/bqckup-go/internal/storage/s3compat"
 )
 
@@ -26,7 +28,35 @@ func OpenDoctor(ctx context.Context, configDir string) (*doctor.Checker, error) 
 		return checker, nil
 	}
 	checker.Cfg = &configuration
-	checker.Stores, checker.StoreErrs = buildDoctorStores(ctx, configuration.Storages)
+
+	// Resolve remote storages one at a time before construction: doctor
+	// must probe real buckets, and one failing provider must not stop the
+	// other storages or the database checks. Failures become the existing
+	// storage:<name> check via StoreErrs.
+	checker.StoreErrs = make(map[string]error)
+	resolver := remoteconfig.New()
+	for name, storage := range configuration.Storages {
+		if storage.Credentials.Source != "remote" {
+			continue
+		}
+		resolved, err := resolver.Resolve(ctx, map[string]config.Storage{name: storage})
+		if err != nil {
+			checker.StoreErrs[name] = err
+			continue
+		}
+		entry := resolved[name]
+		if err := config.ValidateStorage(name, entry); err != nil {
+			checker.StoreErrs[name] = fmt.Errorf("remote storage configuration is invalid: %w", err)
+			continue
+		}
+		configuration.Storages[name] = entry
+	}
+
+	stores, storeErrs := buildDoctorStores(ctx, configuration.Storages)
+	checker.Stores = stores
+	for name, err := range storeErrs {
+		checker.StoreErrs[name] = err
+	}
 	checker.DBProbers = buildDoctorProbers(configuration)
 	return checker, nil
 }

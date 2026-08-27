@@ -310,6 +310,52 @@ app:
 	})
 }
 
+func TestDoctorRemoteStorageProviderUnavailable(t *testing.T) {
+	tempDir := t.TempDir()
+	sourceDir := filepath.Join(tempDir, "source")
+	require.NoError(t, os.MkdirAll(sourceDir, 0o700))
+
+	writeConfigTree(t, tempDir, fmt.Sprintf(`version: 2
+app:
+  state_database: %s
+  temporary_directory: %s
+  lock_directory: %s
+`, filepath.Join(tempDir, "data", "state.db"), filepath.Join(tempDir, "tmp"), filepath.Join(tempDir, "locks")),
+		`storages:
+  remote-x:
+    type: s3
+    credentials:
+      source: remote
+      url: BQCKUP_DOCTOR_URL
+`, fmt.Sprintf(`version: 2
+site:
+  name: test-site
+  enabled: true
+  sources:
+    files:
+      include: [%s]
+  destinations:
+    - storage: remote-x
+  policy:
+    minimum_interval: 24h
+    keep_last: 7
+`, sourceDir))
+
+	t.Setenv("BQCKUP_DOCTOR_URL", "") // empty → resolver fails without dialing
+
+	var stdout, stderr bytes.Buffer
+	root := NewRoot(buildinfo.Info{})
+	root.SetOut(&stdout)
+	root.SetErr(&stderr)
+	root.SetArgs([]string{"doctor", "--config-dir", tempDir})
+
+	err := root.Execute()
+	assert.Equal(t, 3, ExitCode(err))
+	assert.Contains(t, stdout.String(), "[✗] storage:remote-x: remote storage configuration is unavailable")
+	assert.NotContains(t, stdout.String(), "request failed")
+	assert.NotContains(t, stdout.String(), "http")
+}
+
 func writeFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
