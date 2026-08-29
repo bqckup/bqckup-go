@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/base64"
 	"fmt"
 	"html"
 	"net"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bqckup/bqckup-go/internal/backup"
 	"github.com/bqckup/bqckup-go/internal/config"
 )
 
@@ -108,7 +110,7 @@ func (s *SMTP) Send(ctx context.Context, payload Payload) error {
 		}
 	}
 
-	subject := fmt.Sprintf("[bqckup] %s: %s", payload.Event, payload.Site)
+	subject := headline(payload)
 	message := s.renderMessage(subject, payload)
 	if err := client.Mail(s.from); err != nil {
 		return fmt.Errorf("mail from: %w", err)
@@ -148,51 +150,134 @@ func (s *SMTP) credentials() (username, password string, err error) {
 	return username, password, nil
 }
 
+const logoContentID = "bqckup-logo"
+
+func base64MIME(data []byte) string {
+	encoded := base64.StdEncoding.EncodeToString(data)
+	var builder strings.Builder
+	for len(encoded) > 76 {
+		builder.WriteString(encoded[:76])
+		builder.WriteString("\r\n")
+		encoded = encoded[76:]
+	}
+	if len(encoded) > 0 {
+		builder.WriteString(encoded)
+		builder.WriteString("\r\n")
+	}
+	return builder.String()
+}
+
 func (s *SMTP) renderMessage(subject string, payload Payload) string {
+	boundary := fmt.Sprintf("bqckup_%d", time.Now().UnixNano())
 	var builder strings.Builder
 	fmt.Fprintf(&builder, "From: %s\r\n", s.from)
 	fmt.Fprintf(&builder, "To: %s\r\n", strings.Join(s.to, ", "))
 	fmt.Fprintf(&builder, "Subject: %s\r\n", subject)
 	builder.WriteString("MIME-Version: 1.0\r\n")
-	builder.WriteString("Content-Type: text/html; charset=UTF-8\r\n")
+	fmt.Fprintf(&builder, "Content-Type: multipart/related; boundary=\"%s\"\r\n", boundary)
 	builder.WriteString("\r\n")
-	builder.WriteString(s.renderHTML(subject, payload))
+
+	// HTML part
+	fmt.Fprintf(&builder, "--%s\r\n", boundary)
+	builder.WriteString("Content-Type: text/html; charset=UTF-8\r\n")
+	builder.WriteString("Content-Transfer-Encoding: 8bit\r\n")
+	builder.WriteString("\r\n")
+	builder.WriteString(s.renderHTML(subject, payload, "cid:"+logoContentID))
+	builder.WriteString("\r\n\r\n")
+
+	// Inline logo part
+	if len(logoPNG) > 0 {
+		fmt.Fprintf(&builder, "--%s\r\n", boundary)
+		builder.WriteString("Content-Type: image/png\r\n")
+		builder.WriteString("Content-Transfer-Encoding: base64\r\n")
+		fmt.Fprintf(&builder, "Content-ID: <%s>\r\n", logoContentID)
+		builder.WriteString("Content-Disposition: inline; filename=\"logo-bqckup.png\"\r\n")
+		builder.WriteString("\r\n")
+		builder.WriteString(base64MIME(logoPNG))
+		builder.WriteString("\r\n")
+	}
+
+	fmt.Fprintf(&builder, "--%s--\r\n", boundary)
 	return builder.String()
 }
 
-// renderHTML builds the minimal branded email body: a status-colored banner,
-// a field table, and the sanitized error message for failed/cancelled runs.
-// No remote assets, no endpoints, no server identity.
-func (s *SMTP) renderHTML(subject string, payload Payload) string {
+// renderHTML builds the branded email body: a dark navy header bar with the
+// Bqckup logo, a status color accent line, the headline title, description
+// paragraph, vertical table rows with row dividers, and on failure a What went
+// wrong row, Try this suggestion, and closing monitoring footer. No remote
+// assets and no endpoints.
+func (s *SMTP) renderHTML(subject string, payload Payload, logoSrc ...string) string {
+	src := "cid:" + logoContentID
+	if len(logoSrc) > 0 && logoSrc[0] != "" {
+		src = logoSrc[0]
+	}
+
+	lastSuccess := "No successful backup yet"
+	if payload.LastSuccessfulAt != "" {
+		if t, err := time.Parse(time.RFC3339, payload.LastSuccessfulAt); err == nil {
+			lastSuccess = lastSuccessfulLine(t)
+		} else {
+			lastSuccess = payload.LastSuccessfulAt
+		}
+	}
+
+	rows := []struct{ name, value string }{
+		{"Server", serverLine(payload.Hostname, payload.ServerIP)},
+		{"Last Successful Backup", lastSuccess},
+		{"Duration", durationHuman(payload.DurationSeconds)},
+	}
+
+	var label, message string
+	if payload.Status == string(backup.StatusFailed) || payload.Status == string(backup.StatusNoChange) {
+		label, message = failureBlock(payload)
+		rows = append(rows,
+			struct{ name, value string }{"Consecutive Failures", fmt.Sprintf("%d", payload.FailureStreak)},
+			struct{ name, value string }{"Problem faced", label},
+		)
+		if message != "" {
+			rows = append(rows, struct{ name, value string }{"What went wrong", message})
+		}
+	}
+
 	var body strings.Builder
 	fmt.Fprintf(&body, `<!DOCTYPE html>
 <html>
 <body style="margin:0;padding:0;background:#f6f8fa;font-family:sans-serif;">
-<div style="max-width:600px;margin:24px auto;background:#ffffff;border-top:4px solid #%06X;border-radius:4px;">
-<h2 style="margin:0;padding:16px 24px;font-size:18px;">%s</h2>
+<div style="max-width:600px;margin:24px auto;background:#ffffff;border-radius:6px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+<div style="background:#0c193e;padding:16px 24px;">
+<table style="border-collapse:collapse;">
+<tr>
+<td style="padding:0;vertical-align:middle;">
+<div style="width:34px;height:34px;background:#ffffff;border-radius:8px;padding:3px;box-sizing:border-box;">
+<img src="%s" width="28" height="28" style="display:block;border-radius:5px;" alt="Bqckup" />
+</div>
+</td>
+<td style="padding:0 0 0 12px;vertical-align:middle;font-size:18px;font-weight:700;color:#ffffff;font-family:sans-serif;">
+Bqckup
+</td>
+</tr>
+</table>
+</div>
+<div style="height:3px;background:#%06X;"></div>
+<h2 style="margin:0;padding:24px 24px 12px;font-size:22px;font-weight:700;color:#1f2328;line-height:1.3;">%s</h2>
+<p style="padding:0 24px 16px;margin:0;font-size:14px;color:#586069;line-height:1.5;">%s</p>
 <table style="width:100%%;border-collapse:collapse;font-size:14px;">
-`, statusColor(payload.Status), html.EscapeString(subject))
-	rows := []struct{ name, value string }{
-		{"Site", payload.Site},
-		{"Status", payload.Status},
-		{"Started", payload.StartedAt},
-		{"Finished", payload.FinishedAt},
-		{"Duration", fmt.Sprintf("%ds", payload.DurationSeconds)},
-		{"Artifacts", strconv.Itoa(payload.ArtifactCount)},
-		{"Size", formatBytes(payload.SizeBytes)},
-	}
+`, src, statusColor(payload.Status), html.EscapeString(subject), html.EscapeString(description(payload)))
+
 	for _, row := range rows {
-		fmt.Fprintf(&body, `<tr><td style="padding:8px 24px;color:#586069;">%s</td><td style="padding:8px 24px;">%s</td></tr>
-`, row.name, html.EscapeString(row.value))
-	}
-	if payload.ErrorMessage != "" {
-		fmt.Fprintf(&body, `<tr><td style="padding:8px 24px;color:#586069;">Error</td><td style="padding:8px 24px;"><strong>%s</strong>: %s</td></tr>
-`, html.EscapeString(payload.ErrorCategory), html.EscapeString(payload.ErrorMessage))
+		val := html.EscapeString(row.value)
+		val = strings.ReplaceAll(val, "\n", "<br>")
+		fmt.Fprintf(&body, `<tr><td style="padding:10px 24px;font-weight:600;color:#24292e;border-top:1px solid #e1e4e8;white-space:nowrap;width:38%%;">%s</td><td style="padding:10px 24px;color:#24292e;border-top:1px solid #e1e4e8;">%s</td></tr>
+`, html.EscapeString(row.name), val)
 	}
 	body.WriteString(`</table>
+`)
+
+	fmt.Fprintf(&body, `<p style="padding:16px 24px 24px;margin:0;border-top:1px solid #e1e4e8;font-size:12px;color:#586069;">%s</p>
 </div>
 </body>
 </html>
-`)
+`, html.EscapeString(monitoringFooter(time.Now())))
+
 	return body.String()
 }

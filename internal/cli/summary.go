@@ -81,7 +81,7 @@ func buildSummaries(cfg config.Config, runs []history.BackupRun, filter string) 
 			}
 			if runs[i].Status == history.StatusSuccess {
 				view.SuccessfulBackups++
-				view.TotalRecordedSize += summarizeArtifacts(runs[i].Artifacts).logicalSize
+				view.TotalRecordedSize += summarizePackages(runs[i].Packages).logicalSize
 			}
 		}
 		if latest != nil {
@@ -94,7 +94,7 @@ func buildSummaries(cfg config.Config, runs []history.BackupRun, filter string) 
 				view.LastBackupDurationMillis = &millis
 			}
 			if latest.Status == history.StatusSuccess {
-				size := summarizeArtifacts(latest.Artifacts).logicalSize
+				size := summarizePackages(latest.Packages).logicalSize
 				view.LastBackupSize = &size
 			}
 		}

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"time"
+
+	"github.com/bqckup/bqckup-go/internal/backup"
 )
 
 // discordPayload is the Discord webhook JSON body: one embed with a static
@@ -17,15 +19,21 @@ type discordPayload struct {
 }
 
 type discordEmbed struct {
-	Title  string         `json:"title"`
-	Color  int            `json:"color"`
-	Fields []discordField `json:"fields"`
+	Title       string         `json:"title"`
+	Description string         `json:"description,omitempty"`
+	Color       int            `json:"color"`
+	Fields      []discordField `json:"fields,omitempty"`
+	Footer      *discordFooter `json:"footer,omitempty"`
 }
 
 type discordField struct {
 	Name   string `json:"name"`
 	Value  string `json:"value"`
-	Inline bool   `json:"inline"`
+	Inline bool   `json:"inline,omitempty"`
+}
+
+type discordFooter struct {
+	Text string `json:"text"`
 }
 
 // Discord posts one embed to a Discord webhook URL taken from an environment
@@ -53,26 +61,48 @@ func (d *Discord) Send(ctx context.Context, payload Payload) error {
 	if !ok || url == "" {
 		return fmt.Errorf("environment variable %q is not set", d.webhookURLEnv)
 	}
+
+	lastSuccess := "No successful backup yet"
+	if payload.LastSuccessfulAt != "" {
+		if t, err := time.Parse(time.RFC3339, payload.LastSuccessfulAt); err == nil {
+			lastSuccess = lastSuccessfulLine(t)
+		} else {
+			lastSuccess = payload.LastSuccessfulAt
+		}
+	}
+
+	fields := []discordField{
+		{Name: "Server", Value: serverLine(payload.Hostname, payload.ServerIP), Inline: true},
+		{Name: "Last Successful Backup", Value: lastSuccess, Inline: true},
+		{Name: "Duration", Value: durationHuman(payload.DurationSeconds), Inline: true},
+	}
+
+	if payload.Status == string(backup.StatusFailed) || payload.Status == string(backup.StatusNoChange) {
+		label, message := failureBlock(payload)
+		fields = append(fields,
+			discordField{Name: "Consecutive Failures", Value: fmt.Sprintf("%d", payload.FailureStreak), Inline: true},
+			discordField{Name: "Problem faced", Value: label, Inline: true},
+			discordField{Name: "\u200b", Value: "\u200b", Inline: true},
+		)
+		if message != "" {
+			fields = append(fields, discordField{Name: "What went wrong", Value: message})
+		}
+		fields = append(fields,
+			discordField{Name: "Try this", Value: tryThis(payload)},
+		)
+	}
+
 	body := discordPayload{
 		Username: "Bqckup",
 		Embeds: []discordEmbed{{
-			Title: fmt.Sprintf("[bqckup] %s: %s", payload.Event, payload.Site),
-			Color: statusColor(payload.Status),
-			Fields: []discordField{
-				{Name: "site", Value: payload.Site, Inline: true},
-				{Name: "status", Value: payload.Status, Inline: true},
-				{Name: "duration", Value: fmt.Sprintf("%ds", payload.DurationSeconds), Inline: true},
-				{Name: "artifacts", Value: fmt.Sprintf("%d", payload.ArtifactCount), Inline: true},
-				{Name: "size", Value: formatBytes(payload.SizeBytes), Inline: true},
-			},
+			Title:       headline(payload),
+			Description: description(payload),
+			Color:       statusColor(payload.Status),
+			Fields:      fields,
+			Footer:      &discordFooter{Text: monitoringFooter(time.Now())},
 		}},
 	}
-	if payload.ErrorCategory != "" {
-		body.Embeds[0].Fields = append(body.Embeds[0].Fields,
-			discordField{Name: "error_category", Value: payload.ErrorCategory, Inline: true},
-			discordField{Name: "error_message", Value: payload.ErrorMessage},
-		)
-	}
+
 	raw, err := json.Marshal(body)
 	if err != nil {
 		return fmt.Errorf("encode embed: %w", err)

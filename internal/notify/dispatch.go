@@ -24,14 +24,19 @@ type Channel interface {
 type Dispatcher struct {
 	channels map[string]Channel
 	routes   []config.Route
+	hostname string
+	serverIP string
 }
 
 func NewDispatcher(channels map[string]Channel, routes []config.Route) *Dispatcher {
-	return &Dispatcher{channels: channels, routes: routes}
+	hostname, serverIP := serverIdentity()
+	return &Dispatcher{channels: channels, routes: routes, hostname: hostname, serverIP: serverIP}
 }
 
 func (d *Dispatcher) Notify(ctx context.Context, input backup.NotifyInput) error {
 	payload := NewPayload(input)
+	payload.Hostname = d.hostname
+	payload.ServerIP = d.serverIP
 	var errs []error
 	for _, channel := range d.channelsFor(input.Event) {
 		if err := channel.Send(ctx, payload); err != nil {

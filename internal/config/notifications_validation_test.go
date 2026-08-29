@@ -173,7 +173,14 @@ func TestValidateNotificationsRejectsInvalidForms(t *testing.T) {
 			mutate: func(n *Notifications) {
 				n.Routes[0].Events = []string{"backup_started"}
 			},
-			wantErr: "must be one of backup_succeeded, backup_failed, or backup_cancelled",
+			wantErr: "must be one of backup_failed, backup_cancelled, or backup_no_change",
+		},
+		{
+			name: "route with backup_succeeded rejected",
+			mutate: func(n *Notifications) {
+				n.Routes[0].Events = []string{"backup_succeeded"}
+			},
+			wantErr: "must be one of backup_failed, backup_cancelled, or backup_no_change",
 		},
 	}
 	for _, test := range tests {
@@ -193,6 +200,13 @@ func TestValidateNotificationsRejectsInvalidForms(t *testing.T) {
 func TestValidateNotificationsAcceptsValidForms(t *testing.T) {
 	cfg := validConfig(t)
 	cfg.Notifications = validNotifications()
+	require.NoError(t, cfg.Validate())
+
+	// Route with backup_no_change is valid.
+	cfg.Notifications.Routes = append(cfg.Notifications.Routes, Route{
+		Events:   []string{EventBackupNoChange},
+		Channels: []string{"email"},
+	})
 	require.NoError(t, cfg.Validate())
 
 	// Unauthenticated SMTP is allowed.
@@ -224,8 +238,7 @@ func validNotifications() Notifications {
 			"discord": {Type: "discord", WebhookURLEnv: "BQCKUP_DISCORD_WEBHOOK_URL"},
 		},
 		Routes: []Route{
-			{Events: []string{EventBackupFailed, EventBackupCancelled}, Channels: []string{"email", "discord"}},
-			{Events: []string{EventBackupSucceeded}, Channels: []string{"webhook"}},
+			{Events: []string{EventBackupFailed, EventBackupCancelled}, Channels: []string{"email", "discord", "webhook"}},
 		},
 	}
 }
@@ -249,9 +262,7 @@ const validNotificationsYAML = `notifications:
       webhook_url_env: BQCKUP_DISCORD_WEBHOOK_URL
   routes:
     - events: [backup_failed, backup_cancelled]
-      channels: [email, discord]
-    - events: [backup_succeeded]
-      channels: [webhook]
+      channels: [email, discord, webhook]
 `
 
 func TestLoadDecodesNotificationsSection(t *testing.T) {
@@ -265,7 +276,7 @@ func TestLoadDecodesNotificationsSection(t *testing.T) {
 	assert.Equal(t, 587, cfg.Notifications.Channels["email"].Port)
 	assert.Equal(t, []string{"ops@example.com"}, cfg.Notifications.Channels["email"].To)
 	assert.Equal(t, "BQCKUP_WEBHOOK_URL", cfg.Notifications.Channels["webhook"].URLEnv)
-	require.Len(t, cfg.Notifications.Routes, 2)
+	require.Len(t, cfg.Notifications.Routes, 1)
 	assert.Equal(t, []string{EventBackupFailed, EventBackupCancelled}, cfg.Notifications.Routes[0].Events)
 }
 

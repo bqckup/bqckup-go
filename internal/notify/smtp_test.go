@@ -221,11 +221,18 @@ func smtpChannel(t *testing.T, channel config.Channel, lookupEnv func(string) (s
 }
 
 func smtpPayload() Payload {
-	input := notifyInput(config.EventBackupSucceeded)
-	input.Status = backup.StatusSuccess
-	input.StartedAt = time.Date(2026, 8, 23, 1, 46, 56, 0, time.UTC)
-	input.FinishedAt = time.Date(2026, 8, 23, 1, 48, 38, 0, time.UTC)
-	input.Artifacts = []history.Artifact{{SourceKind: "files", SourceName: "files", Size: 2048}}
+	input := backup.NotifyInput{
+		Event:            config.EventBackupFailed,
+		SiteName:         "example.org",
+		Status:           backup.StatusFailed,
+		StartedAt:        time.Date(2026, 8, 23, 1, 46, 56, 0, time.UTC),
+		FinishedAt:       time.Date(2026, 8, 23, 1, 48, 38, 0, time.UTC),
+		LastSuccessfulAt: time.Date(2026, 8, 22, 1, 0, 0, 0, time.UTC),
+		FailureStreak:    2,
+		ErrorCategory:    "execution",
+		ErrorMessage:     "could not export database",
+		Packages:         []history.Package{{SourceKind: "files", SourceName: "files", Size: 2048}},
+	}
 	return NewPayload(input)
 }
 
@@ -236,15 +243,68 @@ func TestSMTPDeliversPlainMessageWithoutAuth(t *testing.T) {
 		From: "bqckup@example.com", To: []string{"ops@example.com"},
 	}, func(string) (string, bool) { return "", false }, nil)
 
-	require.NoError(t, channel.Send(context.Background(), smtpPayload()))
+	payload := smtpPayload()
+	payload.Hostname = "web-01"
+	payload.ServerIP = "203.0.113.7"
+	require.NoError(t, channel.Send(context.Background(), payload))
 
 	recipients, message, authSeen := server.snapshot()
 	assert.Equal(t, []string{"ops@example.com"}, recipients)
 	assert.False(t, authSeen)
-	assert.Contains(t, message, "Subject: [bqckup] backup_succeeded: example.org")
+	assert.Contains(t, message, "Subject: Backup failed for example.org")
 	assert.Contains(t, message, "From: bqckup@example.com")
-	assert.Contains(t, message, "example.org")
-	assert.Contains(t, message, "Artifacts")
+	assert.Contains(t, message, "Backup failed for example.org")
+	assert.Contains(t, message, ">Server</td>")
+	assert.Contains(t, message, "border-top:1px solid #e1e4e8;")
+	assert.Contains(t, message, "web-01 (203.0.113.7)")
+	assert.Contains(t, message, ">Last Successful Backup</td>")
+	assert.Contains(t, message, ">Duration</td>")
+	assert.Contains(t, message, ">Consecutive Failures</td>")
+	assert.Contains(t, message, ">2</td>")
+	assert.Contains(t, message, ">Problem faced</td>")
+	assert.Contains(t, message, ">Something went wrong</td>")
+	assert.Contains(t, message, ">What went wrong</td>")
+	assert.Contains(t, message, ">could not export database</td>")
+	assert.NotContains(t, message, ">Try this</td>")
+	assert.Contains(t, message, "Bqckup Backup Monitoring · ")
+}
+
+func TestSMTPRendersNoChange(t *testing.T) {
+	server := newFakeSMTPServer(t, false, false)
+	channel := smtpChannel(t, config.Channel{
+		Type: "smtp", Host: "127.0.0.1", Port: portOf(t, server.addr),
+		From: "bqckup@example.com", To: []string{"ops@example.com"},
+	}, func(string) (string, bool) { return "", false }, nil)
+
+	anchor := time.Date(2026, 8, 25, 6, 12, 0, 0, time.UTC)
+	input := backup.NotifyInput{
+		Event:              config.EventBackupNoChange,
+		SiteName:           "example.org",
+		Status:             backup.StatusNoChange,
+		StartedAt:          time.Date(2026, 8, 26, 1, 0, 0, 0, time.UTC),
+		FinishedAt:         time.Date(2026, 8, 26, 1, 1, 0, 0, time.UTC),
+		LastSuccessfulAt:   anchor,
+		FailureStreak:      0,
+		ErrorCategory:      "no_change",
+		ErrorMessage:       "1 item is unchanged from the previous run.",
+		HasDatabaseSources: true,
+		Destinations:       []backup.NotifyDestination{{Name: "s3-primary", Bucket: "my-backups"}},
+	}
+	payload := NewPayload(input)
+	payload.Hostname = "web-01"
+	payload.ServerIP = "203.0.113.7"
+	require.NoError(t, channel.Send(context.Background(), payload))
+
+	_, message, _ := server.snapshot()
+	assert.Contains(t, message, "Subject: No changes detected for example.org")
+	assert.Contains(t, message, "background:#F1C40F;")
+	assert.Contains(t, message, "The new backup is identical to the last one")
+	assert.Contains(t, message, "Likely an idle app")
+	assert.Contains(t, message, ">Problem faced</td>")
+	assert.Contains(t, message, ">No changes detected</td>")
+	assert.Contains(t, message, ">What went wrong</td>")
+	assert.Contains(t, message, ">1 item is unchanged from the previous run.</td>")
+	assert.NotContains(t, message, ">Try this</td>")
 }
 
 func TestSMTPUsesSTARTTLSAndAuthWhenConfigured(t *testing.T) {
@@ -268,7 +328,7 @@ func TestSMTPUsesSTARTTLSAndAuthWhenConfigured(t *testing.T) {
 	recipients, message, authSeen := server.snapshot()
 	assert.Equal(t, []string{"ops@example.com"}, recipients)
 	assert.True(t, authSeen, "AUTH PLAIN must run over the STARTTLS session")
-	assert.Contains(t, message, "Subject: [bqckup] backup_succeeded: example.org")
+	assert.Contains(t, message, "Subject: Backup failed for example.org")
 	assert.NotContains(t, message, "hunter2-secret")
 	assert.NotContains(t, message, "backup-sender")
 }
@@ -313,7 +373,7 @@ func TestSMTPImplicitTLSOnPort465(t *testing.T) {
 	recipients, message, authSeen := server.snapshot()
 	assert.Equal(t, []string{"ops@example.com"}, recipients)
 	assert.True(t, authSeen)
-	assert.Contains(t, message, "backup_succeeded")
+	assert.Contains(t, message, "Backup failed")
 }
 
 func TestSMTPImplicitTLSFlagSetForPort465(t *testing.T) {
@@ -334,6 +394,64 @@ func TestSMTPMissingEnvIsAnError(t *testing.T) {
 	err := channel.Send(context.Background(), smtpPayload())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "BQCKUP_SMTP_USERNAME")
+}
+
+func TestSMTPRendersCancelledSubset(t *testing.T) {
+	server := newFakeSMTPServer(t, false, false)
+	channel := smtpChannel(t, config.Channel{
+		Type: "smtp", Host: "127.0.0.1", Port: portOf(t, server.addr),
+		From: "bqckup@example.com", To: []string{"ops@example.com"},
+	}, func(string) (string, bool) { return "", false }, nil)
+
+	input := backup.NotifyInput{
+		Event:         config.EventBackupCancelled,
+		SiteName:      "example.org",
+		Status:        backup.StatusCancelled,
+		StartedAt:     time.Date(2026, 8, 23, 1, 46, 56, 0, time.UTC),
+		FinishedAt:    time.Date(2026, 8, 23, 1, 48, 38, 0, time.UTC),
+		ErrorCategory: "cancellation",
+		ErrorMessage:  "backup was cancelled",
+	}
+	require.NoError(t, channel.Send(context.Background(), NewPayload(input)))
+
+	_, message, _ := server.snapshot()
+	assert.Contains(t, message, "Subject: Backup cancelled for example.org")
+	assert.Contains(t, message, "The backup was stopped before it finished.")
+	// Cancelled has row 1 only (3 rows)
+	assert.Contains(t, message, ">Server</td>")
+	assert.Contains(t, message, ">Last Successful Backup</td>")
+	assert.Contains(t, message, ">Duration</td>")
+	assert.NotContains(t, message, ">Consecutive Failures</td>")
+	assert.NotContains(t, message, ">Problem faced</td>")
+	assert.NotContains(t, message, ">Error Category</td>")
+	assert.NotContains(t, message, ">What went wrong</td>")
+	assert.NotContains(t, message, ">Try this</td>")
+	assert.Contains(t, message, "Bqckup Backup Monitoring · ")
+}
+
+func TestSMTPOmitsWhatWentWrongWhenEmpty(t *testing.T) {
+	server := newFakeSMTPServer(t, false, false)
+	channel := smtpChannel(t, config.Channel{
+		Type: "smtp", Host: "127.0.0.1", Port: portOf(t, server.addr),
+		From: "bqckup@example.com", To: []string{"ops@example.com"},
+	}, func(string) (string, bool) { return "", false }, nil)
+
+	input := backup.NotifyInput{
+		Event:         config.EventBackupFailed,
+		SiteName:      "example.org",
+		Status:        backup.StatusFailed,
+		StartedAt:     time.Date(2026, 8, 23, 1, 46, 56, 0, time.UTC),
+		FinishedAt:    time.Date(2026, 8, 23, 1, 48, 38, 0, time.UTC),
+		ErrorCategory: "config",
+	}
+	require.NoError(t, channel.Send(context.Background(), NewPayload(input)))
+
+	_, message, _ := server.snapshot()
+	assert.Contains(t, message, "Subject: Backup failed for example.org")
+	assert.Contains(t, message, ">Problem faced</td>")
+	assert.Contains(t, message, ">A setting needs attention</td>")
+	assert.NotContains(t, message, ">What went wrong</td>")
+	assert.NotContains(t, message, ">Try this</td>")
 }
 
 func portOf(t *testing.T, address string) int {

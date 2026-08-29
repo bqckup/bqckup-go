@@ -163,8 +163,8 @@ func (f *fakeProbeStore) Probe(context.Context) error {
 	f.probes++
 	return f.probeErr
 }
-func (f *fakeProbeStore) Put(context.Context, storage.Artifact, string) (storage.StoredArtifact, error) {
-	return storage.StoredArtifact{}, errors.New("unused")
+func (f *fakeProbeStore) Put(context.Context, storage.Package, string) (storage.StoredPackage, error) {
+	return storage.StoredPackage{}, errors.New("unused")
 }
 func (f *fakeProbeStore) Delete(context.Context, string) error { return errors.New("unused") }
 func (f *fakeProbeStore) ListBackupSets(context.Context, string) ([]storage.BackupSet, error) {

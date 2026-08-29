@@ -21,7 +21,7 @@ func TestWriteStorageTextFullMode(t *testing.T) {
 		Mode:        "full",
 		Destination: "s3-primary",
 		Site:        "site-a",
-		Artifacts: []backup.ArtifactRow{
+		Packages: []backup.PackageRow{
 			{Destination: "s3-primary", Key: "bqckup/site-a/2026-11-10T03-00-00.000000000Z/files.tar.gz", Size: 2254857830, CreatedAt: created},
 			{Destination: "s3-primary", Key: "bqckup/site-a/2026-11-10T03-00-00.000000000Z/databases/db.sql.gz", Size: 84 * 1024 * 1024, CreatedAt: created},
 		},
@@ -62,7 +62,7 @@ func TestWriteStorageTextEmptyStates(t *testing.T) {
 	full := backup.Listing{Mode: "full", Destination: "s3-primary", Site: "site-a"}
 	var fullOutput bytes.Buffer
 	require.NoError(t, writeStorageText(&fullOutput, full))
-	assert.Equal(t, "No archive artifacts found for site \"site-a\" on \"s3-primary\".\n", fullOutput.String())
+	assert.Equal(t, "No packages found for site \"site-a\" on \"s3-primary\".\n", fullOutput.String())
 
 	incremental := backup.Listing{Mode: "incremental", Destination: "s3-primary", Site: "site-b"}
 	var incrementalOutput bytes.Buffer
@@ -75,7 +75,7 @@ func TestWriteStorageJSONSchemas(t *testing.T) {
 	full := backup.Listing{
 		Mode:        "full",
 		Destination: "s3-primary",
-		Artifacts: []backup.ArtifactRow{
+		Packages: []backup.PackageRow{
 			{Destination: "s3-primary", Key: "bqckup/site-a/2026-11-10T03-00-00.000000000Z/files.tar.gz", Size: 2254857830, CreatedAt: created},
 		},
 	}

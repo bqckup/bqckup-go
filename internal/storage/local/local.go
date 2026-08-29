@@ -40,7 +40,7 @@ func New(root string) (*Store, error) {
 	return &Store{root: absolute}, nil
 }
 
-func (s *Store) Put(ctx context.Context, artifact storage.Artifact, key string) (stored storage.StoredArtifact, err error) {
+func (s *Store) Put(ctx context.Context, pkg storage.Package, key string) (stored storage.StoredPackage, err error) {
 	if err := ctx.Err(); err != nil {
 		return stored, err
 	}
@@ -48,11 +48,11 @@ func (s *Store) Put(ctx context.Context, artifact storage.Artifact, key string) 
 	if err != nil {
 		return stored, err
 	}
-	if artifact.Size < 0 || len(artifact.SHA256) != sha256.Size*2 {
-		return stored, errors.New("artifact size and SHA-256 are required")
+	if pkg.Size < 0 || len(pkg.SHA256) != sha256.Size*2 {
+		return stored, errors.New("package size and SHA-256 are required")
 	}
-	if _, err := hex.DecodeString(artifact.SHA256); err != nil {
-		return stored, fmt.Errorf("artifact SHA-256 is invalid: %w", err)
+	if _, err := hex.DecodeString(pkg.SHA256); err != nil {
+		return stored, fmt.Errorf("package SHA-256 is invalid: %w", err)
 	}
 	if _, err := os.Lstat(finalPath); err == nil {
 		return stored, fmt.Errorf("storage object %q already exists", key)
@@ -77,9 +77,9 @@ func (s *Store) Put(ctx context.Context, artifact storage.Artifact, key string) 
 		return stored, fmt.Errorf("secure storage staging file: %w", err)
 	}
 
-	source, err := os.Open(artifact.Path)
+	source, err := os.Open(pkg.Path)
 	if err != nil {
-		return stored, fmt.Errorf("open artifact: %w", err)
+		return stored, fmt.Errorf("open package: %w", err)
 	}
 	defer source.Close()
 	hash := sha256.New()
@@ -88,11 +88,11 @@ func (s *Store) Put(ctx context.Context, artifact storage.Artifact, key string) 
 		return stored, err
 	}
 	if err := source.Close(); err != nil {
-		return stored, fmt.Errorf("close artifact: %w", err)
+		return stored, fmt.Errorf("close package: %w", err)
 	}
 	actualSHA := hex.EncodeToString(hash.Sum(nil))
-	if size != artifact.Size || !strings.EqualFold(actualSHA, artifact.SHA256) {
-		return stored, fmt.Errorf("artifact verification failed: expected size %d SHA-256 %s", artifact.Size, artifact.SHA256)
+	if size != pkg.Size || !strings.EqualFold(actualSHA, pkg.SHA256) {
+		return stored, fmt.Errorf("package verification failed: expected size %d SHA-256 %s", pkg.Size, pkg.SHA256)
 	}
 	if err := staging.Sync(); err != nil {
 		return stored, fmt.Errorf("sync storage staging file: %w", err)
@@ -112,7 +112,7 @@ func (s *Store) Put(ctx context.Context, artifact storage.Artifact, key string) 
 	if err := syncDirectory(parent); err != nil {
 		return stored, err
 	}
-	return storage.StoredArtifact{Key: key, Size: size, SHA256: actualSHA}, nil
+	return storage.StoredPackage{Key: key, Size: size, SHA256: actualSHA}, nil
 }
 
 func (s *Store) Delete(ctx context.Context, key string) error {

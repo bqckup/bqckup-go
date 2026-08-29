@@ -232,7 +232,7 @@ func (a *App) RunEnabledBackups(ctx context.Context, force bool) ([]backup.RunRe
 }
 
 func (a *App) LastSuccessful(ctx context.Context, siteName string) (*history.BackupRun, error) {
-	return a.repository.LastSuccessful(ctx, siteName)
+	return a.repository.LastSuccessful(ctx, siteName, time.Time{})
 }
 
 // UnlockRepository removes stale repository locks for a site.
@@ -351,7 +351,7 @@ func parseSiteFromKey(key string) (string, error) {
 	return parts[1], nil
 }
 
-// Link creates a temporary download link for one artifact of a remote
+// Link creates a temporary download link for one package of a remote
 // destination. The site is parsed from the key; it must exist, be enabled,
 // use full mode, and send backups to the destination. Nothing is written to
 // history and the remote only receives one existence check.

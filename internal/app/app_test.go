@@ -285,7 +285,7 @@ func TestOpenWiresAWorkingLocalBackupApplication(t *testing.T) {
 	runs, err := application.ListRuns(context.Background(), "example", 10)
 	require.NoError(t, err)
 	require.Len(t, runs, 1)
-	assert.Len(t, runs[0].Artifacts, 1)
+	assert.Len(t, runs[0].Packages, 1)
 }
 
 func TestBuildNotifierConstructsChannelsFromConfiguration(t *testing.T) {
@@ -297,7 +297,7 @@ func TestBuildNotifierConstructsChannelsFromConfiguration(t *testing.T) {
 			"discord": {Type: "discord", WebhookURLEnv: "BQCKUP_DISCORD_WEBHOOK_URL"},
 		},
 		Routes: []config.Route{
-			{Events: []string{config.EventBackupSucceeded}, Channels: []string{"webhook"}},
+			{Events: []string{config.EventBackupFailed}, Channels: []string{"webhook"}},
 		},
 	}
 
@@ -310,7 +310,7 @@ func TestBuildNotifierReturnsNilWithoutNotifications(t *testing.T) {
 	assert.Nil(t, buildNotifier(config.Notifications{}, os.LookupEnv))
 }
 
-func TestOpenDeliversBackupSucceededThroughConfiguredWebhook(t *testing.T) {
+func TestOpenDeliversBackupFailedThroughConfiguredWebhook(t *testing.T) {
 	var received map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&received))
@@ -329,21 +329,47 @@ func TestOpenDeliversBackupSucceededThroughConfiguredWebhook(t *testing.T) {
       type: webhook
       url_env: BQCKUP_WEBHOOK_URL
   routes:
-    - events: [backup_succeeded]
+    - events: [backup_failed]
       channels: [webhook]
 `)...), 0o600))
+
+	// Add an unreachable database to trigger a backup execution failure.
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, "sites", "example.yaml"), fmt.Appendf(nil, `version: 2
+site:
+  name: example
+  enabled: true
+  sources:
+    files:
+      include: [%s]
+      exclude: []
+      follow_symlinks: false
+    databases:
+      - name: appdb
+        enabled: true
+        engine: mysql
+        host: 127.0.0.1
+        port: 1
+        database: appdb
+        username: user
+        password: pass
+  destinations:
+    - storage: local-primary
+  policy:
+    minimum_interval: 1h
+    keep_last: 3
+`, filepath.Join(filepath.Dir(configDir), "source")), 0o600))
 
 	application, err := Open(context.Background(), configDir)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, application.Close()) })
 
 	result, err := application.RunBackup(context.Background(), "example", true)
-	require.NoError(t, err)
-	assert.Equal(t, "success", string(result.Status))
+	require.Error(t, err)
+	assert.Equal(t, "failed", string(result.Status))
 	require.NotNil(t, received)
-	assert.Equal(t, "backup_succeeded", received["event"])
+	assert.Equal(t, "backup_failed", received["event"])
 	assert.Equal(t, "example", received["site"])
-	assert.EqualValues(t, 1, received["artifact_count"])
+	assert.Equal(t, "execution", received["error_category"])
 }
 
 func writeApplicationConfig(t *testing.T) (string, string) {

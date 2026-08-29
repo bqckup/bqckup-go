@@ -25,7 +25,13 @@ func (c *recordingChannel) Send(_ context.Context, payload Payload) error {
 }
 
 func notifyInput(event string) backup.NotifyInput {
-	return backup.NotifyInput{Event: event, SiteName: "example.org", Status: backup.StatusSuccess}
+	return backup.NotifyInput{
+		Event:         event,
+		SiteName:      "example.org",
+		Status:        backup.StatusFailed,
+		ErrorCategory: "execution",
+		ErrorMessage:  "something went wrong",
+	}
 }
 
 func TestDispatcherFansOutToEveryMatchingChannel(t *testing.T) {
@@ -35,8 +41,8 @@ func TestDispatcherFansOutToEveryMatchingChannel(t *testing.T) {
 	dispatcher := NewDispatcher(map[string]Channel{
 		"webhook": webhook, "email": email, "discord": discord,
 	}, []config.Route{
-		{Events: []string{config.EventBackupFailed, config.EventBackupCancelled}, Channels: []string{"email", "discord"}},
-		{Events: []string{config.EventBackupSucceeded}, Channels: []string{"webhook"}},
+		{Events: []string{config.EventBackupFailed}, Channels: []string{"email", "discord"}},
+		{Events: []string{config.EventBackupCancelled}, Channels: []string{"webhook"}},
 	})
 
 	require.NoError(t, dispatcher.Notify(context.Background(), notifyInput(config.EventBackupFailed)))
@@ -44,8 +50,13 @@ func TestDispatcherFansOutToEveryMatchingChannel(t *testing.T) {
 	require.Len(t, discord.payloads, 1)
 	assert.Empty(t, webhook.payloads)
 	assert.Equal(t, EventBackupFailed, email.payloads[0].Event)
+	assert.NotEmpty(t, email.payloads[0].Hostname, "payloads must carry the machine hostname")
 
-	require.NoError(t, dispatcher.Notify(context.Background(), notifyInput(config.EventBackupSucceeded)))
+	cancelledInput := notifyInput(config.EventBackupCancelled)
+	cancelledInput.Status = backup.StatusCancelled
+	cancelledInput.ErrorCategory = "cancellation"
+	cancelledInput.ErrorMessage = "backup was cancelled"
+	require.NoError(t, dispatcher.Notify(context.Background(), cancelledInput))
 	require.Len(t, webhook.payloads, 1)
 	assert.Equal(t, "example.org", webhook.payloads[0].Site)
 }
@@ -56,7 +67,9 @@ func TestDispatcherUnmatchedEventSendsNothing(t *testing.T) {
 		{Events: []string{config.EventBackupFailed}, Channels: []string{"email"}},
 	})
 
-	require.NoError(t, dispatcher.Notify(context.Background(), notifyInput(config.EventBackupSucceeded)))
+	unmatchedInput := notifyInput(config.EventBackupCancelled)
+	unmatchedInput.Status = backup.StatusCancelled
+	require.NoError(t, dispatcher.Notify(context.Background(), unmatchedInput))
 	assert.Empty(t, email.payloads)
 }
 
@@ -94,5 +107,5 @@ func TestDispatcherSkipsUnknownChannelDefensively(t *testing.T) {
 
 func TestDispatcherWithoutChannelsSendsNothing(t *testing.T) {
 	dispatcher := NewDispatcher(nil, nil)
-	require.NoError(t, dispatcher.Notify(context.Background(), notifyInput(config.EventBackupSucceeded)))
+	require.NoError(t, dispatcher.Notify(context.Background(), notifyInput(config.EventBackupFailed)))
 }

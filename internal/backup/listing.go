@@ -19,7 +19,7 @@ import (
 // is exactly the "local destinations are not listed" error.
 type RemoteLister interface {
 	ListBackupSets(ctx context.Context, sitePrefix string) ([]storage.BackupSet, error)
-	ListArtifacts(ctx context.Context, setPrefix string) ([]storage.RemoteArtifact, error)
+	ListPackages(ctx context.Context, setPrefix string) ([]storage.RemotePackage, error)
 }
 
 // SnapshotLister lists snapshots through the incremental engine.
@@ -27,8 +27,8 @@ type SnapshotLister interface {
 	ListSnapshots(ctx context.Context, repo restic.RepoConfig) ([]restic.Snapshot, error)
 }
 
-// ArtifactRow is one stored object in a full-mode listing.
-type ArtifactRow struct {
+// PackageRow is one stored object in a full-mode listing.
+type PackageRow struct {
 	Destination string
 	Key         string
 	Size        int64
@@ -49,7 +49,7 @@ type Listing struct {
 	Mode        string
 	Site        string
 	Destination string
-	Artifacts   []ArtifactRow
+	Packages    []PackageRow
 	Snapshots   []SnapshotRow
 }
 
@@ -68,7 +68,7 @@ func (l *Lister) lookupEnv(key string) (string, bool) {
 	return os.LookupEnv(key)
 }
 
-// List branches on the site's backup mode: full lists archive artifacts
+// List branches on the site's backup mode: full lists stored packages
 // under every UTC backup set, incremental lists snapshots through the
 // engine. Local destinations fail as config errors: this command exists
 // for remote destinations, local-only users have history.
@@ -89,7 +89,7 @@ func (l *Lister) List(ctx context.Context, destination string, site config.Site,
 	}
 	switch site.BackupMode {
 	case "full":
-		return l.listArtifacts(ctx, destination, site, remote)
+		return l.listPackages(ctx, destination, site, remote)
 	case "incremental":
 		return l.listSnapshots(ctx, destination, site, storageConfig)
 	default:
@@ -114,7 +114,7 @@ func (l *Lister) ListSiteSnapshots(ctx context.Context, destination string, site
 	return l.listSnapshots(ctx, destination, site, storageConfig)
 }
 
-func (l *Lister) listArtifacts(ctx context.Context, destination string, site config.Site, remote RemoteLister) (Listing, error) {
+func (l *Lister) listPackages(ctx context.Context, destination string, site config.Site, remote RemoteLister) (Listing, error) {
 	sets, err := remote.ListBackupSets(ctx, path.Join("bqckup", site.Name))
 	if err != nil {
 		return Listing{}, apperror.Wrap(apperror.CategoryStorage, "could not list remote backup sets", err)
@@ -122,16 +122,16 @@ func (l *Lister) listArtifacts(ctx context.Context, destination string, site con
 	sort.Slice(sets, func(i, j int) bool { return sets[i].CreatedAt.After(sets[j].CreatedAt) })
 	listing := Listing{Mode: "full", Site: site.Name, Destination: destination}
 	for _, set := range sets {
-		artifacts, err := remote.ListArtifacts(ctx, set.Key)
+		packages, err := remote.ListPackages(ctx, set.Key)
 		if err != nil {
-			return Listing{}, apperror.Wrap(apperror.CategoryStorage, "could not list remote backup artifacts", err)
+			return Listing{}, apperror.Wrap(apperror.CategoryStorage, "could not list remote backup packages", err)
 		}
-		for _, artifact := range artifacts {
-			listing.Artifacts = append(listing.Artifacts, ArtifactRow{
+		for _, pkg := range packages {
+			listing.Packages = append(listing.Packages, PackageRow{
 				Destination: destination,
-				Key:         artifact.Key,
-				Size:        artifact.Size,
-				CreatedAt:   artifact.CreatedAt,
+				Key:         pkg.Key,
+				Size:        pkg.Size,
+				CreatedAt:   pkg.CreatedAt,
 			})
 		}
 	}

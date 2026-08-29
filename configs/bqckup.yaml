@@ -25,7 +25,5 @@ app:
 #       type: discord
 #       webhook_url_env: BQCKUP_DISCORD_WEBHOOK_URL
 #   routes:
-#     - events: [backup_failed, backup_cancelled]
-#       channels: [email, discord]
-#     - events: [backup_succeeded]
-#       channels: [webhook]
+#     - events: [backup_failed, backup_cancelled, backup_no_change]
+#       channels: [email, discord, webhook]

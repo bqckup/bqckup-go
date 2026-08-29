@@ -40,22 +40,22 @@ func (e *ProcessExporter) Preflight() error {
 	return nil
 }
 
-func (e *ProcessExporter) Export(ctx context.Context, source config.DatabaseSource, destination string) (artifact backup.Artifact, err error) {
+func (e *ProcessExporter) Export(ctx context.Context, source config.DatabaseSource, destination string) (backup.Package, error) {
 	if err := ctx.Err(); err != nil {
-		return backup.Artifact{}, err
+		return backup.Package{}, err
 	}
 	if source.Engine != e.engine {
-		return backup.Artifact{}, errors.New("database exporter does not match source engine")
+		return backup.Package{}, errors.New("database exporter does not match source engine")
 	}
 	if err := e.Preflight(); err != nil {
-		return backup.Artifact{}, err
+		return backup.Package{}, err
 	}
 	if err := os.MkdirAll(filepath.Dir(destination), 0o700); err != nil {
-		return backup.Artifact{}, apperror.Hide("could not prepare database export", err)
+		return backup.Package{}, apperror.Hide("could not prepare database export", err)
 	}
 	output, err := os.OpenFile(destination, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
-		return backup.Artifact{}, apperror.Hide("could not create database export", err)
+		return backup.Package{}, apperror.Hide("could not create database export", err)
 	}
 	success := false
 	defer func() {
@@ -77,26 +77,26 @@ func (e *ProcessExporter) Export(ctx context.Context, source config.DatabaseSour
 	gzipErr := gzipWriter.Close()
 	if processErr != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			return backup.Artifact{}, ctxErr
+			return backup.Package{}, ctxErr
 		}
-		return backup.Artifact{}, apperror.Hide("could not export database", processErr)
+		return backup.Package{}, apperror.Hide("could not export database", processErr)
 	}
 	if gzipErr != nil {
-		return backup.Artifact{}, apperror.Hide("could not finish database export", gzipErr)
+		return backup.Package{}, apperror.Hide("could not finish database export", gzipErr)
 	}
 	if err := output.Sync(); err != nil {
-		return backup.Artifact{}, apperror.Hide("could not sync database export", err)
+		return backup.Package{}, apperror.Hide("could not sync database export", err)
 	}
 	if err := output.Close(); err != nil {
-		return backup.Artifact{}, apperror.Hide("could not close database export", err)
+		return backup.Package{}, apperror.Hide("could not close database export", err)
 	}
 
 	checksum, size, err := backup.ChecksumFile(destination)
 	if err != nil {
-		return backup.Artifact{}, err
+		return backup.Package{}, err
 	}
 	success = true
-	return backup.Artifact{
+	return backup.Package{
 		Path:       destination,
 		Size:       size,
 		SHA256:     checksum,

@@ -47,14 +47,14 @@ func ParseBackupSet(value string) (time.Time, error) {
 	return time.Time{}, errors.New("invalid backup set timestamp")
 }
 
-type StoredArtifact struct {
+type StoredPackage struct {
 	Key    string
 	Size   int64
 	SHA256 string
 }
 
-// Artifact is the verified local file handed to a storage adapter.
-type Artifact struct {
+// Package is the verified local file handed to a storage adapter.
+type Package struct {
 	Path   string
 	Size   int64
 	SHA256 string
@@ -73,16 +73,16 @@ type DownloadLink struct {
 	ExpiresAt time.Time
 }
 
-// RemoteArtifact is one stored object listed from a remote destination.
+// RemotePackage is one stored object listed from a remote destination.
 // Key is relative to the storage document prefix (bqckup/<site>/<set>/<name>).
-type RemoteArtifact struct {
+type RemotePackage struct {
 	Key       string
 	Size      int64
 	CreatedAt time.Time
 }
 
 type Store interface {
-	Put(ctx context.Context, artifact Artifact, key string) (StoredArtifact, error)
+	Put(ctx context.Context, pkg Package, key string) (StoredPackage, error)
 	Delete(ctx context.Context, key string) error
 	ListBackupSets(ctx context.Context, sitePrefix string) ([]BackupSet, error)
 	Probe(ctx context.Context) error

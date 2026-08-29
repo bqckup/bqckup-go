@@ -9,13 +9,14 @@ const (
 	StatusSuccess   RunStatus = "success"
 	StatusFailed    RunStatus = "failed"
 	StatusCancelled RunStatus = "cancelled"
+	StatusNoChange  RunStatus = "no_change"
 )
 
-type ArtifactStatus string
+type PackageStatus string
 
 const (
-	ArtifactStored ArtifactStatus = "stored"
-	ArtifactFailed ArtifactStatus = "failed"
+	PackageStored PackageStatus = "stored"
+	PackageFailed PackageStatus = "failed"
 )
 
 type BackupRun struct {
@@ -30,22 +31,27 @@ type BackupRun struct {
 	ErrorMessage   string     `gorm:"type:text" json:"error_message,omitempty"`
 	CreatedAt      time.Time  `gorm:"not null" json:"created_at"`
 	UpdatedAt      time.Time  `gorm:"not null" json:"updated_at"`
-	Artifacts      []Artifact `gorm:"foreignKey:RunID" json:"artifacts,omitempty"`
+	Packages       []Package  `gorm:"foreignKey:RunID" json:"packages,omitempty"`
 }
 
-type Artifact struct {
-	ID           string         `gorm:"type:text;primaryKey" json:"id"`
-	RunID        string         `gorm:"type:text;index;not null" json:"run_id"`
-	SourceKind   string         `gorm:"type:text;not null" json:"source_kind"`
-	SourceName   string         `gorm:"type:text;not null" json:"source_name"`
-	Destination  string         `gorm:"type:text;not null" json:"destination"`
-	ObjectKey    string         `gorm:"type:text;not null" json:"object_key"`
-	Size         int64          `gorm:"not null" json:"size"`
-	SHA256       string         `gorm:"type:text;not null" json:"sha256"`
-	Status       ArtifactStatus `gorm:"type:text;not null" json:"status"`
-	ErrorMessage string         `gorm:"type:text" json:"error_message,omitempty"`
-	CreatedAt    time.Time      `gorm:"not null" json:"created_at"`
+type Package struct {
+	ID           string        `gorm:"type:text;primaryKey" json:"id"`
+	RunID        string        `gorm:"type:text;index;not null" json:"run_id"`
+	SourceKind   string        `gorm:"type:text;not null" json:"source_kind"`
+	SourceName   string        `gorm:"type:text;not null" json:"source_name"`
+	Destination  string        `gorm:"type:text;not null" json:"destination"`
+	ObjectKey    string        `gorm:"type:text;not null" json:"object_key"`
+	Size         int64         `gorm:"not null" json:"size"`
+	SHA256       string        `gorm:"type:text;not null" json:"sha256"`
+	Status       PackageStatus `gorm:"type:text;not null" json:"status"`
+	ErrorMessage string        `gorm:"type:text" json:"error_message,omitempty"`
+	CreatedAt    time.Time     `gorm:"not null" json:"created_at"`
 }
+
+// TableName pins the SQLite table to the pre-rename name so existing history
+// databases keep their rows. ponytail: rename the table when a versioned
+// migration system exists.
+func (Package) TableName() string { return "artifacts" }
 
 type RunFilter struct {
 	Site  string
