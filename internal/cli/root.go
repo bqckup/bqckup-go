@@ -57,6 +57,10 @@ func NewRoot(info buildinfo.Info) *cobra.Command {
 		Short: "Print version information",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if info.Commit == "" {
+				_, err := fmt.Fprintf(cmd.OutOrStdout(), "bqckup %s\n", info.Version)
+				return err
+			}
 			_, err := fmt.Fprintf(cmd.OutOrStdout(), "bqckup %s (%s)\n", info.Version, info.Commit)
 			return err
 		},

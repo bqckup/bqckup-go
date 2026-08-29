@@ -7,7 +7,7 @@ func TestCurrentUsesDevelopmentDefaults(t *testing.T) {
 	if info.Version != "v0.0.4" {
 		t.Fatalf("version = %q, want v0.0.4", info.Version)
 	}
-	if info.Commit != "local" {
-		t.Fatalf("commit = %q, want local", info.Commit)
+	if info.Commit != "" {
+		t.Fatalf("commit = %q, want empty", info.Commit)
 	}
 }
