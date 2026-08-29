@@ -198,10 +198,8 @@ notifications:
       webhook_url_env: BQCKUP_DISCORD_WEBHOOK_URL
 
   routes:
-    - events: [backup_failed, backup_cancelled]
+    - events: [backup_failed, backup_cancelled, backup_no_change]
       channels: [email, discord]
-    - events: [backup_succeeded]
-      channels: [webhook]
 ```
 
 - **Channels** are named, one of three types. `smtp` requires `host`,
@@ -214,17 +212,25 @@ notifications:
   values are rejected by strict decoding. Names must match the valid
   environment-variable pattern. Values are resolved at send time; a missing
   value is a per-channel warning.
-- **Routes** map events to channels. Events are `backup_succeeded`,
-  `backup_failed`, and `backup_cancelled`; a route needs at least one event
-  and may fan out to several channels. A channel matched through several
-  routes is sent once per event. Duplicate channel names in the YAML map are
-  not detected: the last definition wins (yaml map semantics).
+- **Routes** map events to channels. Events are `backup_failed`,
+  `backup_cancelled`, and `backup_no_change` (successful runs stay silent); a
+  route needs at least one event and may fan out to several channels. A channel
+  matched through several routes is sent once per event. Duplicate channel
+  names in the YAML map are not detected: the last definition wins (yaml map
+  semantics).
 - **Delivery**: after a run is recorded terminal in history, every channel of
   every matching route is attempted, sequentially, with the same sanitized
-  payload (run id, site, status, timestamps, duration, artifact count and
-  size, and for failed/cancelled runs a redacted error category and message).
+  payload (machine hostname and IP, run id, site, status, timestamps,
+  duration, package count, size, destinations, and for failed, cancelled, or
+  unchanged runs a redacted error category and message).
   A failing channel never stops the others and never changes the run status
   or history. Skipped runs and preflight failures send nothing. Webhook and
   Discord use a 10-second HTTP timeout; SMTP uses a 30-second session
   deadline. SMTP port 465 is implicit TLS; other ports use STARTTLS, and
   PLAIN authentication is only attempted when the session is encrypted.
+
+Running bqckup in a container: the payload's `hostname` and `server_ip`
+describe the container (its ID and bridge IP), not the host. Set `hostname:`
+on the compose service to make it readable. The human date in email and
+Discord renders in the process-local timezone; set `TZ` on the service or
+the date stays UTC.

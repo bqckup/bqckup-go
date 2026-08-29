@@ -422,13 +422,14 @@ empty config message), doc gates.
 (project root); plan: `tasks/plan-notifications.md`.
 
 **Objective:** `notifications:` in the root schema-v2 config: named
-channels (`smtp`, `webhook`, `discord`) and routes mapping the three events
-(`backup_succeeded`, `backup_failed`, `backup_cancelled`) to channels. After
-a run is recorded terminal in history, the runner notifies through every
-matching channel with one shared sanitized payload. Delivery is best effort:
-a failing channel warns on stderr and never changes run status or history.
-`bqckup config validate` flags referenced environment variables that are
-unset.
+channels (`smtp`, `webhook`, `discord`) and routes mapping events
+(`backup_failed`, `backup_cancelled`, `backup_no_change`) to channels
+(successful runs stay silent). After a failed, cancelled, or unchanged run is
+recorded in history, the runner notifies through every matching channel with
+one shared sanitized payload including failure context (`last_successful_at`,
+`failure_streak`). Delivery is best effort: a failing channel warns on stderr
+and never changes run status or history. `bqckup config validate` flags
+referenced environment variables that are unset.
 
 **Prerequisites:** Delivered history recording (`RunArtifacts` query). No
 new dependencies (`net/smtp`, `net/http`), no history schema change,
