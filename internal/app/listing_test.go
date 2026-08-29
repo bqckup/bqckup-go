@@ -17,14 +17,14 @@ import (
 
 type appRemoteLister struct {
 	appFakeStore
-	sets      []storage.BackupSet
-	artifacts []storage.RemoteArtifact
+	sets     []storage.BackupSet
+	packages []storage.RemotePackage
 }
 
 type appFakeStore struct{}
 
-func (appFakeStore) Put(context.Context, storage.Artifact, string) (storage.StoredArtifact, error) {
-	return storage.StoredArtifact{}, errors.New("unused")
+func (appFakeStore) Put(context.Context, storage.Package, string) (storage.StoredPackage, error) {
+	return storage.StoredPackage{}, errors.New("unused")
 }
 func (appFakeStore) Delete(context.Context, string) error { return errors.New("unused") }
 func (appFakeStore) ListBackupSets(context.Context, string) ([]storage.BackupSet, error) {
@@ -35,8 +35,8 @@ func (appFakeStore) Probe(context.Context) error { return nil }
 func (a *appRemoteLister) ListBackupSets(context.Context, string) ([]storage.BackupSet, error) {
 	return a.sets, nil
 }
-func (a *appRemoteLister) ListArtifacts(context.Context, string) ([]storage.RemoteArtifact, error) {
-	return a.artifacts, nil
+func (a *appRemoteLister) ListPackages(context.Context, string) ([]storage.RemotePackage, error) {
+	return a.packages, nil
 }
 
 type appSnapshotLister struct {
@@ -113,11 +113,11 @@ func TestListRemoteContentsLocalDestinationPointsToHistory(t *testing.T) {
 	assert.Contains(t, err.Error(), "--details")
 }
 
-func TestListRemoteContentsFullModeListsArtifacts(t *testing.T) {
+func TestListRemoteContentsFullModeListsPackages(t *testing.T) {
 	created := time.Date(2026, 11, 10, 3, 0, 0, 0, time.UTC)
 	store := &appRemoteLister{
 		sets: []storage.BackupSet{{Key: "bqckup/site-a/2026-11-10T03-00-00.000000000Z", CreatedAt: created}},
-		artifacts: []storage.RemoteArtifact{
+		packages: []storage.RemotePackage{
 			{Key: "bqckup/site-a/2026-11-10T03-00-00.000000000Z/files.tar.gz", Size: 42, CreatedAt: created},
 		},
 	}
@@ -125,9 +125,9 @@ func TestListRemoteContentsFullModeListsArtifacts(t *testing.T) {
 
 	listing, err := application.ListRemoteContents(context.Background(), "site-a", "s3-primary")
 	require.NoError(t, err)
-	require.Len(t, listing.Artifacts, 1)
-	assert.Equal(t, "s3-primary", listing.Artifacts[0].Destination)
-	assert.Equal(t, int64(42), listing.Artifacts[0].Size)
+	require.Len(t, listing.Packages, 1)
+	assert.Equal(t, "s3-primary", listing.Packages[0].Destination)
+	assert.Equal(t, int64(42), listing.Packages[0].Size)
 }
 
 func TestListRemoteContentsIncrementalModeWiresRepositoryConfig(t *testing.T) {

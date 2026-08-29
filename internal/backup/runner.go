@@ -7,6 +7,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/bqckup/bqckup-go/internal/apperror"
@@ -24,6 +25,7 @@ const (
 	StatusFailed    Status = "failed"
 	StatusCancelled Status = "cancelled"
 	StatusSkipped   Status = "skipped"
+	StatusNoChange  Status = "no_change"
 )
 
 type SkipReason string
@@ -45,14 +47,49 @@ type RunResult struct {
 }
 
 type Archiver interface {
-	Create(ctx context.Context, source FileSource, destination string) (Artifact, error)
+	Create(ctx context.Context, source FileSource, destination string) (Package, error)
 }
 
 type RunRepository interface {
 	CreateRun(ctx context.Context, run *history.BackupRun) error
 	FinishRun(ctx context.Context, id string, status history.RunStatus, finished time.Time, errorCategory, errorMessage string) error
-	CreateArtifact(ctx context.Context, artifact *history.Artifact) error
-	LastSuccessful(ctx context.Context, site string) (*history.BackupRun, error)
+	CreatePackage(ctx context.Context, pkg *history.Package) error
+	LastSuccessful(ctx context.Context, site string, before time.Time) (*history.BackupRun, error)
+	RunPackages(ctx context.Context, runID string) ([]history.Package, error)
+	ConsecutiveWithoutSuccess(ctx context.Context, site string, startedAt time.Time) (int, error)
+}
+
+// NotifyDestination describes one configured destination for notifications.
+type NotifyDestination struct {
+	Name   string
+	Bucket string
+	Path   string
+}
+
+// NotifyInput carries one terminal run's facts to the notifier. The event
+// name is one of the config notification events; payload stats are computed
+// from Packages by the notifier, so RunResult stays untouched.
+type NotifyInput struct {
+	Event              string
+	RunID              string
+	SiteName           string
+	Status             Status
+	StartedAt          time.Time
+	FinishedAt         time.Time
+	LastSuccessfulAt   time.Time
+	FailureStreak      int
+	ErrorCategory      string
+	ErrorMessage       string
+	Packages           []history.Package
+	Destinations       []NotifyDestination
+	HasDatabaseSources bool
+}
+
+// Notifier delivers terminal run notifications. It is consumer-owned: the
+// concrete dispatcher lives in internal/notify and is wired in internal/app.
+// Delivery is best effort; an error is a warning, never a run failure.
+type Notifier interface {
+	Notify(ctx context.Context, input NotifyInput) error
 }
 
 type Retainer interface {
@@ -72,6 +109,7 @@ type Dependencies struct {
 	Storages           map[string]config.Storage
 	Retainer           Retainer
 	Locker             Locker
+	Notifier           Notifier
 	Clock              clock.Clock
 	TemporaryDirectory string
 	EnvLookup          func(string) (string, bool)
@@ -119,10 +157,6 @@ func buildRepoConfig(site config.Site, storageConfig config.Storage, lookupEnv f
 	}, nil
 }
 
-// engineDetail surfaces an engine error's public text (engine errors are
-// redacted by contract, so this is safe to store and print).
-func engineDetail(err error) string { return err.Error() }
-
 func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result RunResult, returnedErr error) {
 	result.SiteName = site.Name
 	if err := r.validateDependencies(); err != nil {
@@ -154,12 +188,12 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 		}
 	}()
 
-	lastSuccessful, err := r.dependencies.Repository.LastSuccessful(ctx, site.Name)
+	now := r.dependencies.Clock.Now().UTC()
+	lastSuccessful, err := r.dependencies.Repository.LastSuccessful(ctx, site.Name, now)
 	if err != nil {
 		result.Status = StatusFailed
 		return result, apperror.Wrap(apperror.CategoryPersistence, "could not read backup history", err)
 	}
-	now := r.dependencies.Clock.Now().UTC()
 	if !force && lastSuccessful != nil && now.Sub(lastSuccessful.StartedAt.UTC()) < site.Policy.MinimumInterval {
 		result.Status = StatusSkipped
 		result.SkipReason = SkipMinimumInterval
@@ -182,10 +216,12 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 	fail := func(operationErr error) (RunResult, error) {
 		category := apperror.CategoryOf(operationErr)
 		status := history.StatusFailed
+		event := config.EventBackupFailed
 		result.Status = StatusFailed
 		if errors.Is(operationErr, context.Canceled) || errors.Is(operationErr, context.DeadlineExceeded) {
 			category = apperror.CategoryCancellation
 			status = history.StatusCancelled
+			event = config.EventBackupCancelled
 			result.Status = StatusCancelled
 			operationErr = apperror.Wrap(category, "backup was cancelled", operationErr)
 		}
@@ -198,6 +234,13 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 			result.Status = StatusFailed
 			return result, errors.Join(operationErr, apperror.Wrap(apperror.CategoryPersistence, "could not finalize backup history", finishErr))
 		}
+		r.notify(context.WithoutCancel(ctx), NotifyInput{
+			Event: event, RunID: run.ID, SiteName: site.Name, Status: result.Status,
+			StartedAt: now, FinishedAt: finished,
+			ErrorCategory: string(category), ErrorMessage: apperror.UserMessage(operationErr),
+			Destinations:       buildNotifyDestinations(site, r.dependencies.Storages),
+			HasDatabaseSources: hasEnabledDatabaseSources(site),
+		})
 		return result, operationErr
 	}
 
@@ -223,7 +266,7 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 				return fail(err)
 			}
 			if err := engine.EnsureRepository(ctx, repo); err != nil {
-				return fail(apperror.Wrap(apperror.CategoryStorage, "could not ensure incremental repository: "+engineDetail(err), err))
+				return fail(apperror.Wrap(apperror.CategoryStorage, "could not ensure incremental repository", err))
 			}
 			spec := restic.BackupSpec{
 				SiteName: site.Name,
@@ -233,19 +276,23 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 			}
 			summary, err := engine.BackupFiles(ctx, repo, spec)
 			if err != nil {
-				return fail(apperror.Wrap(apperror.CategoryExecution, "could not create incremental file backup: "+engineDetail(err), err))
+				return fail(apperror.Wrap(apperror.CategoryExecution, "could not create incremental file backup", err))
 			}
-			if err := r.dependencies.Repository.CreateArtifact(ctx, &history.Artifact{
+			if err := r.dependencies.Repository.CreatePackage(ctx, &history.Package{
 				RunID:       run.ID,
 				SourceKind:  "files",
 				SourceName:  "files",
 				Destination: destination.Storage,
 				ObjectKey:   summary.SnapshotID,
-				Size:        summary.DataAdded,
-				SHA256:      summary.SnapshotID,
-				Status:      history.ArtifactStored,
+				// The snapshot's logical size, not the dedup delta: a fully
+				// deduplicated run adds 0 bytes but still holds data. There
+				// is no single package file to hash, so SHA256 stays empty
+				// rather than claiming the snapshot ID is a content hash.
+				Size:   summary.TotalBytesProcessed,
+				SHA256: "",
+				Status: history.PackageStored,
 			}); err != nil {
-				return fail(apperror.Wrap(apperror.CategoryPersistence, "could not record incremental backup artifact", err))
+				return fail(apperror.Wrap(apperror.CategoryPersistence, "could not record incremental backup package", err))
 			}
 		}
 	} else {
@@ -265,7 +312,7 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 		}
 
 		objectKey := path.Join(sitePrefix, backupSet, "files.tar.gz")
-		if err := r.storeArtifact(ctx, run.ID, archive, objectKey, site.Destinations); err != nil {
+		if err := r.storePackage(ctx, run.ID, archive, objectKey, site.Destinations); err != nil {
 			return fail(err)
 		}
 	}
@@ -289,17 +336,17 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 			if err := os.MkdirAll(filepath.Dir(destination), 0o700); err != nil {
 				return fail(apperror.Wrap(apperror.CategoryExecution, "could not prepare database export workspace", err))
 			}
-			databaseArtifact, exportErr := exporter.Export(ctx, source, destination)
+			databasePackage, exportErr := exporter.Export(ctx, source, destination)
 			databaseKey := path.Join(sitePrefix, backupSet, "databases", source.Name+".sql.gz")
 			if exportErr != nil {
-				recordErr := r.recordFailedArtifact(ctx, run.ID, Artifact{SourceKind: "database", SourceName: source.Name}, databaseKey, site.Destinations, "could not export database")
+				recordErr := r.recordFailedPackage(ctx, run.ID, Package{SourceKind: "database", SourceName: source.Name}, databaseKey, site.Destinations, "could not export database")
 				operationErr := apperror.Wrap(apperror.CategoryExecution, "could not export database", exportErr)
 				if recordErr != nil {
 					operationErr = errors.Join(operationErr, recordErr)
 				}
 				return fail(operationErr)
 			}
-			if err := r.storeArtifact(ctx, run.ID, databaseArtifact, databaseKey, site.Destinations); err != nil {
+			if err := r.storePackage(ctx, run.ID, databasePackage, databaseKey, site.Destinations); err != nil {
 				return fail(err)
 			}
 		}
@@ -322,7 +369,7 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 			}
 			reclaimed, err := engine.ApplyRetention(ctx, repo, site.Policy.KeepLast, site.Name)
 			if err != nil {
-				return fail(apperror.Wrap(apperror.CategoryStorage, "backup completed but incremental retention could not be applied: "+engineDetail(err), err))
+				return fail(apperror.Wrap(apperror.CategoryStorage, "backup completed but incremental retention could not be applied", err))
 			}
 			result.ReclaimedBytes += reclaimed
 		}
@@ -335,15 +382,169 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 		}
 	}
 
+	if site.BackupMode != "incremental" {
+		anchor, err := r.dependencies.Repository.LastSuccessful(ctx, site.Name, now)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not load previous backup for change detection: %v\n", err)
+		} else if anchor != nil {
+			prevPkgs, prevErr := r.dependencies.Repository.RunPackages(ctx, anchor.ID)
+			currPkgs, currErr := r.dependencies.Repository.RunPackages(ctx, run.ID)
+			if prevErr != nil {
+				fmt.Fprintf(os.Stderr, "warning: could not load previous backup packages: %v\n", prevErr)
+			} else if currErr != nil {
+				fmt.Fprintf(os.Stderr, "warning: could not load current backup packages: %v\n", currErr)
+			} else if unchangedSizes(currPkgs, prevPkgs) {
+				seenSources := make(map[[2]string]struct{})
+				var details []string
+				for _, p := range currPkgs {
+					k := [2]string{p.SourceKind, p.SourceName}
+					if _, seen := seenSources[k]; seen {
+						continue
+					}
+					seenSources[k] = struct{}{}
+					name := path.Base(p.ObjectKey)
+					details = append(details, fmt.Sprintf("%s (%d B)", name, p.Size))
+				}
+				fmt.Fprintf(os.Stderr, "warning: backup for %s is unchanged: %s — same sizes as the previous run\n", site.Name, strings.Join(details, ", "))
+
+				count := len(seenSources)
+				var msg string
+				if count == 1 {
+					msg = "1 item is unchanged from the previous run."
+				} else {
+					msg = fmt.Sprintf("%d items are unchanged from the previous run.", count)
+				}
+
+				finished := r.dependencies.Clock.Now().UTC()
+				if err := r.dependencies.Repository.FinishRun(context.WithoutCancel(ctx), run.ID, history.StatusNoChange, finished, "no_change", msg); err != nil {
+					result.Status = StatusFailed
+					result.FinishedAt = finished
+					r.notify(context.WithoutCancel(ctx), NotifyInput{
+						Event: config.EventBackupFailed, RunID: run.ID, SiteName: site.Name, Status: result.Status,
+						StartedAt: now, FinishedAt: finished,
+						ErrorCategory: string(apperror.CategoryPersistence), ErrorMessage: "could not finalize backup history",
+						Destinations:       buildNotifyDestinations(site, r.dependencies.Storages),
+						HasDatabaseSources: hasEnabledDatabaseSources(site),
+					})
+					return result, apperror.Wrap(apperror.CategoryPersistence, "could not finalize backup history", err)
+				}
+				result.Status = StatusNoChange
+				result.FinishedAt = finished
+				r.notify(context.WithoutCancel(ctx), NotifyInput{
+					Event: config.EventBackupNoChange, RunID: run.ID, SiteName: site.Name, Status: result.Status,
+					StartedAt: now, FinishedAt: finished,
+					ErrorCategory: "no_change", ErrorMessage: msg,
+					Destinations:       buildNotifyDestinations(site, r.dependencies.Storages),
+					HasDatabaseSources: hasEnabledDatabaseSources(site),
+				})
+				return result, nil
+			}
+		}
+	}
+
 	finished := r.dependencies.Clock.Now().UTC()
 	if err := r.dependencies.Repository.FinishRun(context.WithoutCancel(ctx), run.ID, history.StatusSuccess, finished, "", ""); err != nil {
 		result.Status = StatusFailed
 		result.FinishedAt = finished
+		r.notify(context.WithoutCancel(ctx), NotifyInput{
+			Event: config.EventBackupFailed, RunID: run.ID, SiteName: site.Name, Status: result.Status,
+			StartedAt: now, FinishedAt: finished,
+			ErrorCategory: string(apperror.CategoryPersistence), ErrorMessage: "could not finalize backup history",
+			Destinations:       buildNotifyDestinations(site, r.dependencies.Storages),
+			HasDatabaseSources: hasEnabledDatabaseSources(site),
+		})
 		return result, apperror.Wrap(apperror.CategoryPersistence, "could not finalize backup history", err)
 	}
 	result.Status = StatusSuccess
 	result.FinishedAt = finished
 	return result, nil
+}
+
+// unchangedSizes reports whether every stored package in current has a
+// same-sized counterpart in previous, deduped by source kind and name.
+func unchangedSizes(current, previous []history.Package) bool {
+	if len(current) == 0 || len(previous) == 0 {
+		return false
+	}
+	currentSizes := make(map[[2]string]int64)
+	for _, p := range current {
+		key := [2]string{p.SourceKind, p.SourceName}
+		if _, exists := currentSizes[key]; !exists {
+			currentSizes[key] = p.Size
+		}
+	}
+	previousSizes := make(map[[2]string]int64)
+	for _, p := range previous {
+		key := [2]string{p.SourceKind, p.SourceName}
+		if _, exists := previousSizes[key]; !exists {
+			previousSizes[key] = p.Size
+		}
+	}
+	if len(currentSizes) == 0 || len(currentSizes) != len(previousSizes) {
+		return false
+	}
+	for key, currentSize := range currentSizes {
+		prevSize, exists := previousSizes[key]
+		if !exists || currentSize != prevSize {
+			return false
+		}
+	}
+	return true
+}
+
+func buildNotifyDestinations(site config.Site, storages map[string]config.Storage) []NotifyDestination {
+	destinations := make([]NotifyDestination, 0, len(site.Destinations))
+	for _, d := range site.Destinations {
+		nd := NotifyDestination{Name: d.Storage}
+		if s, ok := storages[d.Storage]; ok {
+			switch s.Type {
+			case "local":
+				nd.Path = s.Directory
+			case "s3", "r2":
+				nd.Bucket = s.Bucket
+			}
+		}
+		destinations = append(destinations, nd)
+	}
+	return destinations
+}
+
+func hasEnabledDatabaseSources(site config.Site) bool {
+	for _, db := range site.Sources.Databases {
+		if db.Enabled {
+			return true
+		}
+	}
+	return false
+}
+
+// notify delivers one terminal notification after the run is recorded in
+// history. Delivery is best effort: errors are warnings on stderr and never
+// alter the run result. Runs without a notifier skip the work entirely.
+func (r *Runner) notify(ctx context.Context, input NotifyInput) {
+	if r.dependencies.Notifier == nil {
+		return
+	}
+	lastSuccessful, err := r.dependencies.Repository.LastSuccessful(ctx, input.SiteName, input.StartedAt)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not load last successful run for notification: %v\n", err)
+	} else if lastSuccessful != nil {
+		input.LastSuccessfulAt = lastSuccessful.StartedAt
+	}
+	streak, err := r.dependencies.Repository.ConsecutiveWithoutSuccess(ctx, input.SiteName, input.StartedAt)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not compute failure streak for notification: %v\n", err)
+	} else {
+		input.FailureStreak = streak
+	}
+	packages, err := r.dependencies.Repository.RunPackages(ctx, input.RunID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not load run packages for notification: %v\n", err)
+	}
+	input.Packages = packages
+	if err := r.dependencies.Notifier.Notify(ctx, input); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: notification delivery failed: %v\n", err)
+	}
 }
 
 // Unlock removes stale repository locks for every destination of a site
@@ -366,46 +567,46 @@ func (r *Runner) Unlock(ctx context.Context, site config.Site) error {
 			return apperror.Wrap(apperror.CategoryPreflight, "could not build repository configuration", err)
 		}
 		if err := engine.Unlock(ctx, repo); err != nil {
-			return apperror.Wrap(apperror.CategoryStorage, "could not unlock the incremental repository: "+engineDetail(err), err)
+			return apperror.Wrap(apperror.CategoryStorage, "could not unlock the incremental repository", err)
 		}
 	}
 	return nil
 }
 
-func (r *Runner) storeArtifact(ctx context.Context, runID string, artifact Artifact, objectKey string, destinations []config.Destination) error {
+func (r *Runner) storePackage(ctx context.Context, runID string, pkg Package, objectKey string, destinations []config.Destination) error {
 	for _, destination := range destinations {
 		store, ok := r.dependencies.Stores[destination.Storage]
 		if !ok || store == nil {
 			return apperror.Wrap(apperror.CategoryInternal, "a configured storage destination is unavailable", nil)
 		}
-		stored, putErr := store.Put(ctx, storage.Artifact{Path: artifact.Path, Size: artifact.Size, SHA256: artifact.SHA256}, objectKey)
+		stored, putErr := store.Put(ctx, storage.Package{Path: pkg.Path, Size: pkg.Size, SHA256: pkg.SHA256}, objectKey)
 		if putErr != nil {
-			recordErr := r.recordFailedArtifact(ctx, runID, artifact, objectKey, []config.Destination{destination}, "could not store backup artifact")
-			operationErr := apperror.Wrap(apperror.CategoryStorage, "could not store backup artifact", putErr)
+			recordErr := r.recordFailedPackage(ctx, runID, pkg, objectKey, []config.Destination{destination}, "could not store backup package")
+			operationErr := apperror.Wrap(apperror.CategoryStorage, "could not store backup package", putErr)
 			if recordErr != nil {
 				operationErr = errors.Join(operationErr, recordErr)
 			}
 			return operationErr
 		}
-		if err := r.dependencies.Repository.CreateArtifact(ctx, &history.Artifact{
-			RunID: runID, SourceKind: artifact.SourceKind, SourceName: artifact.SourceName,
+		if err := r.dependencies.Repository.CreatePackage(ctx, &history.Package{
+			RunID: runID, SourceKind: pkg.SourceKind, SourceName: pkg.SourceName,
 			Destination: destination.Storage, ObjectKey: stored.Key, Size: stored.Size,
-			SHA256: stored.SHA256, Status: history.ArtifactStored,
+			SHA256: stored.SHA256, Status: history.PackageStored,
 		}); err != nil {
-			return apperror.Wrap(apperror.CategoryPersistence, "could not record stored backup artifact", err)
+			return apperror.Wrap(apperror.CategoryPersistence, "could not record stored backup package", err)
 		}
 	}
 	return nil
 }
 
-func (r *Runner) recordFailedArtifact(ctx context.Context, runID string, artifact Artifact, objectKey string, destinations []config.Destination, message string) error {
+func (r *Runner) recordFailedPackage(ctx context.Context, runID string, pkg Package, objectKey string, destinations []config.Destination, message string) error {
 	for _, destination := range destinations {
-		if err := r.dependencies.Repository.CreateArtifact(context.WithoutCancel(ctx), &history.Artifact{
-			RunID: runID, SourceKind: artifact.SourceKind, SourceName: artifact.SourceName,
-			Destination: destination.Storage, ObjectKey: objectKey, Size: artifact.Size,
-			SHA256: artifact.SHA256, Status: history.ArtifactFailed, ErrorMessage: message,
+		if err := r.dependencies.Repository.CreatePackage(context.WithoutCancel(ctx), &history.Package{
+			RunID: runID, SourceKind: pkg.SourceKind, SourceName: pkg.SourceName,
+			Destination: destination.Storage, ObjectKey: objectKey, Size: pkg.Size,
+			SHA256: pkg.SHA256, Status: history.PackageFailed, ErrorMessage: message,
 		}); err != nil {
-			return apperror.Wrap(apperror.CategoryPersistence, "could not record failed backup artifact", err)
+			return apperror.Wrap(apperror.CategoryPersistence, "could not record failed backup package", err)
 		}
 	}
 	return nil

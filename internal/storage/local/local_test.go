@@ -18,7 +18,7 @@ import (
 func TestPutRejectsUnsafeKeys(t *testing.T) {
 	store, err := New(t.TempDir())
 	require.NoError(t, err)
-	artifact := sourceArtifact(t, []byte("backup"))
+	pkg := sourcePackage(t, []byte("backup"))
 
 	for _, key := range []string{
 		"../escape.tar.gz",
@@ -29,7 +29,7 @@ func TestPutRejectsUnsafeKeys(t *testing.T) {
 		"",
 	} {
 		t.Run(key, func(t *testing.T) {
-			_, putErr := store.Put(context.Background(), artifact, key)
+			_, putErr := store.Put(context.Background(), pkg, key)
 			require.Error(t, putErr)
 		})
 	}
@@ -39,11 +39,11 @@ func TestPutCancelledRemovesStagingFiles(t *testing.T) {
 	root := t.TempDir()
 	store, err := New(root)
 	require.NoError(t, err)
-	artifact := sourceArtifact(t, []byte("backup"))
+	pkg := sourcePackage(t, []byte("backup"))
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err = store.Put(ctx, artifact, "bqckup/site/2026-07-23T03-45-00.000000000Z/files.tar.gz")
+	_, err = store.Put(ctx, pkg, "bqckup/site/2026-07-23T03-45-00.000000000Z/files.tar.gz")
 	require.ErrorIs(t, err, context.Canceled)
 
 	var files []string
@@ -63,10 +63,10 @@ func TestPutSameSecondRunDoesNotOverwrite(t *testing.T) {
 
 	timestamp := time.Date(2026, 7, 23, 3, 45, 0, 123_456_789, time.UTC).Format(storage.TimestampLayout)
 	key := path.Join("bqckup", "site", timestamp, "files.tar.gz")
-	_, err = store.Put(context.Background(), sourceArtifact(t, []byte("first")), key)
+	_, err = store.Put(context.Background(), sourcePackage(t, []byte("first")), key)
 	require.NoError(t, err)
 
-	_, err = store.Put(context.Background(), sourceArtifact(t, []byte("second")), key)
+	_, err = store.Put(context.Background(), sourcePackage(t, []byte("second")), key)
 	require.Error(t, err)
 }
 
@@ -74,31 +74,31 @@ func TestPutDoesNotOverwriteExistingObject(t *testing.T) {
 	root := t.TempDir()
 	store, err := New(root)
 	require.NoError(t, err)
-	artifact := sourceArtifact(t, []byte("new"))
+	pkg := sourcePackage(t, []byte("new"))
 	key := "bqckup/site/2026-07-23T03-45-00.000000000Z/files.tar.gz"
 	finalPath := filepath.Join(root, filepath.FromSlash(key))
 	require.NoError(t, os.MkdirAll(filepath.Dir(finalPath), 0o700))
 	require.NoError(t, os.WriteFile(finalPath, []byte("existing"), 0o600))
 
-	_, err = store.Put(context.Background(), artifact, key)
+	_, err = store.Put(context.Background(), pkg, key)
 	require.Error(t, err)
 	contents, readErr := os.ReadFile(finalPath)
 	require.NoError(t, readErr)
 	assert.Equal(t, []byte("existing"), contents)
 }
 
-func TestPutPersistsVerifiedArtifactWithPrivatePermissions(t *testing.T) {
+func TestPutPersistsVerifiedPackageWithPrivatePermissions(t *testing.T) {
 	root := t.TempDir()
 	store, err := New(root)
 	require.NoError(t, err)
 	contents := []byte("verified backup")
-	artifact := sourceArtifact(t, contents)
+	pkg := sourcePackage(t, contents)
 	key := "bqckup/site/2026-07-23T03-45-00.000000000Z/files.tar.gz"
 
-	stored, err := store.Put(context.Background(), artifact, key)
+	stored, err := store.Put(context.Background(), pkg, key)
 	require.NoError(t, err)
 	assert.Equal(t, key, stored.Key)
-	assert.Equal(t, artifact.SHA256, stored.SHA256)
+	assert.Equal(t, pkg.SHA256, stored.SHA256)
 	assert.EqualValues(t, len(contents), stored.Size)
 
 	finalPath := filepath.Join(root, filepath.FromSlash(key))
@@ -133,12 +133,12 @@ func TestListBackupSetsRecognizesReadableAndLegacyUTCApplicationTimestamps(t *te
 	assert.Equal(t, "bqckup/site/23-July-2026/03-45-00", sets[2].Key)
 }
 
-func sourceArtifact(t *testing.T, contents []byte) storage.Artifact {
+func sourcePackage(t *testing.T, contents []byte) storage.Package {
 	t.Helper()
-	filename := filepath.Join(t.TempDir(), "artifact.tar.gz")
+	filename := filepath.Join(t.TempDir(), "pkg.tar.gz")
 	require.NoError(t, os.WriteFile(filename, contents, 0o600))
 	sum := sha256.Sum256(contents)
-	return storage.Artifact{
+	return storage.Package{
 		Path:   filename,
 		Size:   int64(len(contents)),
 		SHA256: hex.EncodeToString(sum[:]),

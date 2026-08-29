@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/bqckup/bqckup-go/internal/config"
 	resticfacade "github.com/bqckup/bqckup-go/internal/engine/restic/facade"
 	"github.com/bqckup/bqckup-go/internal/history"
+	"github.com/bqckup/bqckup-go/internal/notify"
 	"github.com/bqckup/bqckup-go/internal/platform/lock"
 	"github.com/bqckup/bqckup-go/internal/process"
 	"github.com/bqckup/bqckup-go/internal/retention"
@@ -82,6 +84,7 @@ func Open(ctx context.Context, configDir string) (*App, error) {
 		Storages:           configuration.Storages,
 		Retainer:           retentionAdapter{},
 		Locker:             lock.New(configuration.App.LockDirectory),
+		Notifier:           buildNotifier(configuration.Notifications, os.LookupEnv),
 		Clock:              clock.System{},
 		TemporaryDirectory: configuration.App.TemporaryDirectory,
 	})
@@ -94,6 +97,27 @@ func Open(ctx context.Context, configDir string) (*App, error) {
 		restorer:      engine,
 		closeDatabase: closeDatabase,
 	}, nil
+}
+
+// buildNotifier constructs the notification dispatcher from the configured
+// channels and routes. A config without a notifications section yields nil,
+// which the runner treats as a no-op.
+func buildNotifier(notifications config.Notifications, lookupEnv func(string) (string, bool)) backup.Notifier {
+	if len(notifications.Channels) == 0 {
+		return nil
+	}
+	channels := make(map[string]notify.Channel, len(notifications.Channels))
+	for name, channel := range notifications.Channels {
+		switch channel.Type {
+		case "smtp":
+			channels[name] = notify.NewSMTP(name, channel, lookupEnv, nil)
+		case "webhook":
+			channels[name] = notify.NewWebhook(name, channel.URLEnv, lookupEnv)
+		case "discord":
+			channels[name] = notify.NewDiscord(name, channel.WebhookURLEnv, lookupEnv)
+		}
+	}
+	return notify.NewDispatcher(channels, notifications.Routes)
 }
 
 func resolveRemoteStorageConfiguration(ctx context.Context, configuration config.Config, resolver remoteStorageResolver) (config.Config, error) {
@@ -208,7 +232,7 @@ func (a *App) RunEnabledBackups(ctx context.Context, force bool) ([]backup.RunRe
 }
 
 func (a *App) LastSuccessful(ctx context.Context, siteName string) (*history.BackupRun, error) {
-	return a.repository.LastSuccessful(ctx, siteName)
+	return a.repository.LastSuccessful(ctx, siteName, time.Time{})
 }
 
 // UnlockRepository removes stale repository locks for a site.
@@ -327,7 +351,7 @@ func parseSiteFromKey(key string) (string, error) {
 	return parts[1], nil
 }
 
-// Link creates a temporary download link for one artifact of a remote
+// Link creates a temporary download link for one package of a remote
 // destination. The site is parsed from the key; it must exist, be enabled,
 // use full mode, and send backups to the destination. Nothing is written to
 // history and the remote only receives one existence check.

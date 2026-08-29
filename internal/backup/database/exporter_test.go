@@ -19,13 +19,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestMySQLExporterWritesCompressedVerifiedArtifact(t *testing.T) {
+func TestMySQLExporterWritesCompressedVerifiedPackage(t *testing.T) {
 	runner := &fakeProcessRunner{output: "CREATE DATABASE application;\n"}
 	exporter := NewMySQL(runner)
 	source := validDatabaseSource("mysql")
 	destination := filepath.Join(t.TempDir(), "application.sql.gz")
 
-	artifact, err := exporter.Export(context.Background(), source, destination)
+	pkg, err := exporter.Export(context.Background(), source, destination)
 	require.NoError(t, err)
 	assert.Equal(t, "mysqldump", runner.spec.Command)
 	assert.Contains(t, runner.spec.Args, "--single-transaction")
@@ -34,13 +34,13 @@ func TestMySQLExporterWritesCompressedVerifiedArtifact(t *testing.T) {
 	assert.Contains(t, runner.spec.Args, "--triggers")
 	assert.NotContains(t, strings.Join(runner.spec.Args, " "), source.Password)
 	assert.Equal(t, source.Password, environmentValue(runner.spec.Env, "MYSQL_PWD"))
-	assert.Equal(t, "database", artifact.SourceKind)
-	assert.Equal(t, source.Name, artifact.SourceName)
-	assert.Equal(t, destination, artifact.Path)
+	assert.Equal(t, "database", pkg.SourceKind)
+	assert.Equal(t, source.Name, pkg.SourceName)
+	assert.Equal(t, destination, pkg.Path)
 	compressed, err := os.ReadFile(destination)
 	require.NoError(t, err)
-	assert.Equal(t, int64(len(compressed)), artifact.Size)
-	assert.Equal(t, checksum(string(compressed)), artifact.SHA256)
+	assert.Equal(t, int64(len(compressed)), pkg.Size)
+	assert.Equal(t, checksum(string(compressed)), pkg.SHA256)
 
 	file, err := os.Open(destination)
 	require.NoError(t, err)
@@ -62,7 +62,7 @@ func TestPostgresExporterUsesPGPASSWORD(t *testing.T) {
 	source := validDatabaseSource("postgres")
 	destination := filepath.Join(t.TempDir(), "application.sql.gz")
 
-	artifact, err := exporter.Export(context.Background(), source, destination)
+	pkg, err := exporter.Export(context.Background(), source, destination)
 	require.NoError(t, err)
 	assert.Equal(t, "pg_dump", runner.spec.Command)
 	assert.Contains(t, runner.spec.Args, "--format=plain")
@@ -71,10 +71,10 @@ func TestPostgresExporterUsesPGPASSWORD(t *testing.T) {
 	assert.Equal(t, source.Password, environmentValue(runner.spec.Env, "PGPASSWORD"))
 	compressed, err := os.ReadFile(destination)
 	require.NoError(t, err)
-	assert.Equal(t, checksum(string(compressed)), artifact.SHA256)
+	assert.Equal(t, checksum(string(compressed)), pkg.SHA256)
 }
 
-func TestExporterRemovesPartialArtifactOnFailure(t *testing.T) {
+func TestExporterRemovesPartialPackageOnFailure(t *testing.T) {
 	runner := &fakeProcessRunner{
 		err:    errors.New("process failed with password database-secret"),
 		stderr: "database-secret provider output",
@@ -89,7 +89,7 @@ func TestExporterRemovesPartialArtifactOnFailure(t *testing.T) {
 	assert.ErrorIs(t, statErr, os.ErrNotExist)
 }
 
-func TestExporterRemovesArtifactOnCancellation(t *testing.T) {
+func TestExporterRemovesPackageOnCancellation(t *testing.T) {
 	runner := &fakeProcessRunner{waitForCancel: true}
 	exporter := NewPostgres(runner)
 	destination := filepath.Join(t.TempDir(), "application.sql.gz")

@@ -50,11 +50,11 @@ func TestDisposableS3CompatibleStorage(t *testing.T) {
 	filename := filepath.Join(t.TempDir(), "probe.txt")
 	require.NoError(t, os.WriteFile(filename, contents, 0o600))
 	sum := sha256.Sum256(contents)
-	artifact := storage.Artifact{Path: filename, Size: int64(len(contents)), SHA256: hex.EncodeToString(sum[:])}
+	pkg := storage.Package{Path: filename, Size: int64(len(contents)), SHA256: hex.EncodeToString(sum[:])}
 
-	stored, err := store.Put(ctx, artifact, path.Join(setKey, "probe.txt"))
+	stored, err := store.Put(ctx, pkg, path.Join(setKey, "probe.txt"))
 	require.NoError(t, err)
-	assert.Equal(t, artifact.SHA256, stored.SHA256)
+	assert.Equal(t, pkg.SHA256, stored.SHA256)
 	sets, err := store.ListBackupSets(ctx, path.Join("bqckup", site))
 	require.NoError(t, err)
 	require.Len(t, sets, 1)

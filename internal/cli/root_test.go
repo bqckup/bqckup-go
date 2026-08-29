@@ -2,8 +2,11 @@ package cli
 
 import (
 	"bytes"
+	"errors"
+
 	"testing"
 
+	"github.com/bqckup/bqckup-go/internal/apperror"
 	"github.com/bqckup/bqckup-go/internal/buildinfo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -35,4 +38,36 @@ func TestRootRejectsUnknownCommand(t *testing.T) {
 	root := NewRoot(buildinfo.Info{Version: "dev", Commit: "unknown"})
 	root.SetArgs([]string{"missing"})
 	assert.Error(t, root.Execute())
+}
+
+func TestFormatErrorMessageKeepsCleanMessageAndCauseChain(t *testing.T) {
+	err := apperror.Wrap(apperror.CategoryExecution, "could not create incremental file backup", errors.New("restic: snapshot failed: exit status 1"))
+	assert.Equal(t, "could not create incremental file backup: restic: snapshot failed: exit status 1", formatErrorMessage(err))
+}
+
+func TestFormatErrorMessageSkipsEmptyAndDuplicateCauseText(t *testing.T) {
+	cause := errors.New("repo: lock held by another process")
+	err := apperror.Wrap(apperror.CategoryStorage, "could not unlock the incremental repository",
+		apperror.Wrap(apperror.CategoryStorage, "repo: lock held by another process", cause))
+	assert.Equal(t, "could not unlock the incremental repository: repo: lock held by another process", formatErrorMessage(err))
+}
+
+func TestFormatErrorMessageDescendsIntoJoinedErrors(t *testing.T) {
+	operationErr := apperror.Wrap(apperror.CategoryExecution, "could not export database", errors.New("mysql: connection refused"))
+	err := errors.Join(operationErr, apperror.Wrap(apperror.CategoryPersistence, "could not finalize backup history", errors.New("database unavailable")))
+	assert.Equal(t, "could not export database: mysql: connection refused: could not finalize backup history: database unavailable", formatErrorMessage(err))
+}
+
+func TestFormatErrorMessageDescendsIntoJoinNestedInCause(t *testing.T) {
+	inner := errors.Join(errors.New("storage: quota exceeded"), errors.New("cleanup: partial key left"))
+	err := apperror.Wrap(apperror.CategoryStorage, "could not store backup package", inner)
+	assert.Equal(t, "could not store backup package: storage: quota exceeded: cleanup: partial key left", formatErrorMessage(err))
+}
+
+func TestFormatErrorMessagePassesThroughNonAppErrors(t *testing.T) {
+	assert.Equal(t, "plain failure", formatErrorMessage(errors.New("plain failure")))
+}
+
+func TestExitCodeNoChange(t *testing.T) {
+	assert.Equal(t, 5, ExitCode(errNoChange))
 }
