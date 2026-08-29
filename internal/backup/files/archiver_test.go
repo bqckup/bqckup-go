@@ -25,15 +25,15 @@ func TestCreateExcludesConfiguredSubtree(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(source, "cache", "b.txt"), []byte("drop"), 0o600))
 	out := filepath.Join(t.TempDir(), "files.tar.gz")
 
-	artifact, err := New().Create(context.Background(), backup.FileSource{
+	pkg, err := New().Create(context.Background(), backup.FileSource{
 		Include: []string{source},
 		Exclude: []string{filepath.Join(source, "cache")},
 	}, out)
 
 	require.NoError(t, err)
 	assert.Equal(t, []string{"source/keep/a.txt"}, archiveMembers(t, out))
-	assert.Len(t, artifact.SHA256, 64)
-	assert.Positive(t, artifact.Size)
+	assert.Len(t, pkg.SHA256, 64)
+	assert.Positive(t, pkg.Size)
 }
 
 func TestCreateSupportsRelativeExcludePatterns(t *testing.T) {

@@ -59,22 +59,22 @@ func newWithClients(options Options, uploader uploaderAPI, client objectAPI, pre
 	return &Store{bucket: options.Bucket, prefix: options.Prefix, uploader: uploader, client: client, presigner: presigner}
 }
 
-func (s *Store) Put(ctx context.Context, artifact storage.Artifact, key string) (storage.StoredArtifact, error) {
+func (s *Store) Put(ctx context.Context, pkg storage.Package, key string) (storage.StoredPackage, error) {
 	if err := ctx.Err(); err != nil {
-		return storage.StoredArtifact{}, err
+		return storage.StoredPackage{}, err
 	}
 	finalKey, err := storage.JoinPrefix(s.prefix, key)
 	if err != nil {
-		return storage.StoredArtifact{}, err
+		return storage.StoredPackage{}, err
 	}
-	checksum, size, err := inspectArtifact(ctx, artifact)
+	checksum, size, err := inspectPackage(ctx, pkg)
 	if err != nil {
-		return storage.StoredArtifact{}, err
+		return storage.StoredPackage{}, err
 	}
 
-	file, err := os.Open(artifact.Path)
+	file, err := os.Open(pkg.Path)
 	if err != nil {
-		return storage.StoredArtifact{}, apperror.Hide("could not open backup artifact", err)
+		return storage.StoredPackage{}, apperror.Hide("could not open backup package", err)
 	}
 	defer file.Close()
 	_, err = s.uploader.UploadObject(ctx, &transfermanager.UploadObjectInput{
@@ -90,12 +90,12 @@ func (s *Store) Put(ctx context.Context, artifact storage.Artifact, key string) 
 	})
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return storage.StoredArtifact{}, err
+			return storage.StoredPackage{}, err
 		}
 		if isCollision(err) {
-			return storage.StoredArtifact{}, apperror.Hide(ErrObjectExists.Error(), ErrObjectExists)
+			return storage.StoredPackage{}, apperror.Hide(ErrObjectExists.Error(), ErrObjectExists)
 		}
-		return storage.StoredArtifact{}, apperror.Hide("S3-compatible upload failed", err)
+		return storage.StoredPackage{}, apperror.Hide("S3-compatible upload failed", err)
 	}
 
 	head, err := s.client.HeadObject(ctx, &s3.HeadObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(finalKey)})
@@ -107,28 +107,28 @@ func (s *Store) Put(ctx context.Context, artifact storage.Artifact, key string) 
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			verificationErr = err
 		} else {
-			verificationErr = apperror.Hide("remote artifact verification failed", err)
+			verificationErr = apperror.Hide("remote package verification failed", err)
 		}
 		_, cleanupErr := s.client.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(finalKey)})
 		if cleanupErr != nil {
 			verificationErr = apperror.Hide(verificationErr.Error(), errors.Join(verificationErr, cleanupErr))
 		}
-		return storage.StoredArtifact{}, verificationErr
+		return storage.StoredPackage{}, verificationErr
 	}
 
-	return storage.StoredArtifact{Key: finalKey, Size: size, SHA256: checksum}, nil
+	return storage.StoredPackage{Key: finalKey, Size: size, SHA256: checksum}, nil
 }
 
-func inspectArtifact(ctx context.Context, artifact storage.Artifact) (string, int64, error) {
-	if artifact.Size < 0 || len(artifact.SHA256) != sha256.Size*2 {
-		return "", 0, errors.New("artifact size and SHA-256 are required")
+func inspectPackage(ctx context.Context, pkg storage.Package) (string, int64, error) {
+	if pkg.Size < 0 || len(pkg.SHA256) != sha256.Size*2 {
+		return "", 0, errors.New("package size and SHA-256 are required")
 	}
-	if _, err := hex.DecodeString(artifact.SHA256); err != nil {
-		return "", 0, errors.New("artifact SHA-256 is invalid")
+	if _, err := hex.DecodeString(pkg.SHA256); err != nil {
+		return "", 0, errors.New("package SHA-256 is invalid")
 	}
-	file, err := os.Open(artifact.Path)
+	file, err := os.Open(pkg.Path)
 	if err != nil {
-		return "", 0, apperror.Hide("could not inspect backup artifact", err)
+		return "", 0, apperror.Hide("could not inspect backup package", err)
 	}
 	defer file.Close()
 	hash := sha256.New()
@@ -137,8 +137,8 @@ func inspectArtifact(ctx context.Context, artifact storage.Artifact) (string, in
 		return "", size, err
 	}
 	checksum := hex.EncodeToString(hash.Sum(nil))
-	if size != artifact.Size || !strings.EqualFold(checksum, artifact.SHA256) {
-		return "", size, errors.New("local artifact verification failed")
+	if size != pkg.Size || !strings.EqualFold(checksum, pkg.SHA256) {
+		return "", size, errors.New("local package verification failed")
 	}
 	return checksum, size, nil
 }
@@ -362,7 +362,7 @@ func (s *Store) ListBackupSets(ctx context.Context, sitePrefix string) ([]storag
 	return sets, nil
 }
 
-func (s *Store) ListArtifacts(ctx context.Context, setPrefix string) ([]storage.RemoteArtifact, error) {
+func (s *Store) ListPackages(ctx context.Context, setPrefix string) ([]storage.RemotePackage, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -374,7 +374,7 @@ func (s *Store) ListArtifacts(ctx context.Context, setPrefix string) ([]storage.
 		return nil, err
 	}
 	requestPrefix := finalPrefix + "/"
-	var artifacts []storage.RemoteArtifact
+	var packages []storage.RemotePackage
 	var continuation *string
 	for {
 		output, listErr := s.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
@@ -383,7 +383,7 @@ func (s *Store) ListArtifacts(ctx context.Context, setPrefix string) ([]storage.
 			ContinuationToken: continuation,
 		})
 		if listErr != nil {
-			return nil, remoteOperationError("could not list remote backup artifacts", listErr)
+			return nil, remoteOperationError("could not list remote backup packages", listErr)
 		}
 		if output == nil {
 			return nil, errors.New("remote object listing returned no result")
@@ -393,14 +393,14 @@ func (s *Store) ListArtifacts(ctx context.Context, setPrefix string) ([]storage.
 			if !strings.HasPrefix(key, requestPrefix) {
 				continue
 			}
-			artifacts = append(artifacts, storage.RemoteArtifact{
+			packages = append(packages, storage.RemotePackage{
 				Key:       setPrefix + "/" + strings.TrimPrefix(key, requestPrefix),
 				Size:      aws.ToInt64(object.Size),
 				CreatedAt: aws.ToTime(object.LastModified),
 			})
 		}
 		if !aws.ToBool(output.IsTruncated) {
-			return artifacts, nil
+			return packages, nil
 		}
 		if output.NextContinuationToken == nil || aws.ToString(output.NextContinuationToken) == "" {
 			return nil, errors.New("remote object listing omitted its continuation token")

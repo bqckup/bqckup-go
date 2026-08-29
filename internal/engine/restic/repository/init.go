@@ -58,7 +58,7 @@ func Init(ctx context.Context, b backend.Backend, password string) (*Repository,
 	return repo, nil
 }
 
-// rollbackInit removes artifacts from an initialization that did not reach a
+// rollbackInit removes leftover files from an initialization that did not reach a
 // usable config+key pair. Without this rollback, a transient key write failure
 // leaves a config that makes every retry try (and fail) to open the repository.
 func rollbackInit(ctx context.Context, b backend.Backend, key restic.Handle, initErr error) error {

@@ -13,7 +13,7 @@ type FileSource struct {
 	FollowSymlinks bool
 }
 
-type Artifact struct {
+type Package struct {
 	Path       string
 	Size       int64
 	SHA256     string
@@ -22,7 +22,7 @@ type Artifact struct {
 }
 
 type Exporter interface {
-	Export(ctx context.Context, source config.DatabaseSource, destination string) (Artifact, error)
+	Export(ctx context.Context, source config.DatabaseSource, destination string) (Package, error)
 }
 
 type IncrementalEngine interface {

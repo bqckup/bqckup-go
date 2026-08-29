@@ -9,10 +9,48 @@ const SchemaVersion = 2
 
 // Config is the immutable, fully loaded application configuration.
 type Config struct {
-	Version  int
-	App      App
-	Storages map[string]Storage
-	Sites    []Site
+	Version       int
+	App           App
+	Storages      map[string]Storage
+	Sites         []Site
+	Notifications Notifications
+}
+
+// Notification event names. These are the canonical values for the
+// notifications route contract; internal/notify maps them to its typed enum.
+const (
+	EventBackupFailed    = "backup_failed"
+	EventBackupCancelled = "backup_cancelled"
+	EventBackupNoChange  = "backup_no_change"
+)
+
+// Notifications is the optional top-level notifications section. Absent in
+// YAML it stays the zero value and notifications are off.
+type Notifications struct {
+	Channels map[string]Channel `mapstructure:"channels" yaml:"channels"`
+	Routes   []Route            `mapstructure:"routes" yaml:"routes"`
+}
+
+// Channel is one configured delivery channel. All fields share one struct;
+// validation enforces the per-type allowed field set, so fields foreign to a
+// channel type (for example host on a webhook channel) are rejected.
+// Credentials and URLs are environment-variable references only.
+type Channel struct {
+	Type          string   `mapstructure:"type" yaml:"type"`
+	Host          string   `mapstructure:"host" yaml:"host"`
+	Port          int      `mapstructure:"port" yaml:"port"`
+	UsernameEnv   string   `mapstructure:"username_env" yaml:"username_env"`
+	PasswordEnv   string   `mapstructure:"password_env" yaml:"password_env"`
+	From          string   `mapstructure:"from" yaml:"from"`
+	To            []string `mapstructure:"to" yaml:"to"`
+	URLEnv        string   `mapstructure:"url_env" yaml:"url_env"`
+	WebhookURLEnv string   `mapstructure:"webhook_url_env" yaml:"webhook_url_env"`
+}
+
+// Route maps one or more events to one or more channels.
+type Route struct {
+	Events   []string `mapstructure:"events" yaml:"events"`
+	Channels []string `mapstructure:"channels" yaml:"channels"`
 }
 
 type App struct {

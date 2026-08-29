@@ -17,7 +17,7 @@ import (
 
 const storageTimeLayout = "02 Jan 2006 15:04"
 
-type artifactJSON struct {
+type packageJSON struct {
 	Destination string    `json:"destination"`
 	Key         string    `json:"key"`
 	Size        int64     `json:"size"`
@@ -69,7 +69,7 @@ func newStorageCommand(opts *options) *cobra.Command {
 	var expiryDuration time.Duration
 	link := &cobra.Command{
 		Use:   "link <destination>",
-		Short: "Create a temporary download link for one remote artifact",
+		Short: "Create a temporary download link for one remote package",
 		Args: func(_ *cobra.Command, args []string) error {
 			if len(args) != 1 {
 				return fmt.Errorf("%w: storage link requires exactly one destination", ErrInvalidInput)
@@ -158,21 +158,21 @@ func writeStorageText(output io.Writer, listing backup.Listing) error {
 	if listing.Mode == "incremental" {
 		return writeSnapshotText(output, listing)
 	}
-	return writeArtifactText(output, listing)
+	return writePackageText(output, listing)
 }
 
-func writeArtifactText(output io.Writer, listing backup.Listing) error {
-	if len(listing.Artifacts) == 0 {
-		_, err := fmt.Fprintf(output, "No archive artifacts found for site %q on %q.\n", listing.Site, listing.Destination)
+func writePackageText(output io.Writer, listing backup.Listing) error {
+	if len(listing.Packages) == 0 {
+		_, err := fmt.Fprintf(output, "No packages found for site %q on %q.\n", listing.Site, listing.Destination)
 		return err
 	}
 	table := tabwriter.NewWriter(output, 0, 4, 2, ' ', 0)
 	if _, err := fmt.Fprintln(table, "DESTINATION\tKEY\tSIZE\tCREATED AT"); err != nil {
 		return err
 	}
-	for _, artifact := range listing.Artifacts {
+	for _, pkg := range listing.Packages {
 		if _, err := fmt.Fprintf(table, "%s\t%s\t%s\t%s\n",
-			artifact.Destination, artifact.Key, humanBytes(artifact.Size), artifact.CreatedAt.UTC().Format(storageTimeLayout)); err != nil {
+			pkg.Destination, pkg.Key, humanBytes(pkg.Size), pkg.CreatedAt.UTC().Format(storageTimeLayout)); err != nil {
 			return err
 		}
 	}
@@ -216,10 +216,10 @@ func encodeStorageJSON(encoder *json.Encoder, listing backup.Listing) error {
 		}
 		return encoder.Encode(rows)
 	}
-	rows := make([]artifactJSON, 0, len(listing.Artifacts))
-	for _, artifact := range listing.Artifacts {
-		rows = append(rows, artifactJSON{
-			Destination: artifact.Destination, Key: artifact.Key, Size: artifact.Size, CreatedAt: artifact.CreatedAt.UTC(),
+	rows := make([]packageJSON, 0, len(listing.Packages))
+	for _, pkg := range listing.Packages {
+		rows = append(rows, packageJSON{
+			Destination: pkg.Destination, Key: pkg.Key, Size: pkg.Size, CreatedAt: pkg.CreatedAt.UTC(),
 		})
 	}
 	return encoder.Encode(rows)

@@ -116,6 +116,18 @@ bqckup version
 Use `--output json` for machine-readable output. Run `bqckup --help` or any
 subcommand with `--help` to see all available options.
 
+## Notifications
+
+Add a `notifications:` section to `bqckup.yaml` to get an email, generic
+webhook, or Discord webhook when a run finishes. Three events exist:
+`backup_failed`, `backup_cancelled`, and `backup_no_change` (successful runs stay
+silent). Routes map events to channels; secrets and webhook URLs are
+environment-variable references only (`username_env`, `password_env`, `url_env`,
+`webhook_url_env`), never plaintext in YAML. Delivery is best effort: a failing
+channel prints a warning and never changes the run result or history. Skipped
+runs and preflight failures send nothing. `bqckup config validate` reports
+notification environment variables that are not set.
+
 ## Scheduling
 
 Run Bqckup with cron, systemd timers, or another scheduler. A daily cron job

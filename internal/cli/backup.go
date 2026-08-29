@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -14,6 +15,8 @@ import (
 	"github.com/bqckup/bqckup-go/internal/backup"
 	"github.com/spf13/cobra"
 )
+
+var errNoChange = errors.New("backup unchanged")
 
 type siteView struct {
 	Name             string     `json:"name"`
@@ -113,9 +116,18 @@ func newBackupCommand(opts *options) *cobra.Command {
 						return err
 					}
 					if opts.output == "json" {
-						return writeJSON(cmd, result)
+						if err := writeJSON(cmd, result); err != nil {
+							return err
+						}
+					} else {
+						if err := writeRunResultText(cmd.OutOrStdout(), result); err != nil {
+							return err
+						}
 					}
-					return writeRunResultText(cmd.OutOrStdout(), result)
+					if result.Status == backup.StatusNoChange {
+						return errNoChange
+					}
+					return nil
 				}
 
 				results, err := application.RunEnabledBackups(cmd.Context(), force)
@@ -123,11 +135,19 @@ func newBackupCommand(opts *options) *cobra.Command {
 					return err
 				}
 				if opts.output == "json" {
-					return writeJSON(cmd, results)
+					if err := writeJSON(cmd, results); err != nil {
+						return err
+					}
+				} else {
+					for _, result := range results {
+						if err := writeRunResultText(cmd.OutOrStdout(), result); err != nil {
+							return err
+						}
+					}
 				}
 				for _, result := range results {
-					if err := writeRunResultText(cmd.OutOrStdout(), result); err != nil {
-						return err
+					if result.Status == backup.StatusNoChange {
+						return errNoChange
 					}
 				}
 				return nil

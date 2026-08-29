@@ -20,19 +20,19 @@ type Archiver struct{}
 
 func New() *Archiver { return &Archiver{} }
 
-func (a *Archiver) Create(ctx context.Context, source backup.FileSource, destination string) (artifact backup.Artifact, err error) {
+func (a *Archiver) Create(ctx context.Context, source backup.FileSource, destination string) (backup.Package, error) {
 	if err := ctx.Err(); err != nil {
-		return backup.Artifact{}, err
+		return backup.Package{}, err
 	}
 	if len(source.Include) == 0 {
-		return backup.Artifact{}, errors.New("archive requires at least one source path")
+		return backup.Package{}, errors.New("archive requires at least one source path")
 	}
 	if err := os.MkdirAll(filepath.Dir(destination), 0o700); err != nil {
-		return backup.Artifact{}, fmt.Errorf("create archive directory: %w", err)
+		return backup.Package{}, fmt.Errorf("create archive directory: %w", err)
 	}
 	output, err := os.OpenFile(destination, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
-		return backup.Artifact{}, fmt.Errorf("create archive: %w", err)
+		return backup.Package{}, fmt.Errorf("create archive: %w", err)
 	}
 	success := false
 	defer func() {
@@ -50,35 +50,35 @@ func (a *Archiver) Create(ctx context.Context, source backup.FileSource, destina
 		clean := filepath.Clean(include)
 		rootName := filepath.Base(clean)
 		if rootName == "." || rootName == string(filepath.Separator) || rootName == "" {
-			return backup.Artifact{}, fmt.Errorf("cannot archive source root %q", include)
+			return backup.Package{}, fmt.Errorf("cannot archive source root %q", include)
 		}
 		if _, exists := rootNames[rootName]; exists {
-			return backup.Artifact{}, fmt.Errorf("source archive name %q is duplicated", rootName)
+			return backup.Package{}, fmt.Errorf("source archive name %q is duplicated", rootName)
 		}
 		rootNames[rootName] = struct{}{}
 		if err := state.add(clean, rootName, map[string]bool{}); err != nil {
-			return backup.Artifact{}, err
+			return backup.Package{}, err
 		}
 	}
 	if err := tw.Close(); err != nil {
-		return backup.Artifact{}, fmt.Errorf("finish tar archive: %w", err)
+		return backup.Package{}, fmt.Errorf("finish tar archive: %w", err)
 	}
 	if err := gz.Close(); err != nil {
-		return backup.Artifact{}, fmt.Errorf("finish gzip archive: %w", err)
+		return backup.Package{}, fmt.Errorf("finish gzip archive: %w", err)
 	}
 	if err := output.Sync(); err != nil {
-		return backup.Artifact{}, fmt.Errorf("sync archive: %w", err)
+		return backup.Package{}, fmt.Errorf("sync archive: %w", err)
 	}
 	if err := output.Close(); err != nil {
-		return backup.Artifact{}, fmt.Errorf("close archive: %w", err)
+		return backup.Package{}, fmt.Errorf("close archive: %w", err)
 	}
 
 	checksum, size, err := backup.ChecksumFile(destination)
 	if err != nil {
-		return backup.Artifact{}, err
+		return backup.Package{}, err
 	}
 	success = true
-	return backup.Artifact{
+	return backup.Package{
 		Path: destination, Size: size, SHA256: checksum,
 		SourceKind: "files", SourceName: "files",
 	}, nil

@@ -17,9 +17,9 @@ import (
 
 type fakeRemoteLister struct {
 	sets          []storage.BackupSet
-	artifacts     map[string][]storage.RemoteArtifact
+	packages      map[string][]storage.RemotePackage
 	setsErr       error
-	artifactsErr  error
+	packagesErr   error
 	listedSetKeys []string
 }
 
@@ -27,13 +27,13 @@ func (f *fakeRemoteLister) ListBackupSets(_ context.Context, _ string) ([]storag
 	return f.sets, f.setsErr
 }
 
-func (f *fakeRemoteLister) ListArtifacts(_ context.Context, setPrefix string) ([]storage.RemoteArtifact, error) {
+func (f *fakeRemoteLister) ListPackages(_ context.Context, setPrefix string) ([]storage.RemotePackage, error) {
 	f.listedSetKeys = append(f.listedSetKeys, setPrefix)
-	return f.artifacts[setPrefix], f.artifactsErr
+	return f.packages[setPrefix], f.packagesErr
 }
 
-func (f *fakeRemoteLister) Put(context.Context, storage.Artifact, string) (storage.StoredArtifact, error) {
-	return storage.StoredArtifact{}, errors.New("unused")
+func (f *fakeRemoteLister) Put(context.Context, storage.Package, string) (storage.StoredPackage, error) {
+	return storage.StoredPackage{}, errors.New("unused")
 }
 
 func (f *fakeRemoteLister) Delete(context.Context, string) error { return errors.New("unused") }
@@ -55,8 +55,8 @@ func (f *fakeSnapshotLister) ListSnapshots(_ context.Context, repo restic.RepoCo
 // internal/storage/local's store.
 type fakeLocalStore struct{}
 
-func (fakeLocalStore) Put(context.Context, storage.Artifact, string) (storage.StoredArtifact, error) {
-	return storage.StoredArtifact{}, errors.New("unused")
+func (fakeLocalStore) Put(context.Context, storage.Package, string) (storage.StoredPackage, error) {
+	return storage.StoredPackage{}, errors.New("unused")
 }
 func (fakeLocalStore) Delete(context.Context, string) error { return errors.New("unused") }
 func (fakeLocalStore) ListBackupSets(context.Context, string) ([]storage.BackupSet, error) {
@@ -79,7 +79,7 @@ func TestListFullModeReturnsNewestSetFirst(t *testing.T) {
 			{Key: "bqckup/site-a/2026-11-10T03-00-00.000000000Z", CreatedAt: older},
 			{Key: "bqckup/site-a/2026-11-11T04-00-00.000000000Z", CreatedAt: newer},
 		},
-		artifacts: map[string][]storage.RemoteArtifact{
+		packages: map[string][]storage.RemotePackage{
 			"bqckup/site-a/2026-11-10T03-00-00.000000000Z": {
 				{Key: "bqckup/site-a/2026-11-10T03-00-00.000000000Z/files.tar.gz", Size: 100, CreatedAt: older.Add(time.Second)},
 			},
@@ -93,11 +93,11 @@ func TestListFullModeReturnsNewestSetFirst(t *testing.T) {
 	listing, err := lister.List(context.Background(), "s3-primary", fullSite(), config.Storage{Type: "s3"}, remote)
 	require.NoError(t, err)
 	require.Equal(t, "full", listing.Mode)
-	require.Len(t, listing.Artifacts, 2)
-	assert.Equal(t, "bqckup/site-a/2026-11-11T04-00-00.000000000Z/files.tar.gz", listing.Artifacts[0].Key)
-	assert.Equal(t, int64(200), listing.Artifacts[0].Size)
-	assert.Equal(t, "s3-primary", listing.Artifacts[0].Destination)
-	assert.Equal(t, "bqckup/site-a/2026-11-10T03-00-00.000000000Z/files.tar.gz", listing.Artifacts[1].Key)
+	require.Len(t, listing.Packages, 2)
+	assert.Equal(t, "bqckup/site-a/2026-11-11T04-00-00.000000000Z/files.tar.gz", listing.Packages[0].Key)
+	assert.Equal(t, int64(200), listing.Packages[0].Size)
+	assert.Equal(t, "s3-primary", listing.Packages[0].Destination)
+	assert.Equal(t, "bqckup/site-a/2026-11-10T03-00-00.000000000Z/files.tar.gz", listing.Packages[1].Key)
 	// Newest set listed first.
 	assert.Equal(t, []string{
 		"bqckup/site-a/2026-11-11T04-00-00.000000000Z",
