@@ -15,14 +15,21 @@ should omit the `version` field. Existing files that explicitly contain
 ## Root file
 
 ```yaml
+server_id: 207.180.252.231
+
 app:
   state_database: /var/lib/bqckup/bqckup.db
   temporary_directory: /var/lib/bqckup/tmp
   lock_directory: /var/lib/bqckup/locks
   log_level: info
+  log_file: /var/log/bqckup/bqckup.log # optional; file mode 0600
 ```
 
-Environment overrides: `BQCKUP_STATE_DATABASE`, `BQCKUP_TEMPORARY_DIRECTORY`, `BQCKUP_LOCK_DIRECTORY`, and `BQCKUP_LOG_LEVEL`.
+Values inside `bqckup.yaml` are authoritative and are not overridden by
+environment variables. `BQCKUP_CONFIG_DIR` only selects the configuration
+directory when `--config-dir` is omitted. `log_level` accepts `debug`, `info`,
+`warn`, or `error`; `log_file` receives operational events and is created with
+mode `0600`.
 
 ## Storage file
 
@@ -59,12 +66,12 @@ storages:
     primary: false
 
   # S3-compatible settings loaded from an HTTPS provider at startup.
-  # `url` names an environment variable; it is not a literal URL.
+  # `url` is the literal provider URL.
   managed-s3:
     type: s3
     credentials:
       source: remote
-      url: BQCKUP_MANAGED_S3_CREDENTIAL_URL
+      url: https://credentials.example.com/bqckup/storage
     prefix: prod-backups                         # optional local override
     primary: false
 ```
@@ -72,11 +79,10 @@ storages:
 - **Cloudflare R2**: Use `type: r2` with an HTTPS endpoint (`https://<account_id>.r2.cloudflarestorage.com`) and `region: auto`. Credentials must be dedicated **R2 API Tokens** with *Object Read & Write* permissions.
 - **AWS S3 / S3-Compatible**: Use `type: s3`. For custom endpoints (e.g. MinIO, Wasabi), set `endpoint` and standard `region`.
 - **Remote provider**: `credentials.source: remote` requires `credentials.url`
-  to contain a valid environment-variable name. That variable must hold an
-  absolute HTTPS URL. Remote credentials cannot be mixed with `bucket`,
+  to contain an absolute HTTPS URL directly. Remote credentials cannot be mixed with `bucket`,
   `access_key_id`, `secret_access_key`, `region`, or `endpoint` in YAML.
   `prefix` and `primary` remain local settings.
-- **Security**: Keep storage files containing inline credentials as regular
+- **Security**: Keep storage files containing inline credentials or provider URLs as regular
   non-symlink files with mode `0600`. A remote provider response is retained
   only in process memory and is never written back to YAML, logs, history, or
   command output.
@@ -117,9 +123,9 @@ site:
   # backup_mode accepts 'full' (default) or 'incremental'
   backup_mode: incremental
   incremental:
-    # Name of the environment variable containing the repository password.
+    # Literal repository password; protect this file with mode 0600.
     # Incremental backup always uses Bqckup's built-in pure-Go engine.
-    password_env: RESTIC_PASSWORD
+    password: replace-with-a-strong-repository-password
   sources:
     files:
       include:
@@ -145,7 +151,7 @@ site:
 ```
 
 - **Backup Mode**: `backup_mode` defaults to `full` (`.tar.gz` archive). When set to `incremental`, Bqckup's built-in pure-Go engine creates Restic-format-v2 deduplicated file snapshots; no external Restic executable is required.
-- **Incremental Password**: `incremental.password_env` references the runtime environment variable holding the repository encryption password (plaintext passwords in YAML are strictly rejected).
+- **Incremental Password**: `incremental.password` contains the repository encryption password directly. The site file must be a regular, non-symlink file with exact mode `0600`; the value is never logged or printed.
 - **File Excludes**: `sources.files.exclude` accepts absolute paths or glob patterns relative to each include root. Basename globs such as `*.tmp` match at any depth; use a trailing `/**`, for example `cache/**`, to exclude a directory recursively. These semantics are shared by full and incremental backups.
 - **Removed field**: `incremental.engine` is no longer accepted. Remove it from existing site files. Restic format-v1 repositories must be migrated to format v2 separately before use.
 - **Database engines**: `mysql` and `postgres`. MySQL/MariaDB uses `mysqldump`; PostgreSQL uses `pg_dump`. Passwords are passed through `MYSQL_PWD` or `PGPASSWORD`. A password-bearing site file must be a regular file with mode `0600`.
@@ -167,9 +173,9 @@ bqckup --config-dir /etc/bqckup --output json config validate
 ```
 
 Unknown keys, invalid paths, unsupported types, and explicit versions other than `2` are rejected.
-`bqckup config validate` additionally fails when an environment variable
-referenced by the `notifications` section is unset or empty; the backup
-command itself never fails for that reason (delivery warns instead).
+`bqckup config validate` additionally checks notification URLs and requires a
+credential-bearing `bqckup.yaml` to be a regular, non-symlink file with mode
+`0600`.
 
 ## Notifications
 
@@ -183,35 +189,35 @@ notifications:
       type: smtp
       host: smtp.example.com
       port: 587
-      username_env: BQCKUP_SMTP_USERNAME
-      password_env: BQCKUP_SMTP_PASSWORD
+      username: backup-user
+      password: replace-with-smtp-password
       from: bqckup@example.com
       to:
         - ops@example.com
 
     webhook:
       type: webhook
-      url_env: BQCKUP_WEBHOOK_URL
+      url: https://hooks.example.com/bqckup
 
     discord:
       type: discord
-      webhook_url_env: BQCKUP_DISCORD_WEBHOOK_URL
+      webhook_url: https://discord.com/api/webhooks/replace-me
 
   routes:
-    - events: [backup_failed, backup_cancelled, backup_no_change]
+    - events: [all]
       channels: [email, discord]
 ```
 
 - **Channels** are named, one of three types. `smtp` requires `host`,
-  `port`, `from`, and a non-empty `to`; `webhook` requires `url_env`;
-  `discord` requires `webhook_url_env`. Fields foreign to the channel type
-  are rejected, as are `username_env`/`password_env` provided one without
+  `port`, `from`, and a non-empty `to`; `webhook` requires `url`;
+  `discord` requires `webhook_url`. Fields foreign to the channel type
+  are rejected, as are `username`/`password` provided one without
   the other.
-- **Secrets and URLs are environment-variable references only**
-  (`username_env`, `password_env`, `url_env`, `webhook_url_env`). Plaintext
-  values are rejected by strict decoding. Names must match the valid
-  environment-variable pattern. Values are resolved at send time; a missing
-  value is a per-channel warning.
+- **Credentials and URLs are literal config values** (`username`, `password`,
+  `url`, `webhook_url`). Because these values may be sensitive, a root config
+  containing any of them must be a regular, non-symlink file with exact mode
+  `0600`. Webhook URLs must be absolute HTTP(S) URLs; non-loopback endpoints
+  require HTTPS.
 - **Routes** map events to channels. Events are `backup_failed`,
   `backup_cancelled`, and `backup_no_change` (successful runs stay silent); a
   route needs at least one event and may fan out to several channels. A channel

@@ -1,6 +1,11 @@
 site:
   name: example
   enabled: true
+  # For incremental backups, uncomment these fields and set a strong password.
+  # Keep this file at mode 0600. Full mode is the default.
+  # backup_mode: incremental
+  # incremental:
+  #   password: replace-with-a-strong-repository-password
   sources:
     files:
       include:

@@ -25,7 +25,7 @@ func TestDiscordEmbedFailed(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	discord := NewDiscord("discord", "BQCKUP_DISCORD_WEBHOOK_URL", func(string) (string, bool) { return server.URL, true })
+	discord := NewDiscord("discord", server.URL)
 	lastSuccess := time.Date(2026, 8, 22, 1, 0, 0, 0, time.UTC)
 	input := backup.NotifyInput{
 		Event:            config.EventBackupFailed,
@@ -101,7 +101,7 @@ func TestDiscordNoChangeEmbed(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	discord := NewDiscord("discord", "BQCKUP_DISCORD_WEBHOOK_URL", func(string) (string, bool) { return server.URL, true })
+	discord := NewDiscord("discord", server.URL)
 	anchor := time.Date(2026, 8, 25, 6, 12, 0, 0, time.UTC)
 	input := backup.NotifyInput{
 		Event:              config.EventBackupNoChange,
@@ -148,7 +148,7 @@ func TestDiscordEmbedFailedWithoutErrorMessage(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	discord := NewDiscord("discord", "BQCKUP_DISCORD_WEBHOOK_URL", func(string) (string, bool) { return server.URL, true })
+	discord := NewDiscord("discord", server.URL)
 	input := backup.NotifyInput{
 		Event:         config.EventBackupFailed,
 		SiteName:      "example.org",
@@ -190,7 +190,7 @@ func TestDiscordCancelledEmbedHasNoFailureBlock(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	discord := NewDiscord("discord", "BQCKUP_DISCORD_WEBHOOK_URL", func(string) (string, bool) { return server.URL, true })
+	discord := NewDiscord("discord", server.URL)
 	input := backup.NotifyInput{
 		Event:         config.EventBackupCancelled,
 		SiteName:      "example.org",
@@ -236,7 +236,7 @@ func TestDiscordEmbedShowsHumanRowsOnly(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	discord := NewDiscord("discord", "BQCKUP_DISCORD_WEBHOOK_URL", func(string) (string, bool) { return server.URL, true })
+	discord := NewDiscord("discord", server.URL)
 	input := backup.NotifyInput{
 		Event:         config.EventBackupFailed,
 		SiteName:      "example.org",
@@ -264,12 +264,12 @@ func TestDiscordEmbedShowsHumanRowsOnly(t *testing.T) {
 }
 
 func TestDiscordReturnsErrorsLikeWebhook(t *testing.T) {
-	discord := NewDiscord("discord", "BQCKUP_DISCORD_WEBHOOK_URL", func(string) (string, bool) { return "", false })
+	discord := NewDiscord("discord", "")
 	err := discord.Send(context.Background(), NewPayload(backup.NotifyInput{
 		Event:    config.EventBackupFailed,
 		SiteName: "example.org",
 		Status:   backup.StatusFailed,
 	}))
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "BQCKUP_DISCORD_WEBHOOK_URL")
+	assert.Contains(t, err.Error(), "unsupported protocol scheme")
 }

@@ -7,11 +7,10 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/bqckup/bqckup-go/internal/apperror"
-	"github.com/bqckup/bqckup-go/internal/backup/restic"
+	"github.com/bqckup/bqckup-go/internal/backup/incremental"
 	"github.com/bqckup/bqckup-go/internal/clock"
 	"github.com/bqckup/bqckup-go/internal/config"
 	"github.com/bqckup/bqckup-go/internal/history"
@@ -101,6 +100,7 @@ type Locker interface {
 }
 
 type Dependencies struct {
+	ServerID           string
 	Repository         RunRepository
 	Archiver           Archiver
 	IncrementalEngine  IncrementalEngine
@@ -112,40 +112,41 @@ type Dependencies struct {
 	Notifier           Notifier
 	Clock              clock.Clock
 	TemporaryDirectory string
-	EnvLookup          func(string) (string, bool)
 }
 
 type Runner struct{ dependencies Dependencies }
 
-func NewRunner(dependencies Dependencies) *Runner { return &Runner{dependencies: dependencies} }
-
-func (r *Runner) lookupEnv(key string) (string, bool) {
-	if r.dependencies.EnvLookup != nil {
-		return r.dependencies.EnvLookup(key)
+func backupSitePrefix(siteName, serverID string) string {
+	if serverID == "" {
+		return path.Join("bqckup", siteName)
 	}
-	return os.LookupEnv(key)
+	return path.Join("bqckup", serverID, siteName)
 }
 
+func NewRunner(dependencies Dependencies) *Runner { return &Runner{dependencies: dependencies} }
+
 // buildRepo constructs the engine repository configuration for one
-// destination. requirePassword mirrors the run-time rule that the
-// repository password environment variable must be set.
-func (r *Runner) buildRepo(site config.Site, storageConfig config.Storage, requirePassword bool) (restic.RepoConfig, error) {
-	return buildRepoConfig(site, storageConfig, r.lookupEnv, requirePassword)
+// destination. requirePassword enforces a configured repository password.
+func (r *Runner) buildRepo(site config.Site, storageConfig config.Storage, requirePassword bool) (incremental.RepoConfig, error) {
+	return buildRepoConfig(site, storageConfig, requirePassword, r.dependencies.ServerID)
 }
 
 // buildRepoConfig constructs the engine repository configuration for one
-// destination. requirePassword mirrors the run-time rule that the
-// repository password environment variable must be set.
-func buildRepoConfig(site config.Site, storageConfig config.Storage, lookupEnv func(string) (string, bool), requirePassword bool) (restic.RepoConfig, error) {
-	repoURL, err := restic.RepositoryURL(storageConfig, site.Name)
+// destination from values already loaded from protected YAML files.
+func buildRepoConfig(site config.Site, storageConfig config.Storage, requirePassword bool, serverID ...string) (incremental.RepoConfig, error) {
+	server := ""
+	if len(serverID) > 0 {
+		server = serverID[0]
+	}
+	repoURL, err := incremental.RepositoryURL(storageConfig, site.Name, server)
 	if err != nil {
-		return restic.RepoConfig{}, err
+		return incremental.RepoConfig{}, err
 	}
-	password, ok := lookupEnv(site.Incremental.PasswordEnv)
-	if requirePassword && (!ok || password == "") {
-		return restic.RepoConfig{}, apperror.Wrap(apperror.CategoryPreflight, fmt.Sprintf("environment variable %q for incremental repository password is not set or empty", site.Incremental.PasswordEnv), nil)
+	password := site.Incremental.Password
+	if requirePassword && password == "" {
+		return incremental.RepoConfig{}, apperror.Wrap(apperror.CategoryPreflight, "incremental repository password is not configured", nil)
 	}
-	return restic.RepoConfig{
+	return incremental.RepoConfig{
 		URL:             repoURL,
 		Password:        password,
 		AccessKeyID:     storageConfig.AccessKeyID,
@@ -153,7 +154,7 @@ func buildRepoConfig(site config.Site, storageConfig config.Storage, lookupEnv f
 		Region:          storageConfig.Region,
 		Endpoint:        storageConfig.Endpoint,
 		Bucket:          storageConfig.Bucket,
-		Prefix:          path.Join(storageConfig.Prefix, "restic", site.Name),
+		Prefix:          path.Join(storageConfig.Prefix, incremental.RepositoryPrefix(site.Name, server)),
 	}, nil
 }
 
@@ -245,16 +246,15 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 	}
 
 	backupSet := storage.FormatBackupSet(now)
-	sitePrefix := path.Join("bqckup", site.Name)
+	sitePrefix := backupSitePrefix(site.Name, r.dependencies.ServerID)
 
 	if site.BackupMode == "incremental" {
 		engine := r.dependencies.IncrementalEngine
 		if engine == nil {
 			return fail(apperror.Wrap(apperror.CategoryInternal, "incremental backup engine is unavailable", nil))
 		}
-		password, ok := r.lookupEnv(site.Incremental.PasswordEnv)
-		if !ok || password == "" {
-			return fail(apperror.Wrap(apperror.CategoryPreflight, fmt.Sprintf("environment variable %q for incremental repository password is not set or empty", site.Incremental.PasswordEnv), nil))
+		if site.Incremental.Password == "" {
+			return fail(apperror.Wrap(apperror.CategoryPreflight, "incremental repository password is not configured", nil))
 		}
 		for _, destination := range site.Destinations {
 			storageConfig, ok := r.dependencies.Storages[destination.Storage]
@@ -268,7 +268,7 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 			if err := engine.EnsureRepository(ctx, repo); err != nil {
 				return fail(apperror.Wrap(apperror.CategoryStorage, "could not ensure incremental repository", err))
 			}
-			spec := restic.BackupSpec{
+			spec := incremental.BackupSpec{
 				SiteName: site.Name,
 				Include:  []string(site.Sources.Files.Include),
 				Exclude:  []string(site.Sources.Files.Exclude),
@@ -395,17 +395,13 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 				fmt.Fprintf(os.Stderr, "warning: could not load current backup packages: %v\n", currErr)
 			} else if unchangedSizes(currPkgs, prevPkgs) {
 				seenSources := make(map[[2]string]struct{})
-				var details []string
 				for _, p := range currPkgs {
 					k := [2]string{p.SourceKind, p.SourceName}
 					if _, seen := seenSources[k]; seen {
 						continue
 					}
 					seenSources[k] = struct{}{}
-					name := path.Base(p.ObjectKey)
-					details = append(details, fmt.Sprintf("%s (%d B)", name, p.Size))
 				}
-				fmt.Fprintf(os.Stderr, "warning: backup for %s is unchanged: %s — same sizes as the previous run\n", site.Name, strings.Join(details, ", "))
 
 				count := len(seenSources)
 				var msg string

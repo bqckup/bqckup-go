@@ -2,7 +2,8 @@ package config
 
 import (
 	"context"
-	"strings"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -68,27 +69,27 @@ func TestValidateNotificationsRejectsInvalidForms(t *testing.T) {
 			wantErr: "at least one recipient",
 		},
 		{
-			name: "webhook without url_env",
+			name: "webhook without url",
 			mutate: func(n *Notifications) {
 				n.Channels["webhook"] = Channel{Type: "webhook"}
 			},
-			wantErr: "url_env is required",
+			wantErr: "url is required",
 		},
 		{
-			name: "discord without webhook_url_env",
+			name: "discord without webhook_url",
 			mutate: func(n *Notifications) {
 				n.Channels["discord"] = Channel{Type: "discord"}
 			},
-			wantErr: "webhook_url_env is required",
+			wantErr: "webhook_url is required",
 		},
 		{
-			name: "smtp with url_env",
+			name: "smtp with url",
 			mutate: func(n *Notifications) {
 				channel := n.Channels["email"]
-				channel.URLEnv = "BQCKUP_WEBHOOK_URL"
+				channel.URL = "BQCKUP_WEBHOOK_URL"
 				setChannel(n, "email", channel)
 			},
-			wantErr: "url_env is not valid for smtp channels",
+			wantErr: "url is not valid for smtp channels",
 		},
 		{
 			name: "webhook with host",
@@ -100,51 +101,51 @@ func TestValidateNotificationsRejectsInvalidForms(t *testing.T) {
 			wantErr: "host is not valid for webhook channels",
 		},
 		{
-			name: "webhook with webhook_url_env",
+			name: "webhook with webhook_url",
 			mutate: func(n *Notifications) {
 				channel := n.Channels["webhook"]
-				channel.WebhookURLEnv = "BQCKUP_DISCORD_WEBHOOK_URL"
+				channel.WebhookURL = "BQCKUP_DISCORD_WEBHOOK_URL"
 				setChannel(n, "webhook", channel)
 			},
-			wantErr: "webhook_url_env is not valid for webhook channels",
+			wantErr: "webhook_url is not valid for webhook channels",
 		},
 		{
-			name: "discord with url_env",
+			name: "discord with url",
 			mutate: func(n *Notifications) {
 				channel := n.Channels["discord"]
-				channel.URLEnv = "BQCKUP_WEBHOOK_URL"
+				channel.URL = "BQCKUP_WEBHOOK_URL"
 				setChannel(n, "discord", channel)
 			},
-			wantErr: "url_env is not valid for discord channels",
+			wantErr: "url is not valid for discord channels",
 		},
 		{
-			name: "username_env without password_env",
+			name: "username without password",
 			mutate: func(n *Notifications) {
 				channel := n.Channels["email"]
-				channel.UsernameEnv = "BQCKUP_SMTP_USERNAME"
-				channel.PasswordEnv = ""
+				channel.Username = "BQCKUP_SMTP_USERNAME"
+				channel.Password = ""
 				setChannel(n, "email", channel)
 			},
 			wantErr: "must be provided together",
 		},
 		{
-			name: "password_env without username_env",
+			name: "password without username",
 			mutate: func(n *Notifications) {
 				channel := n.Channels["email"]
-				channel.PasswordEnv = "BQCKUP_SMTP_PASSWORD"
-				channel.UsernameEnv = ""
+				channel.Password = "BQCKUP_SMTP_PASSWORD"
+				channel.Username = ""
 				setChannel(n, "email", channel)
 			},
 			wantErr: "must be provided together",
 		},
 		{
-			name: "invalid env name",
+			name: "invalid webhook url",
 			mutate: func(n *Notifications) {
 				channel := n.Channels["webhook"]
-				channel.URLEnv = "webhook-url"
+				channel.URL = "webhook-url"
 				setChannel(n, "webhook", channel)
 			},
-			wantErr: "must be a valid environment variable name",
+			wantErr: "must be an absolute HTTP(S) URL",
 		},
 		{
 			name: "unsafe channel name",
@@ -173,14 +174,14 @@ func TestValidateNotificationsRejectsInvalidForms(t *testing.T) {
 			mutate: func(n *Notifications) {
 				n.Routes[0].Events = []string{"backup_started"}
 			},
-			wantErr: "must be one of backup_failed, backup_cancelled, or backup_no_change",
+			wantErr: "must be one of all, backup_failed, backup_cancelled, or backup_no_change",
 		},
 		{
 			name: "route with backup_succeeded rejected",
 			mutate: func(n *Notifications) {
 				n.Routes[0].Events = []string{"backup_succeeded"}
 			},
-			wantErr: "must be one of backup_failed, backup_cancelled, or backup_no_change",
+			wantErr: "must be one of all, backup_failed, backup_cancelled, or backup_no_change",
 		},
 	}
 	for _, test := range tests {
@@ -231,11 +232,11 @@ func validNotifications() Notifications {
 		Channels: map[string]Channel{
 			"email": {
 				Type: "smtp", Host: "smtp.example.com", Port: 587,
-				UsernameEnv: "BQCKUP_SMTP_USERNAME", PasswordEnv: "BQCKUP_SMTP_PASSWORD",
+				Username: "backup-user", Password: "smtp-secret",
 				From: "bqckup@example.com", To: []string{"ops@example.com"},
 			},
-			"webhook": {Type: "webhook", URLEnv: "BQCKUP_WEBHOOK_URL"},
-			"discord": {Type: "discord", WebhookURLEnv: "BQCKUP_DISCORD_WEBHOOK_URL"},
+			"webhook": {Type: "webhook", URL: "https://hooks.example.test/bqckup"},
+			"discord": {Type: "discord", WebhookURL: "https://discord.example.test/api/webhooks/1/secret"},
 		},
 		Routes: []Route{
 			{Events: []string{EventBackupFailed, EventBackupCancelled}, Channels: []string{"email", "discord", "webhook"}},
@@ -249,17 +250,17 @@ const validNotificationsYAML = `notifications:
       type: smtp
       host: smtp.example.com
       port: 587
-      username_env: BQCKUP_SMTP_USERNAME
-      password_env: BQCKUP_SMTP_PASSWORD
+      username: backup-user
+      password: smtp-secret
       from: bqckup@example.com
       to:
         - ops@example.com
     webhook:
       type: webhook
-      url_env: BQCKUP_WEBHOOK_URL
+      url: https://hooks.example.test/bqckup
     discord:
       type: discord
-      webhook_url_env: BQCKUP_DISCORD_WEBHOOK_URL
+      webhook_url: https://discord.example.test/api/webhooks/1/secret
   routes:
     - events: [backup_failed, backup_cancelled]
       channels: [email, discord, webhook]
@@ -275,24 +276,17 @@ func TestLoadDecodesNotificationsSection(t *testing.T) {
 	assert.Equal(t, "smtp.example.com", cfg.Notifications.Channels["email"].Host)
 	assert.Equal(t, 587, cfg.Notifications.Channels["email"].Port)
 	assert.Equal(t, []string{"ops@example.com"}, cfg.Notifications.Channels["email"].To)
-	assert.Equal(t, "BQCKUP_WEBHOOK_URL", cfg.Notifications.Channels["webhook"].URLEnv)
+	assert.Equal(t, "https://hooks.example.test/bqckup", cfg.Notifications.Channels["webhook"].URL)
 	require.Len(t, cfg.Notifications.Routes, 1)
 	assert.Equal(t, []string{EventBackupFailed, EventBackupCancelled}, cfg.Notifications.Routes[0].Events)
 }
 
-func TestLoadRejectsPlaintextNotificationCredentials(t *testing.T) {
-	plaintext := []string{
-		"    email:\n      type: smtp\n      host: smtp.example.com\n      port: 587\n      password: hunter2\n      from: bqckup@example.com\n      to: [ops@example.com]\n",
-		"    webhook:\n      type: webhook\n      url: https://example.invalid/hook?token=secret\n",
-		"    discord:\n      type: discord\n      webhook_url: https://discord.invalid/api/webhooks/1/secret\n",
-	}
-	for _, channel := range plaintext {
-		t.Run(strings.TrimSpace(channel), func(t *testing.T) {
-			dir := writeConfigTree(t, "version: 2\napp:\n  state_database: data/bqckup.db\n  temporary_directory: tmp\n  lock_directory: locks\nnotifications:\n  channels:\n"+channel, localStorageYAML, validSiteYAML(t))
+func TestLoadRequires0600ForInlineNotificationCredentials(t *testing.T) {
+	dir := writeConfigTree(t, "version: 2\napp:\n  state_database: data/bqckup.db\n  temporary_directory: tmp\n  lock_directory: locks\n"+validNotificationsYAML, localStorageYAML, validSiteYAML(t))
+	rootPath := filepath.Join(dir, "bqckup.yaml")
+	require.NoError(t, os.Chmod(rootPath, 0o644))
 
-			_, err := Load(context.Background(), dir)
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), "bqckup.yaml")
-		})
-	}
+	_, err := Load(context.Background(), dir)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "must have mode 0600")
 }

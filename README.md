@@ -82,8 +82,27 @@ The default configuration directory is `/etc/bqckup`:
 Ready-to-edit examples are in [`configs/`](configs/). Use
 `--config-dir <directory>` to load a different configuration tree.
 
+The `configs/sites/failure-test.yaml` example is intentionally enabled and
+uses a missing source path so notification and failure-history behavior can be
+tested with `bqckup backup run failure-test --force`.
+
 Credential-bearing YAML files must be regular files, not symbolic links, and
 must have mode `0600`. Never commit real passwords or storage keys.
+
+To convert a legacy configuration tree, install PyYAML and run:
+
+```bash
+python3 -m pip install -r scripts/requirements-converter.txt
+sudo mv /etc/bqckup /etc/bqckup_old
+python3 scripts/convert_legacy_config.py \
+  --input-dir /etc/bqckup_old \
+  --output-dir /etc/bqckup
+sudo bqckup --config-dir /etc/bqckup config validate
+```
+
+The converter does not modify the legacy tree or print credentials. Review
+warnings—especially undefined legacy destinations such as `dummy`—before
+switching the service to the generated configuration.
 
 ## Backup modes
 
@@ -91,14 +110,14 @@ must have mode `0600`. Never commit real passwords or storage keys.
 
 Full mode is the default. It creates portable `.tar.gz` file archives and
 compressed `.sql.gz` database dumps below
-`bqckup/<site>/<UTC timestamp>/` in each destination.
+`bqckup/<server_id>/<site>/<UTC timestamp>/` in each destination.
 
 ### Incremental backup
 
 Incremental mode stores encrypted, deduplicated file snapshots below
-`restic/<site>/` in each destination. Set `backup_mode: incremental` and set
-`incremental.password_env` to the name of an environment variable containing
-the repository password. The built-in engine is always used.
+`bqckup/<server_id>/<site>/incremental-backup/` in each destination. Set `backup_mode: incremental` and set
+`incremental.password` directly to the repository password. Keep the site YAML
+as a regular, non-symlink file with mode `0600`. The built-in engine is always used.
 
 ## Commands
 
@@ -114,19 +133,27 @@ bqckup version
 ```
 
 Use `--output json` for machine-readable output. Run `bqckup --help` or any
-subcommand with `--help` to see all available options.
+subcommand with `--help` to see all available options. In text mode,
+`backup run` reports each site as soon as it starts, shows a loading spinner in
+an interactive terminal (or a five-second heartbeat when redirected), and
+prints its result as soon as it finishes; JSON mode suppresses progress text.
+
+`storage list` displays full-mode archives as stored objects. For incremental
+sites it displays file snapshots separately; when the site has enabled
+databases, a `DATABASE PACKAGES` section also lists the timestamped database
+exports.
 
 ## Notifications
 
 Add a `notifications:` section to `bqckup.yaml` to get an email, generic
 webhook, or Discord webhook when a run finishes. Three events exist:
 `backup_failed`, `backup_cancelled`, and `backup_no_change` (successful runs stay
-silent). Routes map events to channels; secrets and webhook URLs are
-environment-variable references only (`username_env`, `password_env`, `url_env`,
-`webhook_url_env`), never plaintext in YAML. Delivery is best effort: a failing
+silent). Routes map events to channels; SMTP credentials and webhook URLs are
+written directly as `username`, `password`, `url`, and `webhook_url`. A root
+config containing these values must be a regular file with mode `0600`. Delivery is best effort: a failing
 channel prints a warning and never changes the run result or history. Skipped
-runs and preflight failures send nothing. `bqckup config validate` reports
-notification environment variables that are not set.
+runs and preflight failures send nothing. `bqckup config validate` checks the
+notification URL format and protected file permissions.
 
 ## Scheduling
 

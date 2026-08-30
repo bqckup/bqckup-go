@@ -16,6 +16,7 @@ import (
 
 type rootDocument struct {
 	Version       *int          `mapstructure:"version"`
+	ServerID      string        `mapstructure:"server_id"`
 	App           App           `mapstructure:"app"`
 	Notifications Notifications `mapstructure:"notifications"`
 }
@@ -42,7 +43,10 @@ func Load(ctx context.Context, dir string) (Config, error) {
 
 	rootPath := filepath.Join(dir, "bqckup.yaml")
 	var root rootDocument
-	if err := decode(rootPath, &root, bindRootEnvironment); err != nil {
+	if err := decode(rootPath, &root, nil); err != nil {
+		return Config{}, err
+	}
+	if err := validateNotificationCredentialFile(rootPath, root.Notifications); err != nil {
 		return Config{}, err
 	}
 
@@ -79,7 +83,7 @@ func Load(ctx context.Context, dir string) (Config, error) {
 		if err := decode(sitePath, &doc, nil); err != nil {
 			return Config{}, err
 		}
-		if err := validateDatabaseCredentialFile(sitePath, doc.Site); err != nil {
+		if err := validateSiteCredentialFile(sitePath, doc.Site); err != nil {
 			return Config{}, err
 		}
 		doc.Site.SchemaVersion = versionOrDefault(doc.Version)
@@ -102,12 +106,16 @@ func Load(ctx context.Context, dir string) (Config, error) {
 	root.App.StateDatabase = resolveRootPath(root.App.StateDatabase)
 	root.App.TemporaryDirectory = resolveRootPath(root.App.TemporaryDirectory)
 	root.App.LockDirectory = resolveRootPath(root.App.LockDirectory)
+	if root.App.LogFile != "" {
+		root.App.LogFile = resolveRootPath(root.App.LogFile)
+	}
 	if root.App.LogLevel == "" {
 		root.App.LogLevel = "info"
 	}
 
 	cfg := Config{
 		Version:       versionOrDefault(root.Version),
+		ServerID:      root.ServerID,
 		App:           root.App,
 		Storages:      stores.Storages,
 		Sites:         sites,
@@ -126,6 +134,33 @@ func Load(ctx context.Context, dir string) (Config, error) {
 	return cfg, nil
 }
 
+func validateNotificationCredentialFile(path string, notifications Notifications) error {
+	hasCredential := false
+	for _, channel := range notifications.Channels {
+		if channel.Username != "" || channel.Password != "" || channel.URL != "" || channel.WebhookURL != "" {
+			hasCredential = true
+			break
+		}
+	}
+	if !hasCredential {
+		return nil
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return &Error{File: path, Kind: ErrorRead, Err: err}
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return validationError(path, "notifications", "credential-bearing root file must not be a symlink")
+	}
+	if !info.Mode().IsRegular() {
+		return validationError(path, "notifications", "credential-bearing root file must be a regular file")
+	}
+	if info.Mode().Perm() != 0o600 {
+		return validationError(path, "notifications", "credential-bearing root file must have mode 0600")
+	}
+	return nil
+}
+
 func versionOrDefault(version *int) int {
 	if version == nil {
 		return SchemaVersion
@@ -133,8 +168,8 @@ func versionOrDefault(version *int) int {
 	return *version
 }
 
-func validateDatabaseCredentialFile(path string, site Site) error {
-	hasPassword := false
+func validateSiteCredentialFile(path string, site Site) error {
+	hasPassword := site.Incremental.Password != ""
 	for _, database := range site.Sources.Databases {
 		if database.Password != "" {
 			hasPassword = true
@@ -150,13 +185,13 @@ func validateDatabaseCredentialFile(path string, site Site) error {
 		return &Error{File: path, Kind: ErrorRead, Err: err}
 	}
 	if info.Mode()&os.ModeSymlink != 0 {
-		return validationError(path, "site.sources.databases", "password-bearing site file must not be a symlink")
+		return validationError(path, "site", "credential-bearing site file must not be a symlink")
 	}
 	if !info.Mode().IsRegular() {
-		return validationError(path, "site.sources.databases", "password-bearing site file must be a regular file")
+		return validationError(path, "site", "credential-bearing site file must be a regular file")
 	}
 	if info.Mode().Perm() != 0o600 {
-		return validationError(path, "site.sources.databases", "password-bearing site file must have mode 0600")
+		return validationError(path, "site", "credential-bearing site file must have mode 0600")
 	}
 	return nil
 }
@@ -185,7 +220,7 @@ func storagePath(dir string) (string, error) {
 func validateCredentialFile(path string, storages map[string]Storage) error {
 	hasCredentials := false
 	for _, storage := range storages {
-		if storage.AccessKeyID != "" || storage.SecretAccessKey != "" {
+		if storage.AccessKeyID != "" || storage.SecretAccessKey != "" || storage.Credentials.URL != "" {
 			hasCredentials = true
 			break
 		}
@@ -245,12 +280,4 @@ func legacyBooleanHook() mapstructure.DecodeHookFuncType {
 			return value, nil
 		}
 	}
-}
-
-func bindRootEnvironment(v *viper.Viper) {
-	v.SetEnvPrefix("BQCKUP")
-	_ = v.BindEnv("app.state_database", "BQCKUP_STATE_DATABASE")
-	_ = v.BindEnv("app.temporary_directory", "BQCKUP_TEMPORARY_DIRECTORY")
-	_ = v.BindEnv("app.lock_directory", "BQCKUP_LOCK_DIRECTORY")
-	_ = v.BindEnv("app.log_level", "BQCKUP_LOG_LEVEL")
 }

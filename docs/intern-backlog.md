@@ -84,24 +84,24 @@ binary remains an opt-in compatibility-test oracle, not a runtime adapter.
 
 ## M06 — Remote HTTP credential provider
 
-**Status:** Delivered (2026-08-26). Issue #21. The provider URL is referenced
-by `credentials.url`, which contains an environment-variable name; returned
-storage settings remain in memory only.
+**Status:** Delivered (2026-08-26), then simplified in v0.0.5. Issue #21. The
+provider URL is stored directly in `credentials.url`; returned storage settings
+remain in memory only.
 
-**Objective:** Support the legacy `remote_url` use case through a constrained provider whose URL is itself supplied by an environment variable.
+**Objective:** Support the legacy `remote_url` use case through a constrained provider whose URL is supplied directly by protected storage YAML.
 
 **Prerequisites:** M04 merged; response schema, TLS policy, timeout, and refresh semantics approved in a short design note.
 
-**In scope:** `credentials.source: remote`, `credentials.url` environment
-reference, HTTPS client with timeout, bounded response, strict JSON decoding,
+**In scope:** `credentials.source: remote`, literal `credentials.url`, HTTPS
+client with timeout, bounded response, strict JSON decoding,
 in-memory storage settings, redacted errors.
 
-**Out of scope:** URL literal in YAML, credential persistence, arbitrary headers/scripts, retries without limits.
+**Out of scope:** credential persistence, arbitrary headers/scripts, retries without limits.
 
 **Acceptance:** Valid responses create short-lived SDK credentials; non-HTTPS endpoints are rejected except explicitly isolated tests; response bodies and URLs never appear in output/history.
 
 **Required tests:** Timeout, cancellation, status code, oversized/malformed
-response, missing URL env, URL and credential redaction.
+response, missing URL, URL and credential redaction.
 
 **Suggested commit:** `feat: add remote S3 credential provider`
 
@@ -428,15 +428,15 @@ channels (`smtp`, `webhook`, `discord`) and routes mapping events
 recorded in history, the runner notifies through every matching channel with
 one shared sanitized payload including failure context (`last_successful_at`,
 `failure_streak`). Delivery is best effort: a failing channel warns on stderr
-and never changes run status or history. `bqckup config validate` flags
-referenced environment variables that are unset.
+and never changes run status or history. `bqckup config validate` checks
+literal endpoints and protected-file permissions.
 
 **Prerequisites:** Delivered history recording (`RunArtifacts` query). No
 new dependencies (`net/smtp`, `net/http`), no history schema change,
 `RunResult` JSON contract unchanged.
 
 **In scope:** config types, strict decode and validation (per-type fields,
-`*_env` references only, both-or-neither SMTP auth, route/channel
+`*` references only, both-or-neither SMTP auth, route/channel
 references); `internal/notify` package (dispatcher, shared payload with
 distinct-source artifact aggregation, webhook, Discord embed, SMTP with
 STARTTLS and implicit TLS on 465, PLAIN auth only over encrypted sessions);

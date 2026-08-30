@@ -79,18 +79,31 @@ Initialization never overwrites an existing configuration file.
 `bqckup.yaml`:
 
 ```yaml
+server_id: 207.180.252.231
+
 app:
   state_database: /var/lib/bqckup/bqckup.db
   temporary_directory: /var/lib/bqckup/tmp
   lock_directory: /var/lib/bqckup/locks
   log_level: info
+  log_file: /var/log/bqckup/bqckup.log # optional; file mode 0600
 ```
 
-Relative paths are resolved from the configuration directory. The environment
-variables `BQCKUP_STATE_DATABASE`, `BQCKUP_TEMPORARY_DIRECTORY`,
-`BQCKUP_LOCK_DIRECTORY`, and `BQCKUP_LOG_LEVEL` can override these settings.
+Relative paths are resolved from the configuration directory. Values inside
+the YAML are authoritative and are not overridden by environment variables.
+`log_level` accepts `debug`, `info`, `warn`, or `error`. When `log_file` is
+set, Bqckup appends operational events to that file and creates it with mode
+`0600`.
 
-## 4. Configure storage
+## 4. Configure server and storage
+
+Set the global server identity in `bqckup.yaml`:
+
+```yaml
+server_id: 207.180.252.231
+```
+
+Each Bqckup installation should use its own stable server ID.
 
 Edit `config/storages.yaml`. Storage names use lowercase letters, numbers,
 dots, underscores, and hyphens.
@@ -210,7 +223,7 @@ Important rules:
 - Every enabled site needs at least one destination, either explicitly or
   through one primary storage.
 
-A site file containing a database password must have mode `0600`, must be a
+A site file containing a database or incremental repository password must have mode `0600`, must be a
 regular file, and must not be a symbolic link:
 
 ```bash
@@ -222,7 +235,7 @@ Bqckup passes database passwords to exporters through `MYSQL_PWD` or
 
 ### Incremental backup example
 
-Change the site mode and add an environment-variable name:
+Change the site mode and add the repository password directly:
 
 ```yaml
 site:
@@ -230,7 +243,7 @@ site:
   enabled: true
   backup_mode: incremental
   incremental:
-    password_env: BQCKUP_REPOSITORY_PASSWORD
+    password: replace-with-a-strong-repository-password
   sources:
     files:
       include:
@@ -246,18 +259,13 @@ site:
     keep_last: 7
 ```
 
-Set the password in the environment used to run Bqckup:
+The value is stored in this protected YAML file. Keep it at mode `0600`, do
+not commit it, and do not add the removed `incremental.engine` field; the
+built-in engine is always used.
 
-```bash
-export BQCKUP_REPOSITORY_PASSWORD='replace-with-a-strong-secret'
-```
-
-The value is not stored in YAML. Do not add the removed
-`incremental.engine` field; the built-in engine is always used.
-
-Incremental repositories are stored below `restic/<site>/` inside each
-destination. Full backup sets are stored below
-`bqckup/<site>/<UTC timestamp>/`.
+Incremental repositories are stored below
+`bqckup/<server_id>/<site>/incremental-backup/` inside each destination. Full
+backup sets are stored below `bqckup/<server_id>/<site>/<UTC timestamp>/`.
 
 ## 6. Validate before running
 
@@ -273,8 +281,8 @@ bqckup doctor --site website
 ```
 
 `config validate` checks the complete YAML structure. `doctor` also checks
-writable application directories, required database tools, and incremental
-password environment variables.
+writable application directories, required database tools, and configured
+incremental passwords without printing their values.
 
 ## 7. Daily operations
 
@@ -295,6 +303,18 @@ Ignore `minimum_interval` for one run:
 ```bash
 bqckup backup run website --force
 ```
+
+Text output immediately shows which site and backup mode are running, shows a
+loading spinner in an interactive terminal (or a heartbeat every five seconds
+when redirected), then prints that site's result when it finishes. `--output
+json` suppresses these progress lines so stdout remains valid machine-readable
+JSON.
+
+Storage listing follows the backup mode: full sites show archive objects,
+while incremental sites show file snapshots. If an incremental site has an
+enabled database source, its database exports appear in a separate
+`DATABASE PACKAGES` table. JSON output uses `snapshots` and
+`database_packages` fields for that mixed result.
 
 List recent history:
 
@@ -331,8 +351,8 @@ Example cron entry for a daily run at 02:30:
 
 Use the same operating-system user for scheduled and manual runs. Mixing root
 and non-root runs can leave storage or history files with incompatible
-ownership. Ensure incremental password variables are available to the
-scheduler without writing them into the command line or repository.
+ownership. Ensure the scheduler's service account can read the protected site
+and storage YAML files.
 
 ## 9. Restore
 
@@ -401,6 +421,6 @@ Exit codes:
 - Keep credential-bearing YAML files at mode `0600`.
 - Do not use symbolic links for credential-bearing configuration files.
 - Use a dedicated operating-system user for scheduled backups.
-- Keep incremental repository passwords in environment variables.
+- Keep incremental repository passwords only in protected site YAML files.
 - Treat backup destinations and SQLite history as sensitive data.
 - Test restore regularly using an isolated destination.

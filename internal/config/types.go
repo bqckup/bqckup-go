@@ -10,6 +10,7 @@ const SchemaVersion = 2
 // Config is the immutable, fully loaded application configuration.
 type Config struct {
 	Version       int
+	ServerID      string
 	App           App
 	Storages      map[string]Storage
 	Sites         []Site
@@ -19,6 +20,7 @@ type Config struct {
 // Notification event names. These are the canonical values for the
 // notifications route contract; internal/notify maps them to its typed enum.
 const (
+	EventAll             = "all"
 	EventBackupFailed    = "backup_failed"
 	EventBackupCancelled = "backup_cancelled"
 	EventBackupNoChange  = "backup_no_change"
@@ -34,17 +36,18 @@ type Notifications struct {
 // Channel is one configured delivery channel. All fields share one struct;
 // validation enforces the per-type allowed field set, so fields foreign to a
 // channel type (for example host on a webhook channel) are rejected.
-// Credentials and URLs are environment-variable references only.
+// Notification credentials and URLs are literal values loaded from the
+// protected root configuration file.
 type Channel struct {
-	Type          string   `mapstructure:"type" yaml:"type"`
-	Host          string   `mapstructure:"host" yaml:"host"`
-	Port          int      `mapstructure:"port" yaml:"port"`
-	UsernameEnv   string   `mapstructure:"username_env" yaml:"username_env"`
-	PasswordEnv   string   `mapstructure:"password_env" yaml:"password_env"`
-	From          string   `mapstructure:"from" yaml:"from"`
-	To            []string `mapstructure:"to" yaml:"to"`
-	URLEnv        string   `mapstructure:"url_env" yaml:"url_env"`
-	WebhookURLEnv string   `mapstructure:"webhook_url_env" yaml:"webhook_url_env"`
+	Type       string   `mapstructure:"type" yaml:"type"`
+	Host       string   `mapstructure:"host" yaml:"host"`
+	Port       int      `mapstructure:"port" yaml:"port"`
+	Username   string   `mapstructure:"username" yaml:"username"`
+	Password   string   `mapstructure:"password" yaml:"password"`
+	From       string   `mapstructure:"from" yaml:"from"`
+	To         []string `mapstructure:"to" yaml:"to"`
+	URL        string   `mapstructure:"url" yaml:"url"`
+	WebhookURL string   `mapstructure:"webhook_url" yaml:"webhook_url"`
 }
 
 // Route maps one or more events to one or more channels.
@@ -58,6 +61,7 @@ type App struct {
 	TemporaryDirectory string `mapstructure:"temporary_directory" yaml:"temporary_directory"`
 	LockDirectory      string `mapstructure:"lock_directory" yaml:"lock_directory"`
 	LogLevel           string `mapstructure:"log_level" yaml:"log_level"`
+	LogFile            string `mapstructure:"log_file" yaml:"log_file"`
 }
 
 type Storage struct {
@@ -91,7 +95,7 @@ type Site struct {
 }
 
 type Incremental struct {
-	PasswordEnv string `mapstructure:"password_env" yaml:"password_env"`
+	Password string `mapstructure:"password" yaml:"password"`
 }
 
 type Sources struct {

@@ -136,6 +136,22 @@ app:
 	assert.Equal(t, filepath.Join(dir, "locks"), cfg.App.LockDirectory)
 }
 
+func TestLoadDoesNotOverrideYAMLFromEnvironment(t *testing.T) {
+	t.Setenv("BQCKUP_STATE_DATABASE", "/tmp/env-override.db")
+	t.Setenv("BQCKUP_LOG_LEVEL", "debug")
+	dir := writeConfigTree(t, `app:
+  state_database: data/bqckup.db
+  temporary_directory: tmp
+  lock_directory: locks
+  log_level: info
+`, localStorageYAML, validSiteYAML(t))
+
+	cfg, err := Load(t.Context(), dir)
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(dir, "data/bqckup.db"), cfg.App.StateDatabase)
+	assert.Equal(t, "info", cfg.App.LogLevel)
+}
+
 func writeConfigTree(t *testing.T, root, storages, site string) string {
 	t.Helper()
 	dir := t.TempDir()

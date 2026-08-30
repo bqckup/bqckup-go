@@ -73,6 +73,18 @@ func TestDispatcherUnmatchedEventSendsNothing(t *testing.T) {
 	assert.Empty(t, email.payloads)
 }
 
+func TestDispatcherAllEventMatchesEveryNotification(t *testing.T) {
+	discord := &recordingChannel{name: "discord"}
+	dispatcher := NewDispatcher(map[string]Channel{"discord": discord}, []config.Route{
+		{Events: []string{config.EventAll}, Channels: []string{"discord"}},
+	})
+
+	for _, event := range []string{config.EventBackupFailed, config.EventBackupCancelled, config.EventBackupNoChange} {
+		require.NoError(t, dispatcher.Notify(context.Background(), notifyInput(event)))
+	}
+	assert.Len(t, discord.payloads, 3)
+}
+
 func TestDispatcherSendsChannelOnceAcrossRoutes(t *testing.T) {
 	email := &recordingChannel{name: "email"}
 	dispatcher := NewDispatcher(map[string]Channel{"email": email}, []config.Route{

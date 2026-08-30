@@ -231,6 +231,7 @@ app:
   temporary_directory: ${TMP_DIR}
   lock_directory: ${LOCK_DIR}
   log_level: info
+  # log_file: /var/log/bqckup/bqckup.log
 EOF
     chmod 0600 "${CONFIG_DIR}/bqckup.yaml"
     info "Created ${CONFIG_DIR}/bqckup.yaml"

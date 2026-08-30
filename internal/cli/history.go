@@ -19,12 +19,13 @@ func newHistoryCommand(opts *options) *cobra.Command {
 	var limit int
 	var details bool
 	list := &cobra.Command{
-		Use:   "list",
-		Short: "List completed and running backup records",
-		Args:  cobra.NoArgs,
-		PreRunE: func(_ *cobra.Command, _ []string) error {
+		Use:     "list",
+		Short:   "List completed and running backup records",
+		Example: "  bqckup history list --site incremental-test --limit 10",
+		Args:    cobra.NoArgs,
+		PreRunE: func(cmd *cobra.Command, _ []string) error {
 			if limit < 1 {
-				return fmt.Errorf("%w: --limit must be at least 1", ErrInvalidInput)
+				return usageError(cmd, "--limit must be at least 1")
 			}
 			return nil
 		},
@@ -55,6 +56,7 @@ func writeHistoryText(output io.Writer, runs []history.BackupRun, details bool) 
 	}
 
 	table := tabwriter.NewWriter(output, 0, 4, 2, ' ', 0)
+	color := ansiColor{on: isTerminalWriter(output)}
 	if _, err := fmt.Fprintln(table, "STATUS\tSITE\tSTARTED\tDURATION\tPACKAGES\tDESTINATIONS\tLOGICAL SIZE\tRUN ID"); err != nil {
 		return err
 	}
@@ -72,9 +74,9 @@ func writeHistoryText(output io.Writer, runs []history.BackupRun, details bool) 
 		if _, err := fmt.Fprintf(
 			table,
 			"%s\t%s\t%s\t%s\t%d\t%d\t%s\t%s\n",
-			safeHistoryField(strings.ToUpper(string(run.Status))),
+			color.statusLabel(safeHistoryField(string(run.Status))),
 			safeHistoryField(run.SiteName),
-			run.StartedAt.Local().Format("02 Jan 2006, 15:04 MST"),
+			formatCLITime(run.StartedAt),
 			formatRunDuration(run),
 			summary.logicalCount,
 			len(summary.destinations),
@@ -173,6 +175,7 @@ func writePackageDetails(output io.Writer, run history.BackupRun) error {
 	})
 
 	table := tabwriter.NewWriter(output, 0, 4, 2, ' ', 0)
+	color := ansiColor{on: isTerminalWriter(output)}
 	if _, err := fmt.Fprintln(table, "  SOURCE\tDESTINATION\tSTATUS\tSIZE\tOBJECT KEY"); err != nil {
 		return err
 	}
@@ -183,7 +186,7 @@ func writePackageDetails(output io.Writer, run history.BackupRun) error {
 			"  %s\t%s\t%s\t%s\t%s\n",
 			source,
 			safeHistoryField(pkg.Destination),
-			safeHistoryField(strings.ToUpper(string(pkg.Status))),
+			color.statusLabel(safeHistoryField(string(pkg.Status))),
 			humanBytes(pkg.Size),
 			safeHistoryField(pkg.ObjectKey),
 		); err != nil {

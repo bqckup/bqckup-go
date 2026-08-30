@@ -15,7 +15,7 @@ import (
 
 	"github.com/bqckup/bqckup-go/internal/apperror"
 	databaseexporter "github.com/bqckup/bqckup-go/internal/backup/database"
-	restic "github.com/bqckup/bqckup-go/internal/backup/restic"
+	incremental "github.com/bqckup/bqckup-go/internal/backup/incremental"
 	"github.com/bqckup/bqckup-go/internal/config"
 	"github.com/bqckup/bqckup-go/internal/notify"
 	"github.com/bqckup/bqckup-go/internal/process"
@@ -36,7 +36,7 @@ func (f fakeRemoteStorageResolver) Resolve(context.Context, map[string]config.St
 func TestResolveRemoteStorageConfigurationValidatesResolvedValues(t *testing.T) {
 	configuration := validApplicationConfig(t)
 	configuration.Storages = map[string]config.Storage{
-		"remote": {Type: "s3", Credentials: config.StorageCredentials{Source: "remote", URL: "BQCKUP_REMOTE_URL"}},
+		"remote": {Type: "s3", Credentials: config.StorageCredentials{Source: "remote", URL: "https://provider.invalid/storage"}},
 	}
 	configuration.Sites[0].Destinations = []config.Destination{{Storage: "remote"}}
 	resolvedStorage := config.Storage{
@@ -75,15 +75,14 @@ func TestOpenResolvesRemoteStorageBeforeBuildingDestinations(t *testing.T) {
 		_, _ = w.Write([]byte(`{"bucket":"remote-bucket","access_key_id":"remote-key","secret_access_key":"remote-secret","region":"us-east-1"}`))
 	}))
 	t.Cleanup(server.Close)
-	t.Setenv("BQCKUP_REMOTE_URL", server.URL)
 	configDir, _ := writeApplicationConfig(t)
-	require.NoError(t, os.WriteFile(filepath.Join(configDir, "config", "storages.yaml"), []byte(`storages:
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, "config", "storages.yaml"), fmt.Appendf(nil, `storages:
   remote:
     type: s3
     credentials:
       source: remote
-      url: BQCKUP_REMOTE_URL
-`), 0o600))
+      url: %s
+`, server.URL), 0o600))
 	sitePath := filepath.Join(configDir, "sites", "example.yaml")
 	siteBody, err := os.ReadFile(sitePath)
 	require.NoError(t, err)
@@ -179,12 +178,12 @@ func TestBuildStoresConstructsS3AndR2WithoutNetworkIO(t *testing.T) {
 }
 
 type fakeSnapshotLister struct {
-	snapshots []restic.Snapshot
+	snapshots []incremental.Snapshot
 	err       error
-	gotRepo   restic.RepoConfig
+	gotRepo   incremental.RepoConfig
 }
 
-func (f *fakeSnapshotLister) ListSnapshots(_ context.Context, repo restic.RepoConfig) ([]restic.Snapshot, error) {
+func (f *fakeSnapshotLister) ListSnapshots(_ context.Context, repo incremental.RepoConfig) ([]incremental.Snapshot, error) {
 	f.gotRepo = repo
 	return f.snapshots, f.err
 }
@@ -241,13 +240,12 @@ func TestListSiteSnapshotsUnusedDestinationFails(t *testing.T) {
 }
 
 func TestListSiteSnapshotsSucceedsWithLocalStorageDocument(t *testing.T) {
-	t.Setenv("RESTIC_PASSWORD", "secret")
 	site := config.Site{
 		Name: "example", Enabled: true, BackupMode: "incremental",
-		Incremental:  config.Incremental{PasswordEnv: "RESTIC_PASSWORD"},
+		Incremental:  config.Incremental{Password: "secret"},
 		Destinations: []config.Destination{{Storage: "local-primary"}},
 	}
-	lister := &fakeSnapshotLister{snapshots: []restic.Snapshot{{
+	lister := &fakeSnapshotLister{snapshots: []incremental.Snapshot{{
 		ID: "33e25d78", Paths: []string{"/var/www/html"}, Size: 2147483648,
 	}}}
 	application := &App{
@@ -293,21 +291,21 @@ func TestBuildNotifierConstructsChannelsFromConfiguration(t *testing.T) {
 	configuration.Notifications = config.Notifications{
 		Channels: map[string]config.Channel{
 			"email":   {Type: "smtp", Host: "smtp.example.com", Port: 587, From: "bqckup@example.com", To: []string{"ops@example.com"}},
-			"webhook": {Type: "webhook", URLEnv: "BQCKUP_WEBHOOK_URL"},
-			"discord": {Type: "discord", WebhookURLEnv: "BQCKUP_DISCORD_WEBHOOK_URL"},
+			"webhook": {Type: "webhook", URL: "https://hooks.example.test/bqckup"},
+			"discord": {Type: "discord", WebhookURL: "https://discord.example.test/api/webhooks/1/secret"},
 		},
 		Routes: []config.Route{
 			{Events: []string{config.EventBackupFailed}, Channels: []string{"webhook"}},
 		},
 	}
 
-	notifier := buildNotifier(configuration.Notifications, os.LookupEnv)
+	notifier := buildNotifier(configuration.Notifications)
 	require.NotNil(t, notifier)
 	assert.IsType(t, &notify.Dispatcher{}, notifier)
 }
 
 func TestBuildNotifierReturnsNilWithoutNotifications(t *testing.T) {
-	assert.Nil(t, buildNotifier(config.Notifications{}, os.LookupEnv))
+	assert.Nil(t, buildNotifier(config.Notifications{}))
 }
 
 func TestOpenDeliversBackupFailedThroughConfiguredWebhook(t *testing.T) {
@@ -317,8 +315,6 @@ func TestOpenDeliversBackupFailedThroughConfiguredWebhook(t *testing.T) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	t.Cleanup(server.Close)
-	t.Setenv("BQCKUP_WEBHOOK_URL", server.URL)
-
 	configDir, _ := writeApplicationConfig(t)
 	rootPath := filepath.Join(configDir, "bqckup.yaml")
 	root, err := os.ReadFile(rootPath)
@@ -327,7 +323,7 @@ func TestOpenDeliversBackupFailedThroughConfiguredWebhook(t *testing.T) {
   channels:
     webhook:
       type: webhook
-      url_env: BQCKUP_WEBHOOK_URL
+      url: `+server.URL+`
   routes:
     - events: [backup_failed]
       channels: [webhook]
@@ -417,12 +413,12 @@ type fakeSnapshotRestorer struct {
 	snapshotID string
 	paths      []string
 	target     string
-	confirm    restic.RestoreOverwrite
-	summary    restic.RestoreSummary
+	confirm    incremental.RestoreOverwrite
+	summary    incremental.RestoreSummary
 	err        error
 }
 
-func (f *fakeSnapshotRestorer) RestoreSnapshot(_ context.Context, _ restic.RepoConfig, snapshotID string, paths []string, target string, confirm restic.RestoreOverwrite) (restic.RestoreSummary, error) {
+func (f *fakeSnapshotRestorer) RestoreSnapshot(_ context.Context, _ incremental.RepoConfig, snapshotID string, paths []string, target string, confirm incremental.RestoreOverwrite) (incremental.RestoreSummary, error) {
 	f.snapshotID, f.paths, f.target, f.confirm = snapshotID, paths, target, confirm
 	return f.summary, f.err
 }
@@ -430,7 +426,7 @@ func (f *fakeSnapshotRestorer) RestoreSnapshot(_ context.Context, _ restic.RepoC
 func restoreSite() config.Site {
 	return config.Site{
 		Name: "example", Enabled: true, BackupMode: "incremental",
-		Incremental:  config.Incremental{PasswordEnv: "RESTIC_PASSWORD"},
+		Incremental:  config.Incremental{Password: "secret"},
 		Sources:      config.Sources{Files: config.FileSource{Include: []string{"/var/www/html"}}},
 		Destinations: []config.Destination{{Storage: "local-primary"}},
 	}
@@ -491,13 +487,12 @@ func TestRestoreUnusedDestinationFails(t *testing.T) {
 }
 
 func TestRestoreSucceedsThroughEngine(t *testing.T) {
-	t.Setenv("RESTIC_PASSWORD", "secret")
 	site := restoreSite()
-	lister := &fakeSnapshotLister{snapshots: []restic.Snapshot{{
+	lister := &fakeSnapshotLister{snapshots: []incremental.Snapshot{{
 		ID: strings.Repeat("a", 64), Paths: []string{"/var/www/html"}, Size: 100,
 		Tags: []string{"site:example"},
 	}}}
-	engine := &fakeSnapshotRestorer{summary: restic.RestoreSummary{
+	engine := &fakeSnapshotRestorer{summary: incremental.RestoreSummary{
 		SnapshotID: strings.Repeat("a", 64), Target: "/tmp/restore", FilesRestored: 3,
 	}}
 	application := &App{

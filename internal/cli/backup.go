@@ -2,7 +2,6 @@ package cli
 
 import (
 	"bufio"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -13,14 +12,14 @@ import (
 	"github.com/bqckup/bqckup-go/internal/app"
 	"github.com/bqckup/bqckup-go/internal/apperror"
 	"github.com/bqckup/bqckup-go/internal/backup"
+	"github.com/bqckup/bqckup-go/internal/config"
 	"github.com/spf13/cobra"
 )
-
-var errNoChange = errors.New("backup unchanged")
 
 type siteView struct {
 	Name             string     `json:"name"`
 	Enabled          bool       `json:"enabled"`
+	BackupMode       string     `json:"-"`
 	FileSources      int        `json:"file_sources"`
 	Destinations     []string   `json:"destinations"`
 	LastSuccessfulAt *time.Time `json:"last_successful_at,omitempty"`
@@ -45,7 +44,7 @@ func newBackupCommand(opts *options) *cobra.Command {
 					if err != nil {
 						return err
 					}
-					view := siteView{Name: site.Name, Enabled: site.Enabled, FileSources: len(site.Sources.Files.Include), Destinations: destinations}
+					view := siteView{Name: site.Name, Enabled: site.Enabled, BackupMode: site.BackupMode, FileSources: len(site.Sources.Files.Include), Destinations: destinations}
 					if last != nil {
 						lastAt := last.StartedAt.UTC()
 						view.LastSuccessfulAt = &lastAt
@@ -56,13 +55,7 @@ func newBackupCommand(opts *options) *cobra.Command {
 				if opts.output == "json" {
 					return writeJSON(cmd, views)
 				}
-				for _, view := range views {
-					_, err := fmt.Fprintf(cmd.OutOrStdout(), "%s\tenabled=%t\tfiles=%d\tdestinations=%v\n", view.Name, view.Enabled, view.FileSources, view.Destinations)
-					if err != nil {
-						return err
-					}
-				}
-				return nil
+				return writeBackupListText(cmd.OutOrStdout(), views)
 			})
 		},
 	})
@@ -100,18 +93,33 @@ func newBackupCommand(opts *options) *cobra.Command {
 
 	var force bool
 	run := &cobra.Command{
-		Use:   "run [site]",
-		Short: "Run one backup site or every enabled site",
-		Args: func(_ *cobra.Command, args []string) error {
+		Use:     "run [site]",
+		Short:   "Run one backup site or every enabled site",
+		Example: "  bqckup backup run incremental-test --force",
+		Args: func(cmd *cobra.Command, args []string) error {
 			if len(args) > 1 {
-				return fmt.Errorf("%w: backup run accepts at most one site", ErrInvalidInput)
+				return usageError(cmd, "backup run accepts at most one site")
 			}
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return withApplication(cmd, opts.configDir, func(application *app.App) error {
 				if len(args) == 1 {
+					var heartbeat *backupProgressHeartbeat
+					if opts.output != "json" {
+						site, ok := application.Configuration().Site(args[0])
+						if ok {
+							progress := backupProgressForSite(site)
+							if err := writeBackupStartText(cmd.ErrOrStderr(), progress); err != nil {
+								return err
+							}
+							heartbeat = startBackupProgressHeartbeat(cmd.ErrOrStderr(), progress.SiteName)
+						}
+					}
 					result, err := application.RunBackup(cmd.Context(), args[0], force)
+					if heartbeat != nil {
+						heartbeat.Stop()
+					}
 					if err != nil {
 						return err
 					}
@@ -124,31 +132,45 @@ func newBackupCommand(opts *options) *cobra.Command {
 							return err
 						}
 					}
-					if result.Status == backup.StatusNoChange {
-						return errNoChange
-					}
 					return nil
 				}
 
-				results, err := application.RunEnabledBackups(cmd.Context(), force)
-				if err != nil {
-					return err
+				var progressErr error
+				var observer app.BackupRunObserver
+				var heartbeat *backupProgressHeartbeat
+				if opts.output != "json" {
+					observer = func(progress app.BackupRunProgress) {
+						if progressErr != nil {
+							return
+						}
+						if progress.Result == nil {
+							progressErr = writeBackupStartText(cmd.ErrOrStderr(), progress)
+							if progressErr == nil {
+								heartbeat = startBackupProgressHeartbeat(cmd.ErrOrStderr(), progress.SiteName)
+							}
+							return
+						}
+						if heartbeat != nil {
+							heartbeat.Stop()
+							heartbeat = nil
+						}
+						progressErr = writeRunResultText(cmd.OutOrStdout(), *progress.Result)
+						if progressErr == nil && progress.Error != nil {
+							progressErr = writeFailureReason(cmd.ErrOrStderr(), progress.Error)
+						}
+					}
+				}
+				results, runErr := application.RunEnabledBackups(cmd.Context(), force, observer)
+				if progressErr != nil {
+					return progressErr
 				}
 				if opts.output == "json" {
 					if err := writeJSON(cmd, results); err != nil {
 						return err
 					}
-				} else {
-					for _, result := range results {
-						if err := writeRunResultText(cmd.OutOrStdout(), result); err != nil {
-							return err
-						}
-					}
 				}
-				for _, result := range results {
-					if result.Status == backup.StatusNoChange {
-						return errNoChange
-					}
+				if runErr != nil {
+					return apperror.Wrap(apperror.CategoryOf(runErr), "one or more backups failed", nil)
 				}
 				return nil
 			})
@@ -157,11 +179,12 @@ func newBackupCommand(opts *options) *cobra.Command {
 	run.Flags().BoolVar(&force, "force", false, "ignore the minimum backup interval")
 	command.AddCommand(run)
 	command.AddCommand(&cobra.Command{
-		Use:   "unlock <site>",
-		Short: "Remove stale repository locks for one site",
-		Args: func(_ *cobra.Command, args []string) error {
+		Use:     "unlock <site>",
+		Short:   "Remove stale repository locks for one site",
+		Example: "  bqckup backup unlock incremental-test",
+		Args: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 1 {
-				return fmt.Errorf("%w: backup unlock requires exactly one site", ErrInvalidInput)
+				return usageError(cmd, "backup unlock requires exactly one site")
 			}
 			return nil
 		},
@@ -174,17 +197,18 @@ func newBackupCommand(opts *options) *cobra.Command {
 
 	var destination string
 	snapshots := &cobra.Command{
-		Use:   "snapshots <site>",
-		Short: "List the live snapshots of one incremental site",
-		Args: func(_ *cobra.Command, args []string) error {
+		Use:     "snapshots <site> --destination <destination>",
+		Short:   "List the live snapshots of one incremental site",
+		Example: "  bqckup backup snapshots incremental-test --destination testing",
+		Args: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 1 {
-				return fmt.Errorf("%w: backup snapshots requires exactly one site", ErrInvalidInput)
+				return usageError(cmd, "backup snapshots requires exactly one site")
 			}
 			return nil
 		},
-		PreRunE: func(_ *cobra.Command, _ []string) error {
+		PreRunE: func(cmd *cobra.Command, _ []string) error {
 			if destination == "" {
-				return fmt.Errorf("%w: --destination is required", ErrInvalidInput)
+				return usageError(cmd, "--destination is required")
 			}
 			return nil
 		},
@@ -207,20 +231,21 @@ func newBackupCommand(opts *options) *cobra.Command {
 	var snapshot, target string
 	var quiet bool
 	restore := &cobra.Command{
-		Use:   "restore <site>",
-		Short: "Restore one snapshot of an incremental site into a directory",
-		Args: func(_ *cobra.Command, args []string) error {
+		Use:     "restore <site> --destination <destination> --target <directory>",
+		Short:   "Restore one snapshot of an incremental site into a directory",
+		Example: "  bqckup backup restore incremental-test --destination testing --target /tmp/restore",
+		Args: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 1 {
-				return fmt.Errorf("%w: backup restore requires exactly one site", ErrInvalidInput)
+				return usageError(cmd, "backup restore requires exactly one site")
 			}
 			return nil
 		},
-		PreRunE: func(_ *cobra.Command, _ []string) error {
+		PreRunE: func(cmd *cobra.Command, _ []string) error {
 			if destination == "" {
-				return fmt.Errorf("%w: --destination is required", ErrInvalidInput)
+				return usageError(cmd, "--destination is required")
 			}
 			if target == "" {
-				return fmt.Errorf("%w: --target is required", ErrInvalidInput)
+				return usageError(cmd, "--target is required")
 			}
 			return nil
 		},
@@ -250,12 +275,62 @@ func newBackupCommand(opts *options) *cobra.Command {
 	return command
 }
 
+func writeBackupListText(output io.Writer, views []siteView) error {
+	if len(views) == 0 {
+		_, err := fmt.Fprintln(output, "No backup sites configured.")
+		return err
+	}
+	siteWidth, modeWidth, destinationWidth := len("SITE"), len("MODE"), len("DESTINATIONS")
+	for _, view := range views {
+		mode := view.BackupMode
+		if mode == "" {
+			mode = "full"
+		}
+		destinations := strings.Join(view.Destinations, ", ")
+		if len(view.Name) > siteWidth {
+			siteWidth = len(view.Name)
+		}
+		if len(mode) > modeWidth {
+			modeWidth = len(mode)
+		}
+		if len(destinations) > destinationWidth {
+			destinationWidth = len(destinations)
+		}
+	}
+	if _, err := fmt.Fprintf(output, "%-*s  %-7s  %-*s  %5s  %-*s\n", siteWidth, "SITE", "ENABLED", modeWidth, "MODE", "FILES", destinationWidth, "DESTINATIONS"); err != nil {
+		return err
+	}
+	color := ansiColor{on: isTerminalWriter(output)}
+	for _, view := range views {
+		mode := view.BackupMode
+		if mode == "" {
+			mode = "full"
+		}
+		enabled := "no"
+		if view.Enabled {
+			enabled = "yes"
+		}
+		enabledField := fmt.Sprintf("%-7s", strings.ToUpper(enabled))
+		if view.Enabled {
+			enabledField = color.green(enabledField)
+		} else {
+			enabledField = color.dim(enabledField)
+		}
+		destinations := strings.Join(view.Destinations, ", ")
+		if _, err := fmt.Fprintf(output, "%-*s  %s  %-*s  %5d  %-*s\n", siteWidth, view.Name, enabledField, modeWidth, mode, view.FileSources, destinationWidth, destinations); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func writeRunResultText(out io.Writer, result backup.RunResult) error {
+	color := ansiColor{on: isTerminalWriter(out)}
 	var err error
 	if result.Status == backup.StatusSkipped {
-		_, err = fmt.Fprintf(out, "%s: skipped (%s)\n", result.SiteName, result.SkipReason)
+		_, err = fmt.Fprintf(out, "%s %s: %s (%s)\n", color.yellow("[WARN]"), result.SiteName, color.status("skipped"), result.SkipReason)
 	} else {
-		_, err = fmt.Fprintf(out, "%s: %s (run %s)\n", result.SiteName, result.Status, result.RunID)
+		_, err = fmt.Fprintf(out, "%s %s: %s (run %s)\n", colorResultSymbol(color, result.Status), result.SiteName, color.status(string(result.Status)), shortRunID(result.RunID))
 	}
 	if err != nil {
 		return err
@@ -264,6 +339,126 @@ func writeRunResultText(out io.Writer, result backup.RunResult) error {
 		_, err = fmt.Fprintf(out, "%s: reclaimed %s\n", result.SiteName, humanBytes(result.ReclaimedBytes))
 	}
 	return err
+}
+
+func shortRunID(id string) string {
+	if len(id) > 8 {
+		return id[:8]
+	}
+	return id
+}
+
+func resultSymbol(status backup.Status) string {
+	switch status {
+	case backup.StatusSuccess:
+		return "[OK]"
+	case backup.StatusNoChange, backup.StatusCancelled:
+		return "[WARN]"
+	case backup.StatusFailed:
+		return "[FAIL]"
+	default:
+		return "[.]"
+	}
+}
+
+func colorResultSymbol(color ansiColor, status backup.Status) string {
+	symbol := resultSymbol(status)
+	switch status {
+	case backup.StatusSuccess:
+		return color.green(symbol)
+	case backup.StatusNoChange, backup.StatusCancelled:
+		return color.yellow(symbol)
+	case backup.StatusFailed:
+		return color.red(symbol)
+	default:
+		return color.cyan(symbol)
+	}
+}
+
+func writeFailureReason(out io.Writer, err error) error {
+	const width = 96
+	words := strings.Fields(formatErrorMessage(err))
+	line := "  Reason:"
+	for _, word := range words {
+		if len(line)+1+len(word) > width && line != "  Reason:" {
+			if _, writeErr := fmt.Fprintln(out, line); writeErr != nil {
+				return writeErr
+			}
+			line = "           " + word
+			continue
+		}
+		line += " " + word
+	}
+	_, writeErr := fmt.Fprintln(out, line)
+	return writeErr
+}
+
+func backupProgressForSite(site config.Site) app.BackupRunProgress {
+	destinations := make([]string, 0, len(site.Destinations))
+	for _, destination := range site.Destinations {
+		destinations = append(destinations, destination.Storage)
+	}
+	return app.BackupRunProgress{
+		SiteName:     site.Name,
+		BackupMode:   site.BackupMode,
+		Destinations: destinations,
+	}
+}
+
+func writeBackupStartText(out io.Writer, progress app.BackupRunProgress) error {
+	mode := progress.BackupMode
+	if mode == "" {
+		mode = "full"
+	}
+	destinations := strings.Join(progress.Destinations, ", ")
+	color := ansiColor{on: isTerminalWriter(out)}
+	_, err := fmt.Fprintf(out, "%s backup:%s: starting %s backup to %s\n", color.yellow("[>]"), progress.SiteName, mode, destinations)
+	return err
+}
+
+type backupProgressHeartbeat struct {
+	stop     chan struct{}
+	done     chan struct{}
+	terminal bool
+}
+
+func startBackupProgressHeartbeat(out io.Writer, siteName string) *backupProgressHeartbeat {
+	heartbeat := &backupProgressHeartbeat{stop: make(chan struct{}), done: make(chan struct{}), terminal: isTerminalWriter(out)}
+	go func() {
+		defer close(heartbeat.done)
+		interval := 5 * time.Second
+		if heartbeat.terminal {
+			interval = 250 * time.Millisecond
+		}
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		started := time.Now()
+		frame := 0
+		for {
+			select {
+			case <-ticker.C:
+				elapsed := time.Since(started).Round(time.Second)
+				if heartbeat.terminal {
+					frames := "|/-\\"
+					_, _ = fmt.Fprintf(out, "\r[%c] backup:%s: running (%s elapsed)", frames[frame%len(frames)], siteName, elapsed)
+					frame++
+				} else {
+					_, _ = fmt.Fprintf(out, "[...] backup:%s: still running (%s elapsed)\n", siteName, elapsed)
+				}
+			case <-heartbeat.stop:
+				if heartbeat.terminal {
+					_, _ = fmt.Fprint(out, "\r\033[2K\n")
+				}
+				return
+			}
+		}
+	}()
+	return heartbeat
+}
+
+func (h *backupProgressHeartbeat) Stop() {
+	close(h.stop)
+	<-h.done
 }
 
 // resticRestoreOverwrite implements the engine's conflict confirmation: it
@@ -316,7 +511,8 @@ func writeRestoreText(w io.Writer, result backup.RestoreResult) error {
 	if len(id) > 8 {
 		id = id[:8]
 	}
-	if _, err := fmt.Fprintf(w, "restored snapshot %s to %s (%d files, %s, %.1fs)\n", id, result.Target, result.FilesRestored, humanBytes(result.BytesRestored), result.DurationSeconds); err != nil {
+	color := ansiColor{on: isTerminalWriter(w)}
+	if _, err := fmt.Fprintf(w, "%s restored snapshot %s to %s (%d files, %s, %.1fs)\n", color.green("[OK]"), id, result.Target, result.FilesRestored, humanBytes(result.BytesRestored), result.DurationSeconds); err != nil {
 		return err
 	}
 	for _, skipped := range result.SkippedPaths {

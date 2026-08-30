@@ -18,7 +18,8 @@ func newInitCommand(opts *options) *cobra.Command {
 			if err := initializeConfig(opts.configDir); err != nil {
 				return err
 			}
-			_, err := fmt.Fprintf(cmd.OutOrStdout(), "initialized configuration in %s\n", opts.configDir)
+			color := ansiColor{on: isTerminalWriter(cmd.OutOrStdout())}
+			_, err := fmt.Fprintf(cmd.OutOrStdout(), "%s initialized configuration in %s\n", color.green("[OK]"), opts.configDir)
 			return err
 		},
 	}
@@ -31,6 +32,7 @@ func initializeConfig(directory string) error {
   temporary_directory: /var/lib/bqckup/tmp
   lock_directory: /var/lib/bqckup/locks
   log_level: info
+  # log_file: /var/log/bqckup/bqckup.log
 `,
 		filepath.Join(directory, "config", "storages.yaml"): `storages:
   local-primary:
@@ -41,6 +43,10 @@ func initializeConfig(directory string) error {
 		filepath.Join(directory, "sites", "example.yaml"): `site:
   name: example
   enabled: false
+  # For incremental backups, uncomment these fields and keep this file at 0600.
+  # backup_mode: incremental
+  # incremental:
+  #   password: replace-with-a-strong-repository-password
   sources:
     files:
       include:
@@ -58,7 +64,7 @@ func initializeConfig(directory string) error {
 	}
 	for filename := range files {
 		if _, err := os.Lstat(filename); err == nil {
-			return fmt.Errorf("%w: refusing to overwrite %s", ErrInvalidInput, filename)
+			return usageErrorText(fmt.Sprintf("refusing to overwrite %s", filename), "bqckup init --config-dir <directory>", "bqckup init --config-dir /etc/bqckup-new")
 		} else if !errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("inspect initialization target %s: %w", filename, err)
 		}

@@ -19,16 +19,14 @@ func newConfigCommand(opts *options) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := appconfig.ValidateNotificationEnvironment(configuration, nil); err != nil {
-				return err
-			}
 			if opts.output == "json" {
 				return writeJSON(cmd, map[string]any{
 					"valid": true, "version": configuration.Version,
 					"config_directory": opts.configDir, "sites": len(configuration.Sites), "storages": len(configuration.Storages),
 				})
 			}
-			_, err = fmt.Fprintf(cmd.OutOrStdout(), "valid schema v%d configuration: %d site(s), %d storage(s) in %s\n", configuration.Version, len(configuration.Sites), len(configuration.Storages), opts.configDir)
+			color := ansiColor{on: isTerminalWriter(cmd.OutOrStdout())}
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "%s config: schema v%d valid (%d site(s), %d storage(s))\n", color.green("[OK]"), configuration.Version, len(configuration.Sites), len(configuration.Storages))
 			return err
 		},
 	})

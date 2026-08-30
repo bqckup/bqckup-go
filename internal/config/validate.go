@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net"
 	"net/url"
-	"os"
 	"path"
 	"path/filepath"
 	"regexp"
@@ -23,8 +22,7 @@ const (
 var (
 	// SafeName matches names safe to use as site names, storage names,
 	// and file-system path segments.
-	SafeName     = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
-	validEnvName = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
+	SafeName = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
 )
 
 func (c Config) Validate() error {
@@ -39,6 +37,12 @@ func (c Config) Validate() error {
 	}
 	if c.App.LockDirectory == "" {
 		return validationError("bqckup.yaml", "app.lock_directory", "is required")
+	}
+	if c.App.LogLevel != "debug" && c.App.LogLevel != "info" && c.App.LogLevel != "warn" && c.App.LogLevel != "error" {
+		return validationError("bqckup.yaml", "app.log_level", "must be debug, info, warn, or error")
+	}
+	if c.ServerID != "" && !SafeName.MatchString(c.ServerID) {
+		return validationError("bqckup.yaml", "server_id", "contains unsupported characters")
 	}
 	if len(c.Storages) == 0 {
 		return validationError("config/storages.yaml", "storages", "at least one storage is required")
@@ -95,9 +99,9 @@ func (c Config) validateNotifications() error {
 		}
 		for _, event := range route.Events {
 			switch event {
-			case EventBackupFailed, EventBackupCancelled, EventBackupNoChange:
+			case EventAll, EventBackupFailed, EventBackupCancelled, EventBackupNoChange:
 			default:
-				return validationError("bqckup.yaml", field+".events", "must be one of backup_failed, backup_cancelled, or backup_no_change")
+				return validationError("bqckup.yaml", field+".events", "must be one of all, backup_failed, backup_cancelled, or backup_no_change")
 			}
 		}
 		for _, channelName := range route.Channels {
@@ -113,17 +117,6 @@ func validateNotificationChannel(name string, channel Channel) error {
 	field := "notifications.channels." + name
 	if !SafeName.MatchString(name) {
 		return validationError("bqckup.yaml", field, "name contains unsupported characters")
-	}
-	envFields := []struct{ name, value string }{
-		{"username_env", channel.UsernameEnv},
-		{"password_env", channel.PasswordEnv},
-		{"url_env", channel.URLEnv},
-		{"webhook_url_env", channel.WebhookURLEnv},
-	}
-	for _, candidate := range envFields {
-		if candidate.value != "" && !validEnvName.MatchString(candidate.value) {
-			return validationError("bqckup.yaml", field+"."+candidate.name, "must be a valid environment variable name")
-		}
 	}
 	switch channel.Type {
 	case "smtp":
@@ -147,12 +140,12 @@ func presentChannelFields(channel Channel) []channelField {
 	return []channelField{
 		{"host", channel.Host != ""},
 		{"port", channel.Port != 0},
-		{"username_env", channel.UsernameEnv != ""},
-		{"password_env", channel.PasswordEnv != ""},
+		{"username", channel.Username != ""},
+		{"password", channel.Password != ""},
 		{"from", channel.From != ""},
 		{"to", len(channel.To) > 0},
-		{"url_env", channel.URLEnv != ""},
-		{"webhook_url_env", channel.WebhookURLEnv != ""},
+		{"url", channel.URL != ""},
+		{"webhook_url", channel.WebhookURL != ""},
 	}
 }
 
@@ -188,60 +181,44 @@ func validateSMTPChannel(field string, channel Channel) error {
 	if len(channel.To) == 0 {
 		return validationError("bqckup.yaml", field+".to", "at least one recipient is required")
 	}
-	if (channel.UsernameEnv == "") != (channel.PasswordEnv == "") {
-		return validationError("bqckup.yaml", field, "username_env and password_env must be provided together")
+	if (channel.Username == "") != (channel.Password == "") {
+		return validationError("bqckup.yaml", field, "username and password must be provided together")
 	}
-	return validateNoForeignFields(field, "smtp", channel, "host", "port", "username_env", "password_env", "from", "to")
+	return validateNoForeignFields(field, "smtp", channel, "host", "port", "username", "password", "from", "to")
 }
 
 func validateWebhookChannel(field string, channel Channel) error {
-	if channel.URLEnv == "" {
-		return validationError("bqckup.yaml", field+".url_env", "url_env is required")
+	if channel.URL == "" {
+		return validationError("bqckup.yaml", field+".url", "url is required")
 	}
-	return validateNoForeignFields(field, "webhook", channel, "url_env")
+	if err := validateNotificationURL(field+".url", channel.URL); err != nil {
+		return err
+	}
+	return validateNoForeignFields(field, "webhook", channel, "url")
 }
 
 func validateDiscordChannel(field string, channel Channel) error {
-	if channel.WebhookURLEnv == "" {
-		return validationError("bqckup.yaml", field+".webhook_url_env", "webhook_url_env is required")
+	if channel.WebhookURL == "" {
+		return validationError("bqckup.yaml", field+".webhook_url", "webhook_url is required")
 	}
-	return validateNoForeignFields(field, "discord", channel, "webhook_url_env")
+	if err := validateNotificationURL(field+".webhook_url", channel.WebhookURL); err != nil {
+		return err
+	}
+	return validateNoForeignFields(field, "discord", channel, "webhook_url")
 }
 
-// ValidateNotificationEnvironment reports every notification environment
-// variable referenced by the configuration that is unset or empty, one error
-// listing all of them. It is called only by the `config validate` command;
-// Config.Validate never checks environment presence, so a missing variable
-// can never hard-fail a backup run (delivery warns instead).
-func ValidateNotificationEnvironment(cfg Config, lookupEnv func(string) (string, bool)) error {
-	if lookupEnv == nil {
-		lookupEnv = os.LookupEnv
+func validateNotificationURL(field, value string) error {
+	parsed, err := url.ParseRequestURI(value)
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "https" && parsed.Scheme != "http") {
+		return validationError("bqckup.yaml", field, "must be an absolute HTTP(S) URL")
 	}
-	seen := make(map[string]struct{})
-	var missing []string
-	add := func(name string) {
-		if name == "" {
-			return
-		}
-		if _, ok := seen[name]; ok {
-			return
-		}
-		seen[name] = struct{}{}
-		if value, ok := lookupEnv(name); !ok || value == "" {
-			missing = append(missing, name)
-		}
+	if parsed.User != nil || parsed.Fragment != "" {
+		return validationError("bqckup.yaml", field, "must not contain user information or a fragment")
 	}
-	for _, channel := range cfg.Notifications.Channels {
-		add(channel.UsernameEnv)
-		add(channel.PasswordEnv)
-		add(channel.URLEnv)
-		add(channel.WebhookURLEnv)
+	if parsed.Scheme == "http" && !isLoopbackHost(parsed.Hostname()) {
+		return validationError("bqckup.yaml", field, "must use HTTPS unless the host is loopback")
 	}
-	if len(missing) == 0 {
-		return nil
-	}
-	sort.Strings(missing)
-	return validationError("bqckup.yaml", "notifications", "environment variable(s) not set: %s", strings.Join(missing, ", "))
+	return nil
 }
 
 // ValidateStorage validates one storage document. It is the exported
@@ -356,12 +333,26 @@ func validateCredentialSource(field string, value Storage) (bool, error) {
 		return false, validationError("config/storages.yaml", field+".credentials.source", "source must be remote")
 	}
 	if credentials.URL == "" {
-		return false, validationError("config/storages.yaml", field+".credentials.url", "url environment variable is required")
+		return false, validationError("config/storages.yaml", field+".credentials.url", "url is required")
 	}
-	if !validEnvName.MatchString(credentials.URL) {
-		return false, validationError("config/storages.yaml", field+".credentials.url", "must be a valid environment variable name")
+	if err := validateRemoteProviderURL(field+".credentials.url", credentials.URL); err != nil {
+		return false, err
 	}
 	return true, nil
+}
+
+func validateRemoteProviderURL(field, raw string) error {
+	parsed, err := url.ParseRequestURI(raw)
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "https" && parsed.Scheme != "http") {
+		return validationError("config/storages.yaml", field, "must be an absolute HTTP(S) URL")
+	}
+	if parsed.User != nil || parsed.Fragment != "" {
+		return validationError("config/storages.yaml", field, "must not contain user information or a fragment")
+	}
+	if parsed.Scheme == "http" && !isLoopbackHost(parsed.Hostname()) {
+		return validationError("config/storages.yaml", field, "must use HTTPS unless the host is loopback")
+	}
+	return nil
 }
 
 func validateRemotePlaceholders(field string, value Storage) error {
@@ -477,11 +468,8 @@ func (c Config) validateSite(site Site, seen map[string]struct{}) error {
 		return validationError(file, baseField+".backup_mode", "must be 'full' or 'incremental'")
 	}
 	if site.BackupMode == "incremental" {
-		if site.Incremental.PasswordEnv == "" {
-			return validationError(file, baseField+".incremental.password_env", "is required")
-		}
-		if !validEnvName.MatchString(site.Incremental.PasswordEnv) {
-			return validationError(file, baseField+".incremental.password_env", "must be a valid environment variable name")
+		if site.Incremental.Password == "" {
+			return validationError(file, baseField+".incremental.password", "is required")
 		}
 	}
 	if len(site.Sources.Files.Include) == 0 {

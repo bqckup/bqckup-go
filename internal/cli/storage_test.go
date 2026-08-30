@@ -36,6 +36,24 @@ func TestWriteStorageTextFullMode(t *testing.T) {
 	assert.Contains(t, text, "84.0 MiB")
 }
 
+func TestWriteStorageTextFullModeSeparatesDatabasePackages(t *testing.T) {
+	listing := backup.Listing{
+		Mode:        "full",
+		Destination: "s3-primary",
+		Site:        "site-a",
+		Packages: []backup.PackageRow{
+			{Destination: "s3-primary", Key: "bqckup/site-a/timestamp/files.tar.gz", Size: 10},
+			{Destination: "s3-primary", Key: "bqckup/site-a/timestamp/databases/app.sql.gz", Size: 20},
+		},
+	}
+	var output bytes.Buffer
+	require.NoError(t, writeStorageText(&output, listing))
+	text := output.String()
+	assert.Contains(t, text, "FILE PACKAGES")
+	assert.Contains(t, text, "DATABASE PACKAGES")
+	assert.Contains(t, text, "app.sql.gz")
+}
+
 func TestWriteStorageTextIncrementalMode(t *testing.T) {
 	created := time.Date(2026, 12, 11, 6, 55, 47, 0, time.UTC)
 	listing := backup.Listing{
@@ -56,6 +74,26 @@ func TestWriteStorageTextIncrementalMode(t *testing.T) {
 	assert.Regexp(t, `33e25d78\s+/var/www/html\s+2\.0 GiB\s+11 Dec 2026 06:55`, text)
 	assert.Contains(t, text, "/etc, /opt")
 	assert.Contains(t, text, "-") // nil summary renders a dash
+}
+
+func TestWriteStorageTextIncrementalModeIncludesDatabasePackages(t *testing.T) {
+	listing := backup.Listing{
+		Mode:        "incremental",
+		Destination: "s3-primary",
+		Site:        "site-b",
+		Snapshots:   []backup.SnapshotRow{{ID: "33eedd11", Paths: []string{"/var/www"}, Size: 10}},
+		DatabasePackages: []backup.PackageRow{{
+			Destination: "s3-primary",
+			Key:         "bqckup/site-b/2026-12-11T06-55-47Z/databases/app.sql.gz",
+			Size:        42,
+		}},
+	}
+	var output bytes.Buffer
+	require.NoError(t, writeStorageText(&output, listing))
+	text := output.String()
+	assert.Contains(t, text, "ID")
+	assert.Contains(t, text, "DATABASE PACKAGES")
+	assert.Contains(t, text, "app.sql.gz")
 }
 
 func TestWriteStorageTextEmptyStates(t *testing.T) {
@@ -95,6 +133,23 @@ func TestWriteStorageJSONSchemas(t *testing.T) {
 	assert.NotContains(t, empty, "\x1b")
 }
 
+func TestWriteStorageJSONIncrementalWithDatabasePackagesUsesMixedShape(t *testing.T) {
+	listing := backup.Listing{
+		Mode:        "incremental",
+		Destination: "s3-primary",
+		Snapshots:   []backup.SnapshotRow{{ID: "33eedd11", Paths: []string{"/var/www"}, Size: 10}},
+		DatabasePackages: []backup.PackageRow{{
+			Destination: "s3-primary",
+			Key:         "bqckup/site-b/timestamp/databases/app.sql.gz",
+			Size:        42,
+		}},
+	}
+	output := encodeStorageJSONForTest(t, listing)
+	assert.Contains(t, output, `"snapshots"`)
+	assert.Contains(t, output, `"database_packages"`)
+	assert.Contains(t, output, "app.sql.gz")
+}
+
 func encodeStorageJSONForTest(t *testing.T, listing backup.Listing) string {
 	t.Helper()
 	var output bytes.Buffer
@@ -109,6 +164,7 @@ func TestStorageListCommandRejectsMissingSite(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrInvalidInput)
 	assert.Equal(t, 2, ExitCode(err))
+	assert.Contains(t, err.Error(), "Usage:\n  bqckup storage list <destination> --site <site>")
 }
 
 func TestStorageListCommandRejectsMissingDestination(t *testing.T) {
@@ -117,6 +173,7 @@ func TestStorageListCommandRejectsMissingDestination(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrInvalidInput)
 	assert.Equal(t, 2, ExitCode(err))
+	assert.Contains(t, err.Error(), "Example:\n  bqckup storage list testing --site incremental-test")
 }
 
 func TestStorageListLocalDestinationFailsWithHistoryPointer(t *testing.T) {
@@ -138,7 +195,7 @@ site:
   enabled: true
   backup_mode: incremental
   incremental:
-    password_env: RESTIC_PASSWORD
+    password: test-secret-password
   sources:
     files:
       include: [/srv/example/data]
@@ -183,8 +240,7 @@ func TestWriteLinkTextSplitsURLAndInfo(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	require.NoError(t, writeLinkText(&stdout, &stderr, link))
 	assert.Equal(t, "https://example.test/signed\n", stdout.String())
-	assert.Contains(t, stderr.String(), "Link expires at 2026-08-06T03:00:00Z.")
-	assert.Contains(t, stderr.String(), "Anyone with this link can download the file.")
+	assert.Equal(t, "DOWNLOAD LINK\n  Expires: 06 Aug 2026 03:00 UTC\n  Access:  anyone with this link can download the file.\n", stderr.String())
 }
 
 func TestWriteLinkJSONSchema(t *testing.T) {

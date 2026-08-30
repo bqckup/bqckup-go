@@ -215,9 +215,9 @@ func (s *fakeSMTPServer) snapshot() (recipients []string, message string, authSe
 	return append([]string(nil), s.recipients...), s.message, s.authSeen
 }
 
-func smtpChannel(t *testing.T, channel config.Channel, lookupEnv func(string) (string, bool), roots *x509.CertPool) *SMTP {
+func smtpChannel(t *testing.T, channel config.Channel, roots *x509.CertPool) *SMTP {
 	t.Helper()
-	return NewSMTP("email", channel, lookupEnv, roots)
+	return NewSMTP("email", channel, roots)
 }
 
 func smtpPayload() Payload {
@@ -241,7 +241,7 @@ func TestSMTPDeliversPlainMessageWithoutAuth(t *testing.T) {
 	channel := smtpChannel(t, config.Channel{
 		Type: "smtp", Host: "127.0.0.1", Port: portOf(t, server.addr),
 		From: "bqckup@example.com", To: []string{"ops@example.com"},
-	}, func(string) (string, bool) { return "", false }, nil)
+	}, nil)
 
 	payload := smtpPayload()
 	payload.Hostname = "web-01"
@@ -274,7 +274,7 @@ func TestSMTPRendersNoChange(t *testing.T) {
 	channel := smtpChannel(t, config.Channel{
 		Type: "smtp", Host: "127.0.0.1", Port: portOf(t, server.addr),
 		From: "bqckup@example.com", To: []string{"ops@example.com"},
-	}, func(string) (string, bool) { return "", false }, nil)
+	}, nil)
 
 	anchor := time.Date(2026, 8, 25, 6, 12, 0, 0, time.UTC)
 	input := backup.NotifyInput{
@@ -311,16 +311,8 @@ func TestSMTPUsesSTARTTLSAndAuthWhenConfigured(t *testing.T) {
 	server := newFakeSMTPServer(t, true, false)
 	channel := smtpChannel(t, config.Channel{
 		Type: "smtp", Host: "127.0.0.1", Port: portOf(t, server.addr),
-		UsernameEnv: "BQCKUP_SMTP_USERNAME", PasswordEnv: "BQCKUP_SMTP_PASSWORD",
+		Username: "backup-sender", Password: "hunter2-secret",
 		From: "bqckup@example.com", To: []string{"ops@example.com"},
-	}, func(key string) (string, bool) {
-		switch key {
-		case "BQCKUP_SMTP_USERNAME":
-			return "backup-sender", true
-		case "BQCKUP_SMTP_PASSWORD":
-			return "hunter2-secret", true
-		}
-		return "", false
 	}, server.roots)
 
 	require.NoError(t, channel.Send(context.Background(), smtpPayload()))
@@ -337,13 +329,8 @@ func TestSMTPRefusesAuthWithoutSTARTTLS(t *testing.T) {
 	server := newFakeSMTPServer(t, false, false)
 	channel := smtpChannel(t, config.Channel{
 		Type: "smtp", Host: "127.0.0.1", Port: portOf(t, server.addr),
-		UsernameEnv: "BQCKUP_SMTP_USERNAME", PasswordEnv: "BQCKUP_SMTP_PASSWORD",
+		Username: "backup-sender", Password: "secret",
 		From: "bqckup@example.com", To: []string{"ops@example.com"},
-	}, func(key string) (string, bool) {
-		if key == "BQCKUP_SMTP_USERNAME" || key == "BQCKUP_SMTP_PASSWORD" {
-			return "secret", true
-		}
-		return "", false
 	}, nil)
 
 	err := channel.Send(context.Background(), smtpPayload())
@@ -357,13 +344,8 @@ func TestSMTPImplicitTLSOnPort465(t *testing.T) {
 	server := newFakeSMTPServer(t, false, true)
 	channel := smtpChannel(t, config.Channel{
 		Type: "smtp", Host: "127.0.0.1", Port: portOf(t, server.addr),
-		UsernameEnv: "BQCKUP_SMTP_USERNAME", PasswordEnv: "BQCKUP_SMTP_PASSWORD",
+		Username: "backup-sender", Password: "secret",
 		From: "bqckup@example.com", To: []string{"ops@example.com"},
-	}, func(key string) (string, bool) {
-		if key == "BQCKUP_SMTP_USERNAME" || key == "BQCKUP_SMTP_PASSWORD" {
-			return "secret", true
-		}
-		return "", false
 	}, server.roots)
 	// Simulate a 465 listener: implicit TLS on the ephemeral port.
 	channel.implicitTLS = true
@@ -379,21 +361,8 @@ func TestSMTPImplicitTLSOnPort465(t *testing.T) {
 func TestSMTPImplicitTLSFlagSetForPort465(t *testing.T) {
 	channel := NewSMTP("email", config.Channel{
 		Type: "smtp", Host: "smtp.example.com", Port: 465,
-	}, nil, nil)
+	}, nil)
 	assert.True(t, channel.implicitTLS)
-}
-
-func TestSMTPMissingEnvIsAnError(t *testing.T) {
-	server := newFakeSMTPServer(t, true, false)
-	channel := smtpChannel(t, config.Channel{
-		Type: "smtp", Host: "127.0.0.1", Port: portOf(t, server.addr),
-		UsernameEnv: "BQCKUP_SMTP_USERNAME", PasswordEnv: "BQCKUP_SMTP_PASSWORD",
-		From: "bqckup@example.com", To: []string{"ops@example.com"},
-	}, func(string) (string, bool) { return "", false }, server.roots)
-
-	err := channel.Send(context.Background(), smtpPayload())
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "BQCKUP_SMTP_USERNAME")
 }
 
 func TestSMTPRendersCancelledSubset(t *testing.T) {
@@ -401,7 +370,7 @@ func TestSMTPRendersCancelledSubset(t *testing.T) {
 	channel := smtpChannel(t, config.Channel{
 		Type: "smtp", Host: "127.0.0.1", Port: portOf(t, server.addr),
 		From: "bqckup@example.com", To: []string{"ops@example.com"},
-	}, func(string) (string, bool) { return "", false }, nil)
+	}, nil)
 
 	input := backup.NotifyInput{
 		Event:         config.EventBackupCancelled,
@@ -434,7 +403,7 @@ func TestSMTPOmitsWhatWentWrongWhenEmpty(t *testing.T) {
 	channel := smtpChannel(t, config.Channel{
 		Type: "smtp", Host: "127.0.0.1", Port: portOf(t, server.addr),
 		From: "bqckup@example.com", To: []string{"ops@example.com"},
-	}, func(string) (string, bool) { return "", false }, nil)
+	}, nil)
 
 	input := backup.NotifyInput{
 		Event:         config.EventBackupFailed,

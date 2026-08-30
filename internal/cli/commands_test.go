@@ -51,9 +51,17 @@ func TestConfigValidateAndBackupList(t *testing.T) {
 	require.NoError(t, json.Unmarshal(stdout.Bytes(), &sites))
 	require.Len(t, sites, 1)
 	assert.Equal(t, "example", sites[0]["name"])
+
+	root, stdout, _ = commandForTest(t, "--config-dir", configDir, "backup", "list")
+	require.NoError(t, root.Execute())
+	assert.Contains(t, stdout.String(), "SITE")
+	assert.Contains(t, stdout.String(), "ENABLED")
+	assert.Contains(t, stdout.String(), "DESTINATIONS")
+	assert.Contains(t, stdout.String(), "example")
+	assert.Contains(t, stdout.String(), "YES")
 }
 
-func TestConfigValidateFlagsMissingNotificationEnv(t *testing.T) {
+func TestConfigValidateAcceptsInlineNotificationURLs(t *testing.T) {
 	configDir, _ := writeCLIConfig(t)
 	rootPath := filepath.Join(configDir, "bqckup.yaml")
 	root, err := os.ReadFile(rootPath)
@@ -62,32 +70,23 @@ func TestConfigValidateFlagsMissingNotificationEnv(t *testing.T) {
   channels:
     webhook:
       type: webhook
-      url_env: BQCKUP_WEBHOOK_URL
+      url: https://example.invalid/hook
     discord:
       type: discord
-      webhook_url_env: BQCKUP_DISCORD_WEBHOOK_URL
+      webhook_url: https://discord.invalid/hook
   routes:
     - events: [backup_failed]
       channels: [webhook, discord]
 `)...), 0o600))
 
-	rootCmd, _, stderr := commandForTest(t, "--config-dir", configDir, "config", "validate")
-	err = rootCmd.Execute()
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "BQCKUP_WEBHOOK_URL")
-	assert.Contains(t, err.Error(), "BQCKUP_DISCORD_WEBHOOK_URL")
-
-	// Both set: validate passes and the output shape is unchanged.
-	t.Setenv("BQCKUP_WEBHOOK_URL", "https://example.invalid/hook")
-	t.Setenv("BQCKUP_DISCORD_WEBHOOK_URL", "https://discord.invalid/hook")
-	rootCmd, stdout, _ := commandForTest(t, "--config-dir", configDir, "config", "validate")
+	rootCmd, stdout, stderr := commandForTest(t, "--config-dir", configDir, "config", "validate")
 	require.NoError(t, rootCmd.Execute())
 	assert.Contains(t, stdout.String(), "1 site")
 	assert.Contains(t, stdout.String(), "1 storage")
 	assert.NotContains(t, stderr.String(), "not set")
 }
 
-func TestBackupRunSucceedsWithUnsetNotificationEnv(t *testing.T) {
+func TestBackupRunSucceedsWhenUnusedNotificationEndpointIsUnreachable(t *testing.T) {
 	configDir, backupRoot := writeCLIConfig(t)
 	rootPath := filepath.Join(configDir, "bqckup.yaml")
 	root, err := os.ReadFile(rootPath)
@@ -96,7 +95,7 @@ func TestBackupRunSucceedsWithUnsetNotificationEnv(t *testing.T) {
   channels:
     webhook:
       type: webhook
-      url_env: BQCKUP_UNSET_WEBHOOK_URL
+      url: https://unreachable.invalid/bqckup
   routes:
     - events: [backup_failed]
       channels: [webhook]
@@ -106,7 +105,7 @@ func TestBackupRunSucceedsWithUnsetNotificationEnv(t *testing.T) {
 	require.NoError(t, rootCmd.Execute())
 	var result map[string]any
 	require.NoError(t, json.Unmarshal(stdout.Bytes(), &result))
-	assert.Equal(t, "success", result["status"], "a missing notification env must never fail a backup run")
+	assert.Equal(t, "success", result["status"], "an unused notification endpoint must never fail a backup run")
 
 	matches, err := filepath.Glob(filepath.Join(backupRoot, "bqckup", "example", "*", "*", "files.tar.gz"))
 	require.NoError(t, err)
@@ -115,11 +114,12 @@ func TestBackupRunSucceedsWithUnsetNotificationEnv(t *testing.T) {
 
 func TestBackupRunAndHistoryListEndToEnd(t *testing.T) {
 	configDir, backupRoot := writeCLIConfig(t)
-	root, stdout, _ := commandForTest(t, "--config-dir", configDir, "--output", "json", "backup", "run", "example", "--force")
+	root, stdout, stderr := commandForTest(t, "--config-dir", configDir, "--output", "json", "backup", "run", "example", "--force")
 	require.NoError(t, root.Execute())
 	var result map[string]any
 	require.NoError(t, json.Unmarshal(stdout.Bytes(), &result))
 	assert.Equal(t, "success", result["status"])
+	assert.Empty(t, stderr.String(), "JSON backup output must not include progress text")
 
 	matches, err := filepath.Glob(filepath.Join(backupRoot, "bqckup", "example", "*", "*", "files.tar.gz"))
 	require.NoError(t, err)
@@ -144,12 +144,21 @@ func TestBackupRunAndHistoryListEndToEnd(t *testing.T) {
 	assert.Contains(t, stdout.String(), runs[0].Packages[0].ObjectKey)
 }
 
+func TestBackupRunReportsTextProgress(t *testing.T) {
+	configDir, _ := writeCLIConfig(t)
+	root, stdout, stderr := commandForTest(t, "--config-dir", configDir, "backup", "run", "example", "--force")
+	require.NoError(t, root.Execute())
+
+	assert.Equal(t, "[>] backup:example: starting full backup to local-primary\n", stderr.String())
+	assert.Contains(t, stdout.String(), "example: success (run ")
+}
+
 func TestBackupRunWithoutSiteRunsEveryEnabledSite(t *testing.T) {
 	configDir, backupRoot := writeCLIConfig(t)
 	writeCLISite(t, configDir, "site-b", true)
 	writeCLISite(t, configDir, "site-disabled", false)
 
-	root, stdout, _ := commandForTest(t, "--config-dir", configDir, "--output", "json", "backup", "run", "--force")
+	root, stdout, stderr := commandForTest(t, "--config-dir", configDir, "--output", "json", "backup", "run", "--force")
 	require.NoError(t, root.Execute())
 
 	var results []backup.RunResult
@@ -158,6 +167,7 @@ func TestBackupRunWithoutSiteRunsEveryEnabledSite(t *testing.T) {
 	assert.Equal(t, []string{"example", "site-b"}, []string{results[0].SiteName, results[1].SiteName})
 	assert.Equal(t, backup.StatusSuccess, results[0].Status)
 	assert.Equal(t, backup.StatusSuccess, results[1].Status)
+	assert.Empty(t, stderr.String(), "JSON batch output must not include progress text")
 
 	for _, siteName := range []string{"example", "site-b"} {
 		matches, err := filepath.Glob(filepath.Join(backupRoot, "bqckup", siteName, "*", "*", "files.tar.gz"))
@@ -251,14 +261,14 @@ site:
 `, siteName, enabled, source)), 0o600))
 }
 
-func TestBackupRunSingleSiteNoChangeExitCode5(t *testing.T) {
+func TestBackupRunSingleSiteNoChangeIsSuccessful(t *testing.T) {
 	configDir, _ := writeCLIConfig(t)
 	// First run: success
 	root, stdout, _ := commandForTest(t, "--config-dir", configDir, "backup", "run", "example", "--force")
 	require.NoError(t, root.Execute())
 	assert.Contains(t, stdout.String(), "example: success")
 
-	// Second run (source unchanged): no_change, exits with code 5
+	// Second run (source unchanged): no_change is informational and exits 0.
 	stdout = new(bytes.Buffer)
 	stderr := new(bytes.Buffer)
 	code := Execute(t.Context(), stdout, stderr)
@@ -267,8 +277,7 @@ func TestBackupRunSingleSiteNoChangeExitCode5(t *testing.T) {
 	// Run with args via root command execution
 	rootCmd, stdout, stderr := commandForTest(t, "--config-dir", configDir, "--output", "json", "backup", "run", "example", "--force")
 	err := rootCmd.Execute()
-	require.Error(t, err)
-	assert.Equal(t, 5, ExitCode(err))
+	require.NoError(t, err)
 	var result map[string]any
 	require.NoError(t, json.Unmarshal(stdout.Bytes(), &result))
 	assert.Equal(t, "no_change", result["status"])
@@ -276,12 +285,11 @@ func TestBackupRunSingleSiteNoChangeExitCode5(t *testing.T) {
 	// Text output format
 	rootCmd, stdout, _ = commandForTest(t, "--config-dir", configDir, "backup", "run", "example", "--force")
 	err = rootCmd.Execute()
-	require.Error(t, err)
-	assert.Equal(t, 5, ExitCode(err))
+	require.NoError(t, err)
 	assert.Contains(t, stdout.String(), "example: no_change")
 }
 
-func TestBackupRunMultiSiteNoChangeExitCode5(t *testing.T) {
+func TestBackupRunMultiSiteNoChangeIsSuccessful(t *testing.T) {
 	configDir, _ := writeCLIConfig(t)
 	writeCLISite(t, configDir, "site-b", true)
 
@@ -291,11 +299,10 @@ func TestBackupRunMultiSiteNoChangeExitCode5(t *testing.T) {
 	assert.Contains(t, stdout.String(), "example: success")
 	assert.Contains(t, stdout.String(), "site-b: success")
 
-	// Second run (all unchanged): exits 5
+	// Second run (all unchanged): exits 0.
 	root, stdout, _ = commandForTest(t, "--config-dir", configDir, "--output", "json", "backup", "run", "--force")
 	err := root.Execute()
-	require.Error(t, err)
-	assert.Equal(t, 5, ExitCode(err))
+	require.NoError(t, err)
 
 	var results []backup.RunResult
 	require.NoError(t, json.Unmarshal(stdout.Bytes(), &results))

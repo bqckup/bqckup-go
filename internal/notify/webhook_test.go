@@ -27,12 +27,7 @@ func TestWebhookPostsExactPayload(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	webhook := NewWebhook("webhook", "BQCKUP_WEBHOOK_URL", func(key string) (string, bool) {
-		if key == "BQCKUP_WEBHOOK_URL" {
-			return server.URL, true
-		}
-		return "", false
-	})
+	webhook := NewWebhook("webhook", server.URL)
 	payload := NewPayload(notifyInput(config.EventBackupFailed))
 	require.NoError(t, webhook.Send(context.Background(), payload))
 
@@ -49,7 +44,7 @@ func TestWebhookReturnsNon2xxStatus(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	webhook := NewWebhook("webhook", "BQCKUP_WEBHOOK_URL", func(string) (string, bool) { return server.URL, true })
+	webhook := NewWebhook("webhook", server.URL)
 	err := webhook.Send(context.Background(), NewPayload(notifyInput(config.EventBackupFailed)))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "500")
@@ -60,16 +55,16 @@ func TestWebhookReturnsNetworkErrors(t *testing.T) {
 	url := server.URL
 	server.Close() // connection refused from here on
 
-	webhook := NewWebhook("webhook", "BQCKUP_WEBHOOK_URL", func(string) (string, bool) { return url, true })
+	webhook := NewWebhook("webhook", url)
 	err := webhook.Send(context.Background(), NewPayload(notifyInput(config.EventBackupFailed)))
 	require.Error(t, err)
 }
 
-func TestWebhookMissingEnvIsAnError(t *testing.T) {
-	webhook := NewWebhook("webhook", "BQCKUP_WEBHOOK_URL", func(string) (string, bool) { return "", false })
+func TestWebhookEmptyURLIsAnError(t *testing.T) {
+	webhook := NewWebhook("webhook", "")
 	err := webhook.Send(context.Background(), NewPayload(notifyInput(config.EventBackupFailed)))
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "BQCKUP_WEBHOOK_URL")
+	assert.Contains(t, err.Error(), "unsupported protocol scheme")
 }
 
 func TestWebhookTimesOut(t *testing.T) {
@@ -81,7 +76,7 @@ func TestWebhookTimesOut(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	webhook := NewWebhook("webhook", "BQCKUP_WEBHOOK_URL", func(string) (string, bool) { return server.URL, true })
+	webhook := NewWebhook("webhook", server.URL)
 	webhook.client.Timeout = 50 * time.Millisecond
 	started := time.Now()
 	err := webhook.Send(context.Background(), NewPayload(notifyInput(config.EventBackupFailed)))

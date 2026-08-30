@@ -41,7 +41,7 @@ jobs:
           chmod +x restic
           sudo mv restic /usr/local/bin/restic
       - name: Compat tests against the official restic binary
-        run: go test -race -tags=restic_compat ./internal/engine/restic/...
+        run: go test -race -tags=restic_compat ./internal/engine/incremental/...
 
   build:
     needs: verify

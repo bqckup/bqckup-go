@@ -16,6 +16,21 @@ import (
 
 var ErrInvalidInput = errors.New("invalid command input")
 
+func usageError(cmd *cobra.Command, message string) error {
+	usage := strings.TrimSpace(cmd.UseLine())
+	example := strings.TrimSpace(cmd.Example)
+	if example == "" {
+		example = cmd.CommandPath() + " --help"
+	}
+	return fmt.Errorf("%w: %s\n\nUsage:\n  %s\n\nExample:\n  %s", ErrInvalidInput, message, usage, example)
+}
+
+// usageErrorText is used by initialization, which is also exercised as a
+// standalone file-tree helper without a Cobra command instance.
+func usageErrorText(message, usage, example string) error {
+	return fmt.Errorf("%w: %s\n\nUsage:\n  %s\n\nExample:\n  %s", ErrInvalidInput, message, usage, example)
+}
+
 type options struct {
 	configDir string
 	output    string
@@ -33,17 +48,17 @@ func NewRoot(info buildinfo.Info) *cobra.Command {
 		Short:         "Reliable, self-hosted backups",
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		PersistentPreRunE: func(_ *cobra.Command, _ []string) error {
+		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
 			if opts.output != "text" && opts.output != "json" {
-				return fmt.Errorf("%w: --output must be text or json", ErrInvalidInput)
+				return usageError(cmd, "--output must be text or json")
 			}
 			return nil
 		},
 	}
 	root.PersistentFlags().StringVar(&opts.configDir, "config-dir", defaultConfigDir, "configuration directory")
 	root.PersistentFlags().StringVar(&opts.output, "output", "text", "output format: text or json")
-	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
-		return fmt.Errorf("%w: %v", ErrInvalidInput, err)
+	root.SetFlagErrorFunc(func(cmd *cobra.Command, err error) error {
+		return usageError(cmd, err.Error())
 	})
 
 	root.AddCommand(newInitCommand(opts))
@@ -75,7 +90,12 @@ func Execute(ctx context.Context, stdout, stderr io.Writer) int {
 	root.SetOut(stdout)
 	root.SetErr(stderr)
 	if err := root.Execute(); err != nil {
-		_, _ = fmt.Fprintln(stderr, formatErrorMessage(err))
+		message := formatErrorMessage(err)
+		if strings.Contains(err.Error(), "unknown command") {
+			message += "\n\nUsage:\n  bqckup <command> --help\n\nExample:\n  bqckup backup --help"
+		}
+		color := ansiColor{on: isTerminalWriter(stderr)}
+		_, _ = fmt.Fprintf(stderr, "%s %s\n", color.red("[FAIL]"), message)
 		return ExitCode(err)
 	}
 	return 0
@@ -94,6 +114,7 @@ func formatErrorMessage(err error) string {
 	}
 	message = apperror.UserMessage(err)
 	seen := map[string]bool{message: true}
+	previous := ""
 	var walk func(error)
 	walk = func(e error) {
 		if e == nil {
@@ -105,9 +126,10 @@ func formatErrorMessage(err error) string {
 			}
 			return
 		}
-		if text := e.Error(); text != "" && !seen[text] {
+		if text := e.Error(); text != "" && !seen[text] && !strings.Contains(previous, text) {
 			seen[text] = true
 			message += ": " + text
+			previous = text
 		}
 		walk(errors.Unwrap(e))
 	}
@@ -124,9 +146,6 @@ func formatErrorMessage(err error) string {
 func ExitCode(err error) int {
 	if err == nil {
 		return 0
-	}
-	if errors.Is(err, errNoChange) {
-		return 5
 	}
 	var configError *config.Error
 	if errors.Is(err, ErrInvalidInput) || errors.As(err, &configError) || strings.Contains(err.Error(), "unknown command") {
