@@ -17,7 +17,7 @@ import (
 var ErrInvalidInput = errors.New("invalid command input")
 
 func usageError(message, usage, example string) error {
-	return fmt.Errorf("%w: %s\nUsage: %s\nExample: %s", ErrInvalidInput, message, usage, example)
+	return fmt.Errorf("%w: %s\n\nUsage:\n  %s\n\nExample:\n  %s", ErrInvalidInput, message, usage, example)
 }
 
 type options struct {
@@ -81,9 +81,10 @@ func Execute(ctx context.Context, stdout, stderr io.Writer) int {
 	if err := root.Execute(); err != nil {
 		message := formatErrorMessage(err)
 		if strings.Contains(err.Error(), "unknown command") {
-			message += "\nUsage: bqckup <command> --help\nExample: bqckup backup --help"
+			message += "\n\nUsage:\n  bqckup <command> --help\n\nExample:\n  bqckup backup --help"
 		}
-		_, _ = fmt.Fprintln(stderr, message)
+		color := ansiColor{on: isTerminalWriter(stderr)}
+		_, _ = fmt.Fprintf(stderr, "%s %s\n", color.red("[FAIL]"), message)
 		return ExitCode(err)
 	}
 	return 0
