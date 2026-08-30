@@ -173,14 +173,14 @@ func TestValidateNotificationsRejectsInvalidForms(t *testing.T) {
 			mutate: func(n *Notifications) {
 				n.Routes[0].Events = []string{"backup_started"}
 			},
-			wantErr: "must be one of backup_failed, backup_cancelled, or backup_no_change",
+			wantErr: "must be one of all, backup_failed, backup_cancelled, or backup_no_change",
 		},
 		{
 			name: "route with backup_succeeded rejected",
 			mutate: func(n *Notifications) {
 				n.Routes[0].Events = []string{"backup_succeeded"}
 			},
-			wantErr: "must be one of backup_failed, backup_cancelled, or backup_no_change",
+			wantErr: "must be one of all, backup_failed, backup_cancelled, or backup_no_change",
 		},
 	}
 	for _, test := range tests {

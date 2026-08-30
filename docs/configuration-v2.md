@@ -200,7 +200,7 @@ notifications:
       webhook_url: BQCKUP_DISCORD_WEBHOOK_URL
 
   routes:
-    - events: [backup_failed, backup_cancelled, backup_no_change]
+    - events: [all]
       channels: [email, discord]
 ```
 

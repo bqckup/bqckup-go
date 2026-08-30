@@ -53,7 +53,7 @@ func (d *Dispatcher) channelsFor(event string) []Channel {
 	seen := make(map[string]struct{})
 	var matched []Channel
 	for _, route := range d.routes {
-		if !containsString(route.Events, event) {
+		if !containsString(route.Events, event) && !containsString(route.Events, config.EventAll) {
 			continue
 		}
 		for _, name := range route.Channels {

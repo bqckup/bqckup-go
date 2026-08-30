@@ -20,6 +20,7 @@ type Config struct {
 // Notification event names. These are the canonical values for the
 // notifications route contract; internal/notify maps them to its typed enum.
 const (
+	EventAll             = "all"
 	EventBackupFailed    = "backup_failed"
 	EventBackupCancelled = "backup_cancelled"
 	EventBackupNoChange  = "backup_no_change"
