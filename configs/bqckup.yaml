@@ -14,19 +14,20 @@ app:
 #   channels:
 #     email:
 #       type: smtp
-#       host: smtp.example.com
+#       host: <smtp-host>
 #       port: 587
-#       username: backup-user
-#       password: replace-with-smtp-password
-#       from: bqckup@example.com
+#       username: <smtp-user>
+#       password: <smtp-password>
+#       from: <sender-address>
 #       to:
-#         - ops@example.com
+#         - <recipient-address>
 #     webhook:
 #       type: webhook
-#       url: https://hooks.example.com/bqckup
+#       url: <webhook-url>
 #     discord:
 #       type: discord
-#       webhook_url: https://discord.com/api/webhooks/replace-me
+#       webhook_url: <discord-webhook-url>
 #   routes:
-#     - events: [all]
+#     # events options: all | backup_failed | backup_cancelled | backup_no_change
+#     - events: [backup_failed]
 #       channels: [email, discord, webhook]

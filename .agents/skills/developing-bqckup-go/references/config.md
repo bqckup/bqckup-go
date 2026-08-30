@@ -41,8 +41,14 @@ guide.
 14. Notification channels are `smtp`, `webhook`, or `discord`. Routes accept
     `all`, `backup_failed`, `backup_cancelled`, and `backup_no_change`;
     successful runs remain silent. Enforce per-channel fields and URL safety.
+    Documentation examples must show these options beside `events` and use
+    `<placeholder>` values for secrets and endpoints.
 15. `minimum_interval` defaults to `24h` and `keep_last` defaults to `7`; both
     must remain validated before reaching orchestration.
+
+Keep the README short and task-oriented. Put complete field explanations in
+the user guide and configuration reference; keep initialization files copyable
+after placeholders are replaced.
 
 Older binaries reject unknown fields. Document upgrade ordering for optional
 schema additions.

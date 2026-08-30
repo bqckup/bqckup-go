@@ -4,6 +4,21 @@ This guide covers installation, configuration, daily backup operations,
 scheduling, restore, and common failures. It is written for operators of the
 `bqckup` command-line application.
 
+## Quick reference
+
+| Setting | Available values |
+| --- | --- |
+| `app.log_level` | `debug`, `info`, `warn`, `error` |
+| `storage.type` | `local`, `s3`, `r2` |
+| `backup_mode` | `full` (default), `incremental` |
+| database `engine` | `mysql`, `postgres` |
+| notification channel `type` | `smtp`, `webhook`, `discord` |
+| notification route `events` | `all`, `backup_failed`, `backup_cancelled`, `backup_no_change` |
+
+Values written as `<placeholder>` in this guide must be replaced before use.
+They are documentation placeholders, not valid event, channel, or credential
+values.
+
 ## 1. How Bqckup works
 
 Bqckup reads one configuration tree, backs up one named site at a time, writes
@@ -287,6 +302,33 @@ bqckup doctor --site website
 writable application directories, required database tools, and configured
 incremental passwords without printing their values.
 
+## Notifications
+
+Add this optional section to the root `bqckup.yaml`:
+
+```yaml
+notifications:
+  channels:
+    email:
+      type: smtp
+      host: <smtp-host>
+      port: 587
+      username: <smtp-user>
+      password: <smtp-password>
+      from: <sender-address>
+      to: [<recipient-address>]
+  routes:
+    # events options: all | backup_failed | backup_cancelled | backup_no_change
+    - events: [backup_failed]
+      channels: [email]
+```
+
+Channel `type` options are `smtp`, `webhook`, and `discord`. Route `events`
+options are `all`, `backup_failed`, `backup_cancelled`, and `backup_no_change`.
+Successful runs, skipped runs, and preflight failures send no notification.
+Delivery is best effort and never changes backup history or the run result.
+Keep the root file at mode `0600` when it contains credentials or URLs.
+
 ## 7. Daily operations
 
 List configured sites:
@@ -359,7 +401,28 @@ and storage YAML files.
 
 ## 9. Restore
 
-Bqckup does not currently provide a restore command.
+The built-in restore command is for incremental sites. Full-mode archives are
+restored manually as described below.
+
+List incremental snapshots from a destination:
+
+```bash
+bqckup backup snapshots website --destination local-primary
+```
+
+Restore the newest snapshot into an explicit directory:
+
+```bash
+bqckup backup restore website \
+  --destination local-primary \
+  --snapshot latest \
+  --target /tmp/bqckup-restore
+```
+
+Use an ID or ID prefix instead of `latest`. Existing files are never silently
+overwritten; review the conflict list and confirm, or use `--force`. Add
+`--quiet` to suppress a successful text summary. Restore does not create a
+backup-history record.
 
 ### Restore a full backup
 
@@ -393,10 +456,10 @@ replacing production data.
 
 ### Restore an incremental snapshot
 
-Incremental repositories use the standard Restic repository format. Install
-the official `restic` command, provide the same repository password and
-storage credentials, run `restic snapshots`, and restore to an explicit empty
-target directory. Never restore directly over production data.
+The repositories use the standard Restic format, so the official `restic`
+command can also be used when needed. Provide the same repository password and
+storage credentials, then restore to an explicit empty target directory. Never
+restore directly over production data.
 
 ## 10. Troubleshooting
 

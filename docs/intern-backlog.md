@@ -200,7 +200,9 @@ were removed after M12–M14 completed.
 
 **Out of scope:** Implementation during the design PR, Rustic compatibility claims, silent replacement of archive mode, passwords in YAML, destructive restore defaults.
 
-**Design artifacts:** `docs/superpowers/specs/2026-08-20-restic-engine-phase1-design.md` (historical design), format verification and decision notes in `docs/superpowers/notes/`, and the final runtime decision in `docs/restic-engine-planning.md`.
+**Design artifacts:** Historical design notes are intentionally not part of the
+active documentation set; current behavior is defined by the code, tests, and
+the architecture/reference documents.
 
 **Acceptance:** Maintainer approves the design and splits implementation into independently testable follow-up milestones. Archive mode remains supported. Restore requires explicit destination and overwrite safeguards.
 
@@ -214,7 +216,8 @@ were removed after M12–M14 completed.
 backend shipped in `internal/engine/restic/backend/s3.go`; incremental mode
 serves s3/r2 destinations directly; credentials flow in memory only.
 
-**Roadmap:** `tasks/plan-l3-l4-l2.md`.
+**Roadmap:** Track follow-up work in the issue tracker; this section is the
+acceptance checklist for the delivered behavior.
 
 **Objective:** Implement the engine `Backend` interface over S3/R2 so the built-in incremental engine serves cloud destinations too.
 
@@ -237,7 +240,8 @@ Restic-compatible locks shipped in `internal/engine/restic/lock`
 (encrypted lock blobs, 30-minute staleness, `bqckup backup unlock`),
 verified against the official restic 0.19.1 binary in both directions.
 
-**Roadmap:** `tasks/plan-l3-l4-l2.md`.
+**Roadmap:** Track follow-up work in the issue tracker; this section is the
+acceptance checklist for the delivered behavior.
 
 **Objective:** Restic-compatible locks so concurrent backups and prune cannot corrupt the repository; locks respected in both directions with the official binary.
 
@@ -262,7 +266,8 @@ bytes reported in run output (`reclaimed_bytes` in JSON, `reclaimed …` in
 text). Verified against the official restic 0.19.1 binary: `restic check`
 green after prune.
 
-**Roadmap:** `tasks/plan-l3-l4-l2.md`.
+**Roadmap:** Track follow-up work in the issue tracker; this section is the
+acceptance checklist for the delivered behavior.
 
 **Objective:** Deleting old snapshots actually reclaims pack space via mark-and-sweep prune (no repack).
 
@@ -280,13 +285,14 @@ green after prune.
 
 ## M15 — Remote storage listing
 
-**Status:** Delivered; retain this section as its acceptance checklist. See `docs/superpowers/specs/2026-08-24-remote-storage-listing.md` and `docs/superpowers/plans/2026-08-24-remote-storage-listing-plan.md`.
+**Status:** Delivered; retain this section as its acceptance checklist.
 
 **Objective:** `bqckup storage list <destination> --site <site>` shows the live contents of one remote destination for one site: archive artifacts for `full` mode, restic snapshots for `incremental` mode. Port of the legacy `get-list` command.
 
 **Prerequisites:** M04 and M07 delivered (S3 adapter, prefix-scoped listing and pagination); facade and lock package from M12/M13.
 
-**In scope:** one `storage list` subcommand, `storage.Artifact` value type, `s3compat.Store.ListArtifacts`, `facade.Engine.ListSnapshots` with a non-exclusive lock, a consumer-owned lister in `internal/backup`, app wiring, text and JSON rendering, README and `CONTEXT.md` updates.
+**In scope:** one `storage list` subcommand, live listing through the storage
+adapters, app wiring, and text/JSON rendering.
 
 **Out of scope:** local destination listing (use `history list --details`), restore, link generation, Python-era object layouts, listing raw restic repository objects, `--full-id`, any new config field or dependency.
 
@@ -298,13 +304,14 @@ green after prune.
 
 ## M16 — Download link for remote artifacts
 
-**Status:** Delivered; retain this section as its acceptance checklist. See `docs/superpowers/specs/2026-08-24-download-link.md` and `docs/superpowers/plans/2026-08-24-download-link-plan.md`.
+**Status:** Delivered; retain this section as its acceptance checklist.
 
 **Objective:** `bqckup storage link <destination> --key <key> --expires <n>h` prints a temporary signed download URL for one archive artifact of a full-mode site on a remote destination. Port of the legacy web UI's `get_download_link` endpoint.
 
 **Prerequisites:** M04 and M15 delivered (S3 adapter, `storage list` output format the key is copied from).
 
-**In scope:** one `storage link` subcommand, `storage.DownloadLink` value type, `s3compat.Store.PresignLink` (HEAD existence check plus client-side presign with `attachment` content disposition), `local.Store.LocalPath` for the local-destination error message, a consumer-owned linker in `internal/backup`, app wiring that parses the site from the key, text and JSON rendering, README and `CONTEXT.md` updates.
+**In scope:** one `storage link` subcommand, safe remote presigning, local
+destination guidance, app wiring, and text/JSON rendering.
 
 **Out of scope:** linking restic repository blobs (incremental sites fail with a pointer to restore), local destinations (no URL exists; the error shows the local path), any config field or dependency change, history writes, restore.
 
@@ -316,7 +323,8 @@ green after prune.
 
 ## M17 — Incremental snapshot listing
 
-**Status:** Delivered (2026-08-26). See `docs/superpowers/specs/2026-08-26-backup-snapshots.md`.
+**Status:** Delivered (2026-08-26). Retain this section as its acceptance
+checklist.
 
 **Objective:** `bqckup backup snapshots <site> --destination <name>` shows the live snapshots of one incremental site, read directly from the repository for local, S3, and R2 destinations. First half of issue #17; the legacy counterpart is `bqckup get-list <name>`.
 
@@ -334,7 +342,8 @@ green after prune.
 
 ## M18 — Incremental snapshot restore
 
-**Status:** In progress (2026-08-26). See `docs/superpowers/specs/2026-08-26-restore.md`.
+**Status:** Delivered (2026-08-26). Retain this section as its acceptance
+checklist.
 
 **Objective:** `bqckup backup restore <site> --destination <name> --snapshot <id|latest> --target <path> [--force] [--quiet]` rebuilds the configured file paths of one snapshot into an explicit target directory (restic layout), from local, S3, or R2 repositories. Second half of issue #17; the legacy counterpart is `bqckup restore <site> --target <dir>`.
 
@@ -382,7 +391,8 @@ same-second overwrite rejection, and safe retention prefix validation.
 
 ## M20 — Backup summary command
 
-**Status:** Planned (2026-08-27). Issue #14.
+**Status:** Delivered (2026-08-27). Retain this section as its acceptance
+checklist.
 
 **Objective:** `bqckup backup summary [--site <name>]` prints a read-only
 per-site report, text panel or JSON, built from the active configuration and
@@ -404,7 +414,7 @@ incremental sites, Schedule/Next Backup rows, watch mode, stale running-row
 cleanup (future doctor work), history schema changes.
 
 **Acceptance:** text and JSON contracts as locked in
-tasks/plan-backup-summary.md; unknown `--site` exits 2; disabled sites are
+the implementation contract; unknown `--site` exits 2; disabled sites are
 shown; orphan history runs are ignored; no credential appears in output;
 `make verify` and `sh scripts/check-docs.sh` pass.
 
@@ -418,8 +428,8 @@ empty config message), doc gates.
 
 ## M21 — Global notifications (SMTP, webhook, Discord)
 
-**Status:** Planned (2026-08-29). Issue #15. Spec: `SPEC-notifications.md`
-(project root); plan: `tasks/plan-notifications.md`.
+**Status:** Delivered (2026-08-29). Retain this section as its acceptance
+checklist.
 
 **Objective:** `notifications:` in the root schema-v2 config: named
 channels (`smtp`, `webhook`, `discord`) and routes mapping events

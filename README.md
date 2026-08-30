@@ -82,6 +82,21 @@ The default configuration directory is `/etc/bqckup`:
 Ready-to-edit examples are in [`configs/`](configs/). Use
 `--config-dir <directory>` to load a different configuration tree.
 
+Common options:
+
+| Field | Available values |
+| --- | --- |
+| `app.log_level` | `debug`, `info`, `warn`, `error` |
+| `storage.type` | `local`, `s3`, `r2` |
+| `site.backup_mode` | `full` (default), `incremental` |
+| `database.engine` | `mysql`, `postgres` |
+| `notifications.channels.<name>.type` | `smtp`, `webhook`, `discord` |
+| `notifications.routes[].events[]` | `all`, `backup_failed`, `backup_cancelled`, `backup_no_change` |
+
+In examples, replace placeholders such as `<site>`, `<password>`, `<bucket>`,
+and `<webhook-url>` with real values. Do not copy angle-bracket placeholders
+into a production configuration.
+
 The `configs/sites/failure-test.yaml` example is intentionally enabled and
 uses a missing source path so notification and failure-history behavior can be
 tested with `bqckup backup run failure-test --force`.
@@ -101,25 +116,11 @@ python3 scripts/convert_legacy_config.py
 sudo bqckup --config-dir /etc/bqckup config validate
 ```
 
-Without arguments, the converter prefers legacy files in `/etc/bqckup_old` and
-writes `/etc/bqckup`. If legacy files are still in `/etc/bqckup`, it first
-moves them to `/etc/bqckup_old`, then writes the converted config back to
-`/etc/bqckup`. A current schema-v2 tree is not treated as legacy. Use
-`--input-dir` and `--output-dir` for another layout.
-
-The converter does not modify the legacy tree or print credentials. Review
-warnings—especially undefined legacy destinations such as `dummy`—before
-switching the service to the generated configuration.
-
-If a site file is malformed, conversion stops with the exact file path and
-preserves the legacy tree in `/etc/bqckup_old`; fix that file and run the
-converter again.
-
-Existing schema-v2 site files such as the default `example.yaml` are skipped
-automatically when found in the legacy tree.
-
-Legacy database type `postgresql` is normalized to the v2 engine name
-`postgres`.
+Without arguments, it reads `/etc/bqckup_old` and writes `/etc/bqckup`. If old
+files are still in `/etc/bqckup`, they are preserved first. Use `--input-dir`
+and `--output-dir` for another layout. The converter never prints credentials,
+does not modify the preserved tree, skips existing schema-v2 files, and maps
+legacy database type `postgresql` to `postgres`.
 
 ## Backup modes
 
@@ -143,8 +144,13 @@ bqckup init
 bqckup config validate
 bqckup doctor [--site <name>]
 bqckup backup list
+bqckup backup summary [--site <name>]
 bqckup backup run <site> [--force]
 bqckup backup unlock <site>
+bqckup backup snapshots <site> --destination <name>
+bqckup backup restore <site> --destination <name> --target <directory>
+bqckup storage list <destination> --site <site>
+bqckup storage link <destination> --key <key>
 bqckup history list [--site <name>] [--limit <n>] [--details]
 bqckup version
 ```
@@ -162,15 +168,29 @@ exports.
 
 ## Notifications
 
-Add a `notifications:` section to `bqckup.yaml` to get an email, generic
-webhook, or Discord webhook when a run finishes. Three events exist:
-`backup_failed`, `backup_cancelled`, and `backup_no_change` (successful runs stay
-silent). Routes map events to channels; SMTP credentials and webhook URLs are
-written directly as `username`, `password`, `url`, and `webhook_url`. A root
-config containing these values must be a regular file with mode `0600`. Delivery is best effort: a failing
-channel prints a warning and never changes the run result or history. Skipped
-runs and preflight failures send nothing. `bqckup config validate` checks the
-notification URL format and protected file permissions.
+Add an optional `notifications:` section to `bqckup.yaml`:
+
+```yaml
+notifications:
+  channels:
+    email:
+      type: smtp
+      host: <smtp-host>
+      port: 587
+      username: <smtp-user>
+      password: <smtp-password>
+      from: <sender-address>
+      to: [<recipient-address>]
+  routes:
+    # events: all | backup_failed | backup_cancelled | backup_no_change
+    - events: [backup_failed]
+      channels: [email]
+```
+
+Available channel types are `smtp`, `webhook`, and `discord`. Successful runs,
+skips, and preflight failures stay silent. Delivery is best effort and never
+changes the run result or history. Keep credential-bearing root YAML at mode
+`0600`; `config validate` checks URL format and permissions.
 
 ## Scheduling
 
