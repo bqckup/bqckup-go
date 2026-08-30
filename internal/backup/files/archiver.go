@@ -4,6 +4,8 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -42,7 +44,8 @@ func (a *Archiver) Create(ctx context.Context, source backup.FileSource, destina
 		}
 	}()
 
-	gz := gzip.NewWriter(output)
+	digest := sha256.New()
+	gz := gzip.NewWriter(io.MultiWriter(output, digest))
 	tw := tar.NewWriter(gz)
 	state := archiveState{ctx: ctx, writer: tw, source: source}
 	rootNames := map[string]struct{}{}
@@ -68,17 +71,17 @@ func (a *Archiver) Create(ctx context.Context, source backup.FileSource, destina
 	if err := output.Sync(); err != nil {
 		return backup.Package{}, fmt.Errorf("sync archive: %w", err)
 	}
+	info, err := output.Stat()
+	if err != nil {
+		return backup.Package{}, fmt.Errorf("stat archive: %w", err)
+	}
 	if err := output.Close(); err != nil {
 		return backup.Package{}, fmt.Errorf("close archive: %w", err)
 	}
 
-	checksum, size, err := backup.ChecksumFile(destination)
-	if err != nil {
-		return backup.Package{}, err
-	}
 	success = true
 	return backup.Package{
-		Path: destination, Size: size, SHA256: checksum,
+		Path: destination, Size: info.Size(), SHA256: hex.EncodeToString(digest.Sum(nil)),
 		SourceKind: "files", SourceName: "files",
 	}, nil
 }

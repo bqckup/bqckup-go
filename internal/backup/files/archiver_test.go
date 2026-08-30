@@ -4,6 +4,8 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"io"
 	"os"
@@ -33,8 +35,11 @@ func TestCreateExcludesConfiguredSubtree(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, []string{"source/keep/a.txt"}, archiveMembers(t, out))
-	assert.Len(t, pkg.SHA256, 64)
-	assert.Positive(t, pkg.Size)
+	compressed, err := os.ReadFile(out)
+	require.NoError(t, err)
+	assert.Equal(t, int64(len(compressed)), pkg.Size)
+	digest := sha256.Sum256(compressed)
+	assert.Equal(t, hex.EncodeToString(digest[:]), pkg.SHA256)
 }
 
 func TestCreateSupportsRelativeExcludePatterns(t *testing.T) {

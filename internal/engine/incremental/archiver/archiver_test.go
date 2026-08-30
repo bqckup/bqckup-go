@@ -158,6 +158,54 @@ func TestSecondBackupDedups(t *testing.T) {
 	}
 }
 
+func TestSecondBackupReusesUnmodifiedFiles(t *testing.T) {
+	ctx := context.Background()
+	arch, local, source := newArchiver(t, ctx)
+	buildDataset(t, source)
+	spec := BackupSpec{
+		Paths:    []string{source},
+		Excludes: []string{"*.tmp"},
+		Tags:     []string{"site:test"},
+	}
+	firstID, _, err := arch.Backup(ctx, spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	repo := openRepo(t, ctx, local)
+	_, summary, err := New(repo).Backup(ctx, spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.FilesNew != 0 {
+		t.Fatalf("files new = %d, want 0", summary.FilesNew)
+	}
+	if summary.FilesChanged != 0 {
+		t.Fatalf("files changed = %d, want 0", summary.FilesChanged)
+	}
+	if summary.FilesUnmodified != 4 {
+		t.Fatalf("files unmodified = %d, want 4", summary.FilesUnmodified)
+	}
+
+	snapshots, err := repo.ListSnapshots(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshots) != 2 {
+		t.Fatalf("snapshot count = %d, want 2", len(snapshots))
+	}
+	var parentFound bool
+	for _, entry := range snapshots {
+		if entry.Snapshot.Parent != nil && *entry.Snapshot.Parent == firstID {
+			parentFound = true
+			break
+		}
+	}
+	if !parentFound {
+		t.Fatalf("second snapshot parent = %#v, want previous snapshot", snapshots)
+	}
+}
+
 func TestNodeForDoesNotRecordAtime(t *testing.T) {
 	// atime changes when a backup reads the file (relatime filesystems), so
 	// recording it would make every tree differ on the next run and break
@@ -211,6 +259,9 @@ func TestOneByteChangeAddsOnlyAffectedChunks(t *testing.T) {
 	}
 	if summary.DataAdded >= int64(len(data)) {
 		t.Fatalf("one-byte change re-added the whole file: %d bytes", summary.DataAdded)
+	}
+	if summary.FilesChanged != 1 || summary.FilesUnmodified != 3 {
+		t.Fatalf("summary = %#v, want one changed and three unmodified files", summary)
 	}
 }
 
@@ -288,6 +339,27 @@ func TestBackupMultipleRootsWithSameBasename(t *testing.T) {
 	}
 	if _, ok := repo.MasterIndex().Lookup(incremental.TreeBlob, *snapshots[0].Snapshot.Tree); !ok {
 		t.Fatal("snapshot root tree was not persisted in any pack/index")
+	}
+}
+
+func TestSecondBackupReusesMultipleRoots(t *testing.T) {
+	ctx := context.Background()
+	arch, local, _ := newArchiver(t, ctx)
+	dirA := t.TempDir()
+	dirB := t.TempDir()
+	writeFile(t, filepath.Join(dirA, "a.txt"), []byte("a"))
+	writeFile(t, filepath.Join(dirB, "b.txt"), []byte("b"))
+	spec := BackupSpec{Paths: []string{dirA, dirB}}
+	if _, _, err := arch.Backup(ctx, spec); err != nil {
+		t.Fatal(err)
+	}
+	repo := openRepo(t, ctx, local)
+	_, summary, err := New(repo).Backup(ctx, spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.FilesNew != 0 || summary.FilesChanged != 0 || summary.FilesUnmodified != 2 {
+		t.Fatalf("summary = %#v, want two unmodified files", summary)
 	}
 }
 
