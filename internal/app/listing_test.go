@@ -8,7 +8,7 @@ import (
 
 	"github.com/bqckup/bqckup-go/internal/apperror"
 	"github.com/bqckup/bqckup-go/internal/backup"
-	"github.com/bqckup/bqckup-go/internal/backup/restic"
+	"github.com/bqckup/bqckup-go/internal/backup/incremental"
 	"github.com/bqckup/bqckup-go/internal/config"
 	"github.com/bqckup/bqckup-go/internal/storage"
 	"github.com/stretchr/testify/assert"
@@ -40,11 +40,11 @@ func (a *appRemoteLister) ListPackages(context.Context, string) ([]storage.Remot
 }
 
 type appSnapshotLister struct {
-	snapshots []restic.Snapshot
-	gotRepo   restic.RepoConfig
+	snapshots []incremental.Snapshot
+	gotRepo   incremental.RepoConfig
 }
 
-func (a *appSnapshotLister) ListSnapshots(_ context.Context, repo restic.RepoConfig) ([]restic.Snapshot, error) {
+func (a *appSnapshotLister) ListSnapshots(_ context.Context, repo incremental.RepoConfig) ([]incremental.Snapshot, error) {
 	a.gotRepo = repo
 	return a.snapshots, nil
 }
@@ -135,7 +135,7 @@ func TestListRemoteContentsIncrementalModeWiresRepositoryConfig(t *testing.T) {
 	site.BackupMode = "incremental"
 	site.Incremental = config.Incremental{PasswordEnv: "TEST_REPO_PASSWORD"}
 	t.Setenv("TEST_REPO_PASSWORD", "secret")
-	snapshots := &appSnapshotLister{snapshots: []restic.Snapshot{
+	snapshots := &appSnapshotLister{snapshots: []incremental.Snapshot{
 		{ID: "0123456789abcdef", Paths: []string{"/var/www"}, Size: 7, CreatedAt: time.Now()},
 	}}
 	application := listingApp(t, site, map[string]config.Storage{

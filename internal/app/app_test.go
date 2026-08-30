@@ -15,7 +15,7 @@ import (
 
 	"github.com/bqckup/bqckup-go/internal/apperror"
 	databaseexporter "github.com/bqckup/bqckup-go/internal/backup/database"
-	restic "github.com/bqckup/bqckup-go/internal/backup/restic"
+	incremental "github.com/bqckup/bqckup-go/internal/backup/incremental"
 	"github.com/bqckup/bqckup-go/internal/config"
 	"github.com/bqckup/bqckup-go/internal/notify"
 	"github.com/bqckup/bqckup-go/internal/process"
@@ -179,12 +179,12 @@ func TestBuildStoresConstructsS3AndR2WithoutNetworkIO(t *testing.T) {
 }
 
 type fakeSnapshotLister struct {
-	snapshots []restic.Snapshot
+	snapshots []incremental.Snapshot
 	err       error
-	gotRepo   restic.RepoConfig
+	gotRepo   incremental.RepoConfig
 }
 
-func (f *fakeSnapshotLister) ListSnapshots(_ context.Context, repo restic.RepoConfig) ([]restic.Snapshot, error) {
+func (f *fakeSnapshotLister) ListSnapshots(_ context.Context, repo incremental.RepoConfig) ([]incremental.Snapshot, error) {
 	f.gotRepo = repo
 	return f.snapshots, f.err
 }
@@ -247,7 +247,7 @@ func TestListSiteSnapshotsSucceedsWithLocalStorageDocument(t *testing.T) {
 		Incremental:  config.Incremental{PasswordEnv: "RESTIC_PASSWORD"},
 		Destinations: []config.Destination{{Storage: "local-primary"}},
 	}
-	lister := &fakeSnapshotLister{snapshots: []restic.Snapshot{{
+	lister := &fakeSnapshotLister{snapshots: []incremental.Snapshot{{
 		ID: "33e25d78", Paths: []string{"/var/www/html"}, Size: 2147483648,
 	}}}
 	application := &App{
@@ -417,12 +417,12 @@ type fakeSnapshotRestorer struct {
 	snapshotID string
 	paths      []string
 	target     string
-	confirm    restic.RestoreOverwrite
-	summary    restic.RestoreSummary
+	confirm    incremental.RestoreOverwrite
+	summary    incremental.RestoreSummary
 	err        error
 }
 
-func (f *fakeSnapshotRestorer) RestoreSnapshot(_ context.Context, _ restic.RepoConfig, snapshotID string, paths []string, target string, confirm restic.RestoreOverwrite) (restic.RestoreSummary, error) {
+func (f *fakeSnapshotRestorer) RestoreSnapshot(_ context.Context, _ incremental.RepoConfig, snapshotID string, paths []string, target string, confirm incremental.RestoreOverwrite) (incremental.RestoreSummary, error) {
 	f.snapshotID, f.paths, f.target, f.confirm = snapshotID, paths, target, confirm
 	return f.summary, f.err
 }
@@ -493,11 +493,11 @@ func TestRestoreUnusedDestinationFails(t *testing.T) {
 func TestRestoreSucceedsThroughEngine(t *testing.T) {
 	t.Setenv("RESTIC_PASSWORD", "secret")
 	site := restoreSite()
-	lister := &fakeSnapshotLister{snapshots: []restic.Snapshot{{
+	lister := &fakeSnapshotLister{snapshots: []incremental.Snapshot{{
 		ID: strings.Repeat("a", 64), Paths: []string{"/var/www/html"}, Size: 100,
 		Tags: []string{"site:example"},
 	}}}
-	engine := &fakeSnapshotRestorer{summary: restic.RestoreSummary{
+	engine := &fakeSnapshotRestorer{summary: incremental.RestoreSummary{
 		SnapshotID: strings.Repeat("a", 64), Target: "/tmp/restore", FilesRestored: 3,
 	}}
 	application := &App{

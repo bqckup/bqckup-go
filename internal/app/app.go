@@ -13,10 +13,10 @@ import (
 	"github.com/bqckup/bqckup-go/internal/backup"
 	databaseexporter "github.com/bqckup/bqckup-go/internal/backup/database"
 	"github.com/bqckup/bqckup-go/internal/backup/files"
-	restic "github.com/bqckup/bqckup-go/internal/backup/restic"
+	incremental "github.com/bqckup/bqckup-go/internal/backup/incremental"
 	"github.com/bqckup/bqckup-go/internal/clock"
 	"github.com/bqckup/bqckup-go/internal/config"
-	resticfacade "github.com/bqckup/bqckup-go/internal/engine/restic/facade"
+	incrementalfacade "github.com/bqckup/bqckup-go/internal/engine/incremental/facade"
 	"github.com/bqckup/bqckup-go/internal/history"
 	"github.com/bqckup/bqckup-go/internal/notify"
 	"github.com/bqckup/bqckup-go/internal/platform/lock"
@@ -74,8 +74,9 @@ func Open(ctx context.Context, configDir string) (*App, error) {
 	}
 
 	repository := history.NewRepository(database)
-	engine := resticfacade.NewEngine()
+	engine := incrementalfacade.NewEngine()
 	runner := backup.NewRunner(backup.Dependencies{
+		ServerID:           configuration.ServerID,
 		Repository:         repository,
 		Archiver:           files.New(),
 		IncrementalEngine:  engine,
@@ -274,7 +275,7 @@ func (a *App) ListRemoteContents(ctx context.Context, siteName, destinationName 
 	if !ok || store == nil {
 		return backup.Listing{}, apperror.Wrap(apperror.CategoryInternal, "a configured storage destination is unavailable", nil)
 	}
-	return (&backup.Lister{Snapshots: a.snapshots}).List(ctx, destinationName, site, storageConfig, store)
+	return (&backup.Lister{ServerID: a.configuration.ServerID, Snapshots: a.snapshots}).List(ctx, destinationName, site, storageConfig, store)
 }
 
 // ListSiteSnapshots lists the live snapshots of one incremental site on
@@ -302,7 +303,7 @@ func (a *App) ListSiteSnapshots(ctx context.Context, siteName, destinationName s
 	if !siteUsesDestination(site, destinationName) {
 		return backup.Listing{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q does not send backups to destination %q", siteName, destinationName), nil)
 	}
-	return (&backup.Lister{Snapshots: a.snapshots}).ListSiteSnapshots(ctx, destinationName, site, storageConfig)
+	return (&backup.Lister{ServerID: a.configuration.ServerID, Snapshots: a.snapshots}).ListSiteSnapshots(ctx, destinationName, site, storageConfig)
 }
 
 func siteUsesDestination(site config.Site, destination string) bool {
@@ -317,7 +318,7 @@ func siteUsesDestination(site config.Site, destination string) bool {
 // RestoreSnapshot restores one snapshot of one incremental site into the
 // target directory. Validation mirrors ListSiteSnapshots; the confirm
 // callback is passed through to the engine unchanged.
-func (a *App) RestoreSnapshot(ctx context.Context, siteName, destinationName, snapshotRef, target string, confirm restic.RestoreOverwrite) (backup.RestoreResult, error) {
+func (a *App) RestoreSnapshot(ctx context.Context, siteName, destinationName, snapshotRef, target string, confirm incremental.RestoreOverwrite) (backup.RestoreResult, error) {
 	site, ok := a.configuration.Site(siteName)
 	if !ok {
 		return backup.RestoreResult{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q was not found", siteName), nil)
@@ -337,7 +338,7 @@ func (a *App) RestoreSnapshot(ctx context.Context, siteName, destinationName, sn
 	if !siteUsesDestination(site, destinationName) {
 		return backup.RestoreResult{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q does not send backups to destination %q", siteName, destinationName), nil)
 	}
-	return (&backup.Restorer{Snapshots: a.snapshots, Engine: a.restorer}).RestoreSiteSnapshot(ctx, destinationName, snapshotRef, target, site, storageConfig, confirm)
+	return (&backup.Restorer{ServerID: a.configuration.ServerID, Snapshots: a.snapshots, Engine: a.restorer}).RestoreSiteSnapshot(ctx, destinationName, snapshotRef, target, site, storageConfig, confirm)
 }
 
 // parseSiteFromKey extracts the site name from a download-link key. Valid

@@ -44,7 +44,7 @@ Multiple destinations have all-required semantics. A destination failure fails t
 ## Incremental engine
 
 `backup_mode: incremental` always uses the in-process pure-Go engine in
-`internal/engine/restic/` (facade in `internal/engine/restic/facade/`). No
+`internal/engine/incremental/` (facade in `internal/engine/incremental/facade/`). No
 external Restic binary is used at runtime. The engine serves local and S3/R2
 destinations and writes Restic repository format v2. Compatibility tests use
 the official Restic binary as a test oracle for `check`, `snapshots`, restore,
@@ -57,7 +57,7 @@ Retention (keep_last per site tag) forgets old snapshots and prunes
 unreachable pack data with a mark-and-sweep pass (no repack): the new
 index is written before any pack is deleted, so a crash at any point
 leaves `restic check` green. Set retention also prunes the
-`bqckup/<site>/<timestamp>/` package sets in every mode, so database
+`bqckup/<server_id>/<site>/<timestamp>/` package sets in every mode, so database
 dumps stored there by incremental runs are kept for `keep_last` runs
 too. Restore is a future phase with an explicit destination and no silent
 overwrites.
@@ -68,7 +68,7 @@ overwrites.
 - `internal/backup`: orchestration, file package domain types, status decisions.
 - `internal/backup/files`: tar/gzip filesystem adapter with explicit symlink behavior.
 - `internal/backup/database`: MySQL/PostgreSQL process exporters producing gzip-compressed, checksummed SQL packages.
-- `internal/engine/restic`: pure-Go Restic repository format v2 implementation (crypto, chunker, backend, pack, index, tree, snapshot, repository, archiver) and its facade. Zero `github.com/restic/*` imports.
+- `internal/engine/incremental`: pure-Go incremental repository format v2 implementation (crypto, chunker, backend, pack, index, tree, snapshot, repository, archiver) and its facade. Zero `github.com/restic/*` imports.
 - `internal/storage`: adapter contract and portable object-key types.
 - `internal/storage/local`: path-safe, checksum-verified local writes and backup-set listing.
 - `internal/storage/s3compat`: shared S3/R2 verified uploads and prefix-scoped retention.
@@ -82,7 +82,7 @@ overwrites.
 - `internal/platform/lock`: Linux `flock` implementation (site-level
   mutual exclusion).
 - Repository-level locking for the builtin engine lives in
-  `internal/engine/restic/lock` (restic-compatible lock files: encrypted
+  `internal/engine/incremental/lock` (Restic-compatible lock files: encrypted
   blobs in `locks/`, 30-minute staleness, exclusive for backup/retention,
   refresh every 5 minutes during long operations). `bqckup backup unlock
   <site>` removes stale locks.
@@ -98,7 +98,7 @@ SQLite runs with WAL, foreign keys, a five-second busy timeout, and one open con
 Package keys use:
 
 ```text
-bqckup/<site>/<DD-MMMM-YYYY>/<HH-mm-ss>/<package name>
+bqckup/<server_id>/<site>/<DD-MMMM-YYYY>/<HH-mm-ss>/<package name>
 ```
 
 The date and run directories use UTC, with English month names. Run names

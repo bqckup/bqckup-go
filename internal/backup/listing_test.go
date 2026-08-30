@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/bqckup/bqckup-go/internal/apperror"
-	"github.com/bqckup/bqckup-go/internal/backup/restic"
+	"github.com/bqckup/bqckup-go/internal/backup/incremental"
 	"github.com/bqckup/bqckup-go/internal/config"
 	"github.com/bqckup/bqckup-go/internal/storage"
 	"github.com/stretchr/testify/assert"
@@ -41,12 +41,12 @@ func (f *fakeRemoteLister) Delete(context.Context, string) error { return errors
 func (f *fakeRemoteLister) Probe(context.Context) error { return nil }
 
 type fakeSnapshotLister struct {
-	snapshots []restic.Snapshot
+	snapshots []incremental.Snapshot
 	err       error
-	gotRepo   restic.RepoConfig
+	gotRepo   incremental.RepoConfig
 }
 
-func (f *fakeSnapshotLister) ListSnapshots(_ context.Context, repo restic.RepoConfig) ([]restic.Snapshot, error) {
+func (f *fakeSnapshotLister) ListSnapshots(_ context.Context, repo incremental.RepoConfig) ([]incremental.Snapshot, error) {
 	f.gotRepo = repo
 	return f.snapshots, f.err
 }
@@ -108,7 +108,7 @@ func TestListFullModeReturnsNewestSetFirst(t *testing.T) {
 func TestListIncrementalModeTruncatesIDsAndNewestFirst(t *testing.T) {
 	older := time.Date(2026, 12, 10, 6, 0, 0, 0, time.UTC)
 	newer := time.Date(2026, 12, 11, 6, 55, 47, 0, time.UTC)
-	snapshots := &fakeSnapshotLister{snapshots: []restic.Snapshot{
+	snapshots := &fakeSnapshotLister{snapshots: []incremental.Snapshot{
 		{ID: strings.Repeat("a", 64), Paths: []string{"/old"}, Size: 10, CreatedAt: older},
 		{ID: strings.Repeat("b", 64), Paths: []string{"/new", "/extra"}, Size: 20, CreatedAt: newer},
 	}}
@@ -184,7 +184,7 @@ func incrementalSite() config.Site {
 }
 
 func TestListSiteSnapshotsLocalDestinationSucceeds(t *testing.T) {
-	snapshots := &fakeSnapshotLister{snapshots: []restic.Snapshot{
+	snapshots := &fakeSnapshotLister{snapshots: []incremental.Snapshot{
 		{ID: strings.Repeat("a", 64), Paths: []string{"/old"}, Size: 10, CreatedAt: time.Date(2026, 12, 10, 6, 0, 0, 0, time.UTC)},
 	}}
 	envLookup := func(key string) (string, bool) {

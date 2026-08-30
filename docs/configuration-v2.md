@@ -15,6 +15,8 @@ should omit the `version` field. Existing files that explicitly contain
 ## Root file
 
 ```yaml
+server_id: 207.180.252.231
+
 app:
   state_database: /var/lib/bqckup/bqckup.db
   temporary_directory: /var/lib/bqckup/tmp
