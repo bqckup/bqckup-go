@@ -44,6 +44,7 @@ All notable changes to Bqckup are documented in this file.
 - Normalize legacy database type `postgresql` to the v2 `postgres` engine.
 - Allow `--force` to regenerate an existing `/etc/bqckup` output from the
   preserved `/etc/bqckup_old` source.
+- Remove duplicate output-path validation so `--force` is handled consistently.
 - Document the migration layout using `/etc/bqckup_old` as the preserved
   legacy tree and `/etc/bqckup` as the generated active tree.
 - Show each batch failure beside its site and replace the duplicated trailing

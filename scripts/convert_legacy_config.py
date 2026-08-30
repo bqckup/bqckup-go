@@ -244,13 +244,6 @@ def resolve_paths(args: argparse.Namespace) -> tuple[Path, Path, bool]:
             target = Path(args.output_dir).resolve()
         else:
             target = default_target
-            if target.exists() and not relocate_legacy and not args.force:
-                print(
-                    f"error: active config already exists at {target}; "
-                    "pass --force to replace it or use --output-dir",
-                    file=sys.stderr,
-                )
-                raise SystemExit(2)
         return source, target, relocate_legacy
     target = Path(args.output_dir or "/etc/bqckup").resolve()
     if source == target:
