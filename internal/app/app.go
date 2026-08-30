@@ -242,12 +242,14 @@ type BackupRunProgress struct {
 type BackupRunObserver func(BackupRunProgress)
 
 // RunEnabledBackups runs every enabled site in deterministic configuration
-// order. It stops at the first failure so the existing error category and
-// process exit-code contract remain intact. The optional observer is called
+// order. A failure is collected and does not prevent later sites from running;
+// the combined error is returned after all sites finish. Context cancellation
+// still stops the batch immediately. The optional observer is called
 // synchronously, allowing text clients to render each site's progress without
 // exposing credentials from the site configuration.
 func (a *App) RunEnabledBackups(ctx context.Context, force bool, observer BackupRunObserver) ([]backup.RunResult, error) {
 	results := make([]backup.RunResult, 0, len(a.configuration.Sites))
+	var runErr error
 	for _, site := range a.configuration.Sites {
 		if !site.Enabled {
 			continue
@@ -268,12 +270,15 @@ func (a *App) RunEnabledBackups(ctx context.Context, force bool, observer Backup
 			progress.Result = &result
 			observer(progress)
 		}
-		if err != nil {
-			return results, err
-		}
 		results = append(results, result)
+		if err != nil {
+			runErr = errors.Join(runErr, err)
+			if ctx.Err() != nil {
+				return results, errors.Join(runErr, ctx.Err())
+			}
+		}
 	}
-	return results, nil
+	return results, runErr
 }
 
 func (a *App) LastSuccessful(ctx context.Context, siteName string) (*history.BackupRun, error) {

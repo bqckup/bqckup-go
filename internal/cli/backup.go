@@ -157,10 +157,7 @@ func newBackupCommand(opts *options) *cobra.Command {
 						progressErr = writeRunResultText(cmd.OutOrStdout(), *progress.Result)
 					}
 				}
-				results, err := application.RunEnabledBackups(cmd.Context(), force, observer)
-				if err != nil {
-					return err
-				}
+				results, runErr := application.RunEnabledBackups(cmd.Context(), force, observer)
 				if progressErr != nil {
 					return progressErr
 				}
@@ -169,7 +166,7 @@ func newBackupCommand(opts *options) *cobra.Command {
 						return err
 					}
 				}
-				return nil
+				return runErr
 			})
 		},
 	}
