@@ -89,6 +89,20 @@ tested with `bqckup backup run failure-test --force`.
 Credential-bearing YAML files must be regular files, not symbolic links, and
 must have mode `0600`. Never commit real passwords or storage keys.
 
+To convert a legacy configuration tree, install PyYAML and run:
+
+```bash
+python3 -m pip install -r scripts/requirements-converter.txt
+python3 scripts/convert_legacy_config.py \
+  --input-dir /etc/bqckup \
+  --output-dir /etc/bqckup-v2
+sudo bqckup --config-dir /etc/bqckup-v2 config validate
+```
+
+The converter does not modify the legacy tree or print credentials. Review
+warnings—especially undefined legacy destinations such as `dummy`—before
+switching the service to the generated configuration.
+
 ## Backup modes
 
 ### Full backup

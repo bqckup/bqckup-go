@@ -30,6 +30,8 @@ All notable changes to Bqckup are documented in this file.
   timestamps; structured JSON retains machine-readable RFC3339 timestamps.
 - Add an enabled `failure-test` site example with a missing source path for
   testing backup failure notifications and history.
+- Add a Python converter for legacy `storages.yml`, site files, and
+  `bqckup.cnf` configuration trees.
 - Show each batch failure beside its site and replace the duplicated trailing
   error detail with one concise batch-failure message.
 - Shorten run IDs in text output and wrap long failure reasons for narrow
