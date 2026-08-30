@@ -109,6 +109,7 @@ func TestStorageListCommandRejectsMissingSite(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrInvalidInput)
 	assert.Equal(t, 2, ExitCode(err))
+	assert.Contains(t, err.Error(), "Usage: bqckup storage list <destination> --site <site>")
 }
 
 func TestStorageListCommandRejectsMissingDestination(t *testing.T) {
@@ -117,6 +118,7 @@ func TestStorageListCommandRejectsMissingDestination(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrInvalidInput)
 	assert.Equal(t, 2, ExitCode(err))
+	assert.Contains(t, err.Error(), "Example: bqckup storage list testing --site incremental-test")
 }
 
 func TestStorageListLocalDestinationFailsWithHistoryPointer(t *testing.T) {

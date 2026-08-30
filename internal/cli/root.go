@@ -16,6 +16,10 @@ import (
 
 var ErrInvalidInput = errors.New("invalid command input")
 
+func usageError(message, usage, example string) error {
+	return fmt.Errorf("%w: %s\nUsage: %s\nExample: %s", ErrInvalidInput, message, usage, example)
+}
+
 type options struct {
 	configDir string
 	output    string

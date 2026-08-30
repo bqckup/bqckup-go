@@ -56,6 +56,8 @@ func TestBackupSnapshotsRequiresSite(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrInvalidInput)
 	assert.Equal(t, 2, ExitCode(err))
+	assert.Contains(t, err.Error(), "Usage: bqckup backup snapshots <site> --destination <destination>")
+	assert.Contains(t, err.Error(), "Example: bqckup backup snapshots incremental-test --destination testing")
 }
 
 func TestBackupSnapshotsFullModeSiteFails(t *testing.T) {

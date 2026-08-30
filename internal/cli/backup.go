@@ -97,7 +97,7 @@ func newBackupCommand(opts *options) *cobra.Command {
 		Short: "Run one backup site or every enabled site",
 		Args: func(_ *cobra.Command, args []string) error {
 			if len(args) > 1 {
-				return fmt.Errorf("%w: backup run accepts at most one site", ErrInvalidInput)
+				return usageError("backup run accepts at most one site", "bqckup backup run [site] [--force]", "bqckup backup run incremental-test --force")
 			}
 			return nil
 		},
@@ -179,7 +179,7 @@ func newBackupCommand(opts *options) *cobra.Command {
 		Short: "Remove stale repository locks for one site",
 		Args: func(_ *cobra.Command, args []string) error {
 			if len(args) != 1 {
-				return fmt.Errorf("%w: backup unlock requires exactly one site", ErrInvalidInput)
+				return usageError("backup unlock requires exactly one site", "bqckup backup unlock <site>", "bqckup backup unlock incremental-test")
 			}
 			return nil
 		},
@@ -196,13 +196,13 @@ func newBackupCommand(opts *options) *cobra.Command {
 		Short: "List the live snapshots of one incremental site",
 		Args: func(_ *cobra.Command, args []string) error {
 			if len(args) != 1 {
-				return fmt.Errorf("%w: backup snapshots requires exactly one site", ErrInvalidInput)
+				return usageError("backup snapshots requires exactly one site", "bqckup backup snapshots <site> --destination <destination>", "bqckup backup snapshots incremental-test --destination testing")
 			}
 			return nil
 		},
 		PreRunE: func(_ *cobra.Command, _ []string) error {
 			if destination == "" {
-				return fmt.Errorf("%w: --destination is required", ErrInvalidInput)
+				return usageError("--destination is required", "bqckup backup snapshots <site> --destination <destination>", "bqckup backup snapshots incremental-test --destination testing")
 			}
 			return nil
 		},
@@ -229,16 +229,16 @@ func newBackupCommand(opts *options) *cobra.Command {
 		Short: "Restore one snapshot of an incremental site into a directory",
 		Args: func(_ *cobra.Command, args []string) error {
 			if len(args) != 1 {
-				return fmt.Errorf("%w: backup restore requires exactly one site", ErrInvalidInput)
+				return usageError("backup restore requires exactly one site", "bqckup backup restore <site> --destination <destination> --target <directory>", "bqckup backup restore incremental-test --destination testing --target /tmp/restore")
 			}
 			return nil
 		},
 		PreRunE: func(_ *cobra.Command, _ []string) error {
 			if destination == "" {
-				return fmt.Errorf("%w: --destination is required", ErrInvalidInput)
+				return usageError("--destination is required", "bqckup backup restore <site> --destination <destination> --target <directory>", "bqckup backup restore incremental-test --destination testing --target /tmp/restore")
 			}
 			if target == "" {
-				return fmt.Errorf("%w: --target is required", ErrInvalidInput)
+				return usageError("--target is required", "bqckup backup restore <site> --destination <destination> --target <directory>", "bqckup backup restore incremental-test --destination testing --target /tmp/restore")
 			}
 			return nil
 		},

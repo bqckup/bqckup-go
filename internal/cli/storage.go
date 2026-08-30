@@ -39,13 +39,13 @@ func newStorageCommand(opts *options) *cobra.Command {
 		Short: "List the live contents of one remote destination for one site",
 		Args: func(_ *cobra.Command, args []string) error {
 			if len(args) != 1 {
-				return fmt.Errorf("%w: storage list requires exactly one destination", ErrInvalidInput)
+				return usageError("storage list requires exactly one destination", "bqckup storage list <destination> --site <site>", "bqckup storage list testing --site incremental-test")
 			}
 			return nil
 		},
 		PreRunE: func(_ *cobra.Command, _ []string) error {
 			if site == "" {
-				return fmt.Errorf("%w: --site is required", ErrInvalidInput)
+				return usageError("--site is required", "bqckup storage list <destination> --site <site>", "bqckup storage list testing --site incremental-test")
 			}
 			return nil
 		},
@@ -72,13 +72,13 @@ func newStorageCommand(opts *options) *cobra.Command {
 		Short: "Create a temporary download link for one remote package",
 		Args: func(_ *cobra.Command, args []string) error {
 			if len(args) != 1 {
-				return fmt.Errorf("%w: storage link requires exactly one destination", ErrInvalidInput)
+				return usageError("storage link requires exactly one destination", "bqckup storage link <destination> --key <object-key>", "bqckup storage link testing --key bqckup/server/site/timestamp/files.tar.gz")
 			}
 			return nil
 		},
 		PreRunE: func(_ *cobra.Command, _ []string) error {
 			if key == "" {
-				return fmt.Errorf("%w: --key is required", ErrInvalidInput)
+				return usageError("--key is required", "bqckup storage link <destination> --key <object-key>", "bqckup storage link testing --key bqckup/server/site/timestamp/files.tar.gz")
 			}
 			hours, err := parseExpiryHours(expiry)
 			if err != nil {

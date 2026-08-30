@@ -15,6 +15,7 @@ All notable changes to Bqckup are documented in this file.
   for `debug`, `info`, `warn`, and `error`.
 - Treat `no_change` backup results as successful informational outcomes with
   exit code 0 instead of exit status 5.
+- Add usage and example hints to invalid command input errors.
 - Added global `server_id` namespacing under `bqckup/<server_id>/<site>/`.
 - Renamed internal incremental packages from `restic` to `incremental` while
   preserving official Restic repository compatibility.
