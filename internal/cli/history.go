@@ -19,12 +19,13 @@ func newHistoryCommand(opts *options) *cobra.Command {
 	var limit int
 	var details bool
 	list := &cobra.Command{
-		Use:   "list",
-		Short: "List completed and running backup records",
-		Args:  cobra.NoArgs,
-		PreRunE: func(_ *cobra.Command, _ []string) error {
+		Use:     "list",
+		Short:   "List completed and running backup records",
+		Example: "  bqckup history list --site incremental-test --limit 10",
+		Args:    cobra.NoArgs,
+		PreRunE: func(cmd *cobra.Command, _ []string) error {
 			if limit < 1 {
-				return usageError("--limit must be at least 1", "bqckup history list [--site <site>] [--limit <n>]", "bqckup history list --site incremental-test --limit 10")
+				return usageError(cmd, "--limit must be at least 1")
 			}
 			return nil
 		},

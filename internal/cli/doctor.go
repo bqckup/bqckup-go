@@ -11,9 +11,10 @@ import (
 func newDoctorCommand(opts *options) *cobra.Command {
 	var siteFilter string
 	command := &cobra.Command{
-		Use:   "doctor",
-		Short: "Preflight diagnostics and dependency checks",
-		Args:  cobra.NoArgs,
+		Use:     "doctor",
+		Short:   "Preflight diagnostics and dependency checks",
+		Example: "  bqckup doctor --site incremental-test",
+		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			checker, err := app.OpenDoctor(cmd.Context(), opts.configDir)
 			if err != nil {
@@ -21,7 +22,7 @@ func newDoctorCommand(opts *options) *cobra.Command {
 			}
 			report, err := checker.Run(cmd.Context(), siteFilter)
 			if err != nil {
-				return usageError(err.Error(), "bqckup doctor [--site <site>]", "bqckup doctor --site incremental-test")
+				return usageError(cmd, err.Error())
 			}
 			if opts.output == "json" {
 				if err := writeJSON(cmd, report); err != nil {

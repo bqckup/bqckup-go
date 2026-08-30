@@ -16,7 +16,18 @@ import (
 
 var ErrInvalidInput = errors.New("invalid command input")
 
-func usageError(message, usage, example string) error {
+func usageError(cmd *cobra.Command, message string) error {
+	usage := strings.TrimSpace(cmd.UseLine())
+	example := strings.TrimSpace(cmd.Example)
+	if example == "" {
+		example = cmd.CommandPath() + " --help"
+	}
+	return fmt.Errorf("%w: %s\n\nUsage:\n  %s\n\nExample:\n  %s", ErrInvalidInput, message, usage, example)
+}
+
+// usageErrorText is used by initialization, which is also exercised as a
+// standalone file-tree helper without a Cobra command instance.
+func usageErrorText(message, usage, example string) error {
 	return fmt.Errorf("%w: %s\n\nUsage:\n  %s\n\nExample:\n  %s", ErrInvalidInput, message, usage, example)
 }
 
@@ -37,17 +48,17 @@ func NewRoot(info buildinfo.Info) *cobra.Command {
 		Short:         "Reliable, self-hosted backups",
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		PersistentPreRunE: func(_ *cobra.Command, _ []string) error {
+		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
 			if opts.output != "text" && opts.output != "json" {
-				return usageError("--output must be text or json", "bqckup [command] --output text|json", "bqckup --output json backup list")
+				return usageError(cmd, "--output must be text or json")
 			}
 			return nil
 		},
 	}
 	root.PersistentFlags().StringVar(&opts.configDir, "config-dir", defaultConfigDir, "configuration directory")
 	root.PersistentFlags().StringVar(&opts.output, "output", "text", "output format: text or json")
-	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
-		return usageError(err.Error(), "bqckup <command> [flags]", "bqckup backup run --help")
+	root.SetFlagErrorFunc(func(cmd *cobra.Command, err error) error {
+		return usageError(cmd, err.Error())
 	})
 
 	root.AddCommand(newInitCommand(opts))

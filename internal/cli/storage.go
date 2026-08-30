@@ -35,17 +35,18 @@ func newStorageCommand(opts *options) *cobra.Command {
 	command := &cobra.Command{Use: "storage", Short: "Inspect live remote storage contents"}
 	var site string
 	list := &cobra.Command{
-		Use:   "list <destination>",
-		Short: "List the live contents of one remote destination for one site",
-		Args: func(_ *cobra.Command, args []string) error {
+		Use:     "list <destination> --site <site>",
+		Short:   "List the live contents of one remote destination for one site",
+		Example: "  bqckup storage list testing --site incremental-test",
+		Args: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 1 {
-				return usageError("storage list requires exactly one destination", "bqckup storage list <destination> --site <site>", "bqckup storage list testing --site incremental-test")
+				return usageError(cmd, "storage list requires exactly one destination")
 			}
 			return nil
 		},
-		PreRunE: func(_ *cobra.Command, _ []string) error {
+		PreRunE: func(cmd *cobra.Command, _ []string) error {
 			if site == "" {
-				return usageError("--site is required", "bqckup storage list <destination> --site <site>", "bqckup storage list testing --site incremental-test")
+				return usageError(cmd, "--site is required")
 			}
 			return nil
 		},
@@ -68,21 +69,22 @@ func newStorageCommand(opts *options) *cobra.Command {
 	var key, expiry string
 	var expiryDuration time.Duration
 	link := &cobra.Command{
-		Use:   "link <destination>",
-		Short: "Create a temporary download link for one remote package",
-		Args: func(_ *cobra.Command, args []string) error {
+		Use:     "link <destination> --key <object-key>",
+		Short:   "Create a temporary download link for one remote package",
+		Example: "  bqckup storage link testing --key bqckup/server/site/timestamp/files.tar.gz",
+		Args: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 1 {
-				return usageError("storage link requires exactly one destination", "bqckup storage link <destination> --key <object-key>", "bqckup storage link testing --key bqckup/server/site/timestamp/files.tar.gz")
+				return usageError(cmd, "storage link requires exactly one destination")
 			}
 			return nil
 		},
-		PreRunE: func(_ *cobra.Command, _ []string) error {
+		PreRunE: func(cmd *cobra.Command, _ []string) error {
 			if key == "" {
-				return usageError("--key is required", "bqckup storage link <destination> --key <object-key>", "bqckup storage link testing --key bqckup/server/site/timestamp/files.tar.gz")
+				return usageError(cmd, "--key is required")
 			}
 			hours, err := parseExpiryHours(expiry)
 			if err != nil {
-				return err
+				return usageError(cmd, "--expires must be a whole number of hours between 1 and 24, like 6h")
 			}
 			expiryDuration = time.Duration(hours) * time.Hour
 			return nil
@@ -109,17 +111,13 @@ func newStorageCommand(opts *options) *cobra.Command {
 // parseExpiryHours accepts only whole-hour values between 1 and 24.
 func parseExpiryHours(value string) (int, error) {
 	if !strings.HasSuffix(value, "h") {
-		return 0, invalidExpiryError()
+		return 0, fmt.Errorf("invalid expiry")
 	}
 	hours, err := strconv.Atoi(strings.TrimSuffix(value, "h"))
 	if err != nil || hours < 1 || hours > 24 {
-		return 0, invalidExpiryError()
+		return 0, fmt.Errorf("invalid expiry")
 	}
 	return hours, nil
-}
-
-func invalidExpiryError() error {
-	return usageError("--expires must be a whole number of hours between 1 and 24, like 6h", "bqckup storage link <destination> --key <object-key> [--expires <hours>h]", "bqckup storage link testing --key bqckup/server/site/timestamp/files.tar.gz --expires 6h")
 }
 
 func writeLinkText(stdout, stderr io.Writer, link storage.DownloadLink) error {

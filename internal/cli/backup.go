@@ -93,11 +93,12 @@ func newBackupCommand(opts *options) *cobra.Command {
 
 	var force bool
 	run := &cobra.Command{
-		Use:   "run [site]",
-		Short: "Run one backup site or every enabled site",
-		Args: func(_ *cobra.Command, args []string) error {
+		Use:     "run [site]",
+		Short:   "Run one backup site or every enabled site",
+		Example: "  bqckup backup run incremental-test --force",
+		Args: func(cmd *cobra.Command, args []string) error {
 			if len(args) > 1 {
-				return usageError("backup run accepts at most one site", "bqckup backup run [site] [--force]", "bqckup backup run incremental-test --force")
+				return usageError(cmd, "backup run accepts at most one site")
 			}
 			return nil
 		},
@@ -175,11 +176,12 @@ func newBackupCommand(opts *options) *cobra.Command {
 	run.Flags().BoolVar(&force, "force", false, "ignore the minimum backup interval")
 	command.AddCommand(run)
 	command.AddCommand(&cobra.Command{
-		Use:   "unlock <site>",
-		Short: "Remove stale repository locks for one site",
-		Args: func(_ *cobra.Command, args []string) error {
+		Use:     "unlock <site>",
+		Short:   "Remove stale repository locks for one site",
+		Example: "  bqckup backup unlock incremental-test",
+		Args: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 1 {
-				return usageError("backup unlock requires exactly one site", "bqckup backup unlock <site>", "bqckup backup unlock incremental-test")
+				return usageError(cmd, "backup unlock requires exactly one site")
 			}
 			return nil
 		},
@@ -192,17 +194,18 @@ func newBackupCommand(opts *options) *cobra.Command {
 
 	var destination string
 	snapshots := &cobra.Command{
-		Use:   "snapshots <site>",
-		Short: "List the live snapshots of one incremental site",
-		Args: func(_ *cobra.Command, args []string) error {
+		Use:     "snapshots <site> --destination <destination>",
+		Short:   "List the live snapshots of one incremental site",
+		Example: "  bqckup backup snapshots incremental-test --destination testing",
+		Args: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 1 {
-				return usageError("backup snapshots requires exactly one site", "bqckup backup snapshots <site> --destination <destination>", "bqckup backup snapshots incremental-test --destination testing")
+				return usageError(cmd, "backup snapshots requires exactly one site")
 			}
 			return nil
 		},
-		PreRunE: func(_ *cobra.Command, _ []string) error {
+		PreRunE: func(cmd *cobra.Command, _ []string) error {
 			if destination == "" {
-				return usageError("--destination is required", "bqckup backup snapshots <site> --destination <destination>", "bqckup backup snapshots incremental-test --destination testing")
+				return usageError(cmd, "--destination is required")
 			}
 			return nil
 		},
@@ -225,20 +228,21 @@ func newBackupCommand(opts *options) *cobra.Command {
 	var snapshot, target string
 	var quiet bool
 	restore := &cobra.Command{
-		Use:   "restore <site>",
-		Short: "Restore one snapshot of an incremental site into a directory",
-		Args: func(_ *cobra.Command, args []string) error {
+		Use:     "restore <site> --destination <destination> --target <directory>",
+		Short:   "Restore one snapshot of an incremental site into a directory",
+		Example: "  bqckup backup restore incremental-test --destination testing --target /tmp/restore",
+		Args: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 1 {
-				return usageError("backup restore requires exactly one site", "bqckup backup restore <site> --destination <destination> --target <directory>", "bqckup backup restore incremental-test --destination testing --target /tmp/restore")
+				return usageError(cmd, "backup restore requires exactly one site")
 			}
 			return nil
 		},
-		PreRunE: func(_ *cobra.Command, _ []string) error {
+		PreRunE: func(cmd *cobra.Command, _ []string) error {
 			if destination == "" {
-				return usageError("--destination is required", "bqckup backup restore <site> --destination <destination> --target <directory>", "bqckup backup restore incremental-test --destination testing --target /tmp/restore")
+				return usageError(cmd, "--destination is required")
 			}
 			if target == "" {
-				return usageError("--target is required", "bqckup backup restore <site> --destination <destination> --target <directory>", "bqckup backup restore incremental-test --destination testing --target /tmp/restore")
+				return usageError(cmd, "--target is required")
 			}
 			return nil
 		},

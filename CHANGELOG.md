@@ -18,6 +18,8 @@ All notable changes to Bqckup are documented in this file.
 - Add usage and example hints to invalid command input errors.
 - Format CLI input errors as readable blocks with `[FAIL]`, `Usage`, and
   `Example` sections.
+- Derive command usage and examples from Cobra command metadata to keep CLI
+  help and validation guidance synchronized.
 - Added global `server_id` namespacing under `bqckup/<server_id>/<site>/`.
 - Renamed internal incremental packages from `restic` to `incremental` while
   preserving official Restic repository compatibility.
