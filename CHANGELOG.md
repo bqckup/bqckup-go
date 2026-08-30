@@ -22,6 +22,9 @@ All notable changes to Bqckup are documented in this file.
   help and validation guidance synchronized.
 - Show incremental database exports separately from file snapshots in storage
   listings, including structured JSON when both kinds are present.
+- Resolve `storage link` site names from the current
+  `bqckup/<server_id>/<site>/...` object-key layout and clarify that package
+  keys must be supplied with `--key`.
 - Added global `server_id` namespacing under `bqckup/<server_id>/<site>/`.
 - Renamed internal incremental packages from `restic` to `incremental` while
   preserving official Restic repository compatibility.

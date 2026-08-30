@@ -79,7 +79,7 @@ func newStorageCommand(opts *options) *cobra.Command {
 		Example: "  bqckup storage link testing --key bqckup/server/site/timestamp/files.tar.gz",
 		Args: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 1 {
-				return usageError(cmd, "storage link requires exactly one destination")
+				return usageError(cmd, "storage link requires exactly one destination; pass the object key with --key")
 			}
 			return nil
 		},

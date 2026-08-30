@@ -385,12 +385,21 @@ func (a *App) RestoreSnapshot(ctx context.Context, siteName, destinationName, sn
 	return (&backup.Restorer{ServerID: a.configuration.ServerID, Snapshots: a.snapshots, Engine: a.restorer}).RestoreSiteSnapshot(ctx, destinationName, snapshotRef, target, site, storageConfig, confirm)
 }
 
-// parseSiteFromKey extracts the site name from a download-link key. Valid
-// keys start with bqckup/<site>/ and carry at least one segment after the
-// site.
-func parseSiteFromKey(key string) (string, error) {
+// parseSiteFromKey extracts the site name from a download-link key. Current
+// keys are namespaced as bqckup/<server_id>/<site>/... . The legacy
+// bqckup/<site>/... form remains valid when server_id is not configured.
+func parseSiteFromKey(key, serverID string) (string, error) {
 	parts := strings.Split(key, "/")
-	if len(parts) < 3 || parts[0] != "bqckup" || parts[1] == "" || parts[2] == "" {
+	if parts[0] != "bqckup" {
+		return "", fmt.Errorf("key %q must start with bqckup/", key)
+	}
+	if serverID != "" {
+		if len(parts) < 4 || parts[1] != serverID || parts[2] == "" || parts[3] == "" {
+			return "", fmt.Errorf("key %q must start with bqckup/%s/<site>/", key, serverID)
+		}
+		return parts[2], nil
+	}
+	if len(parts) < 3 || parts[1] == "" || parts[2] == "" {
 		return "", fmt.Errorf("key %q must start with bqckup/<site>/", key)
 	}
 	return parts[1], nil
@@ -401,7 +410,7 @@ func parseSiteFromKey(key string) (string, error) {
 // use full mode, and send backups to the destination. Nothing is written to
 // history and the remote only receives one existence check.
 func (a *App) Link(ctx context.Context, destinationName, key string, expires time.Duration) (storage.DownloadLink, error) {
-	siteName, err := parseSiteFromKey(key)
+	siteName, err := parseSiteFromKey(key, a.configuration.ServerID)
 	if err != nil {
 		return storage.DownloadLink{}, apperror.Wrap(apperror.CategoryConfig, err.Error(), nil)
 	}
