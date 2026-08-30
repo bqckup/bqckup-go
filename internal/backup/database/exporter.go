@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"io"
 	"os"
@@ -65,7 +67,8 @@ func (e *ProcessExporter) Export(ctx context.Context, source config.DatabaseSour
 		}
 	}()
 
-	gzipWriter := gzip.NewWriter(output)
+	digest := sha256.New()
+	gzipWriter := gzip.NewWriter(io.MultiWriter(output, digest))
 	var stderr bytes.Buffer
 	processErr := e.process.Run(ctx, process.ProcessSpec{
 		Command: e.command,
@@ -87,19 +90,19 @@ func (e *ProcessExporter) Export(ctx context.Context, source config.DatabaseSour
 	if err := output.Sync(); err != nil {
 		return backup.Package{}, apperror.Hide("could not sync database export", err)
 	}
+	info, err := output.Stat()
+	if err != nil {
+		return backup.Package{}, apperror.Hide("could not stat database export", err)
+	}
 	if err := output.Close(); err != nil {
 		return backup.Package{}, apperror.Hide("could not close database export", err)
 	}
 
-	checksum, size, err := backup.ChecksumFile(destination)
-	if err != nil {
-		return backup.Package{}, err
-	}
 	success = true
 	return backup.Package{
 		Path:       destination,
-		Size:       size,
-		SHA256:     checksum,
+		Size:       info.Size(),
+		SHA256:     hex.EncodeToString(digest.Sum(nil)),
 		SourceKind: "database",
 		SourceName: source.Name,
 	}, nil

@@ -2,6 +2,14 @@
 
 All notable changes to Bqckup are documented in this file.
 
+## v0.0.7
+
+- Reuse unchanged files and directory trees from the previous matching
+  incremental snapshot, reducing repeated chunk reads while preserving parent
+  snapshot metadata and Restic-compatible output.
+- Calculate SHA-256 and compressed package size while writing full file archives
+  and database exports, avoiding a second read of the completed package.
+
 ## v0.0.6
 
 - Add `bqckup update` to download and SHA-256 verify the selected Linux
