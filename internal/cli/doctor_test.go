@@ -107,7 +107,7 @@ app:
 		root.SetArgs([]string{"doctor", "--config-dir", tempDir})
 
 		require.NoError(t, root.Execute())
-		assert.Contains(t, stdout.String(), "[✓] secret:test-site:incremental")
+		assert.Contains(t, stdout.String(), "[OK] secret:test-site:incremental")
 	})
 }
 
@@ -345,7 +345,7 @@ site:
 
 	err := root.Execute()
 	assert.Equal(t, 3, ExitCode(err))
-	assert.Contains(t, stdout.String(), "[✗] storage:remote-x: remote storage configuration is unavailable")
+	assert.Contains(t, stdout.String(), "[FAIL] storage:remote-x: remote storage configuration is unavailable")
 	assert.NotContains(t, stdout.String(), "request failed")
 	assert.NotContains(t, stdout.String(), "http")
 }

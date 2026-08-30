@@ -28,14 +28,18 @@ func newDoctorCommand(opts *options) *cobra.Command {
 					return err
 				}
 			} else {
+				color := ansiColor{on: isTerminalWriter(cmd.OutOrStdout())}
 				for _, check := range report.Checks {
-					statusSymbol := "[✓]"
+					statusSymbol := "[OK]"
+					statusColor := color.green(statusSymbol)
 					if check.Status == "fail" {
-						statusSymbol = "[✗]"
+						statusSymbol = "[FAIL]"
+						statusColor = color.red(statusSymbol)
 					} else if check.Status == "skipped" {
-						statusSymbol = "[-]"
+						statusSymbol = "[WARN]"
+						statusColor = color.yellow(statusSymbol)
 					}
-					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "%s %s: %s\n", statusSymbol, check.Name, check.Message)
+					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "%s %s: %s\n", statusColor, check.Name, check.Message)
 				}
 			}
 

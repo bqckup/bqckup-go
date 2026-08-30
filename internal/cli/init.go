@@ -18,7 +18,8 @@ func newInitCommand(opts *options) *cobra.Command {
 			if err := initializeConfig(opts.configDir); err != nil {
 				return err
 			}
-			_, err := fmt.Fprintf(cmd.OutOrStdout(), "initialized configuration in %s\n", opts.configDir)
+			color := ansiColor{on: isTerminalWriter(cmd.OutOrStdout())}
+			_, err := fmt.Fprintf(cmd.OutOrStdout(), "%s initialized configuration in %s\n", color.green("[OK]"), opts.configDir)
 			return err
 		},
 	}

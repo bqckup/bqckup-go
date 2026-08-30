@@ -8,6 +8,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"text/tabwriter"
 	"time"
 
 	"github.com/bqckup/bqckup-go/internal/app"
@@ -22,6 +23,7 @@ var errNoChange = errors.New("backup unchanged")
 type siteView struct {
 	Name             string     `json:"name"`
 	Enabled          bool       `json:"enabled"`
+	BackupMode       string     `json:"-"`
 	FileSources      int        `json:"file_sources"`
 	Destinations     []string   `json:"destinations"`
 	LastSuccessfulAt *time.Time `json:"last_successful_at,omitempty"`
@@ -46,7 +48,7 @@ func newBackupCommand(opts *options) *cobra.Command {
 					if err != nil {
 						return err
 					}
-					view := siteView{Name: site.Name, Enabled: site.Enabled, FileSources: len(site.Sources.Files.Include), Destinations: destinations}
+					view := siteView{Name: site.Name, Enabled: site.Enabled, BackupMode: site.BackupMode, FileSources: len(site.Sources.Files.Include), Destinations: destinations}
 					if last != nil {
 						lastAt := last.StartedAt.UTC()
 						view.LastSuccessfulAt = &lastAt
@@ -57,13 +59,7 @@ func newBackupCommand(opts *options) *cobra.Command {
 				if opts.output == "json" {
 					return writeJSON(cmd, views)
 				}
-				for _, view := range views {
-					_, err := fmt.Fprintf(cmd.OutOrStdout(), "%s\tenabled=%t\tfiles=%d\tdestinations=%v\n", view.Name, view.Enabled, view.FileSources, view.Destinations)
-					if err != nil {
-						return err
-					}
-				}
-				return nil
+				return writeBackupListText(cmd.OutOrStdout(), views)
 			})
 		},
 	})
@@ -284,12 +280,41 @@ func newBackupCommand(opts *options) *cobra.Command {
 	return command
 }
 
+func writeBackupListText(output io.Writer, views []siteView) error {
+	if len(views) == 0 {
+		_, err := fmt.Fprintln(output, "No backup sites configured.")
+		return err
+	}
+	table := tabwriter.NewWriter(output, 0, 4, 2, ' ', 0)
+	if _, err := fmt.Fprintln(table, "SITE\tENABLED\tMODE\tFILES\tDESTINATIONS"); err != nil {
+		return err
+	}
+	color := ansiColor{on: isTerminalWriter(output)}
+	for _, view := range views {
+		mode := view.BackupMode
+		if mode == "" {
+			mode = "full"
+		}
+		enabled := "no"
+		if view.Enabled {
+			enabled = color.green("yes")
+		} else {
+			enabled = color.dim(enabled)
+		}
+		if _, err := fmt.Fprintf(table, "%s\t%s\t%s\t%d\t%s\n", view.Name, enabled, mode, view.FileSources, strings.Join(view.Destinations, ", ")); err != nil {
+			return err
+		}
+	}
+	return table.Flush()
+}
+
 func writeRunResultText(out io.Writer, result backup.RunResult) error {
+	color := ansiColor{on: isTerminalWriter(out)}
 	var err error
 	if result.Status == backup.StatusSkipped {
-		_, err = fmt.Fprintf(out, "%s: skipped (%s)\n", result.SiteName, result.SkipReason)
+		_, err = fmt.Fprintf(out, "[-] %s: %s (%s)\n", result.SiteName, color.status("skipped"), result.SkipReason)
 	} else {
-		_, err = fmt.Fprintf(out, "%s: %s (run %s)\n", result.SiteName, result.Status, result.RunID)
+		_, err = fmt.Fprintf(out, "%s %s: %s (run %s)\n", resultSymbol(result.Status), result.SiteName, color.status(string(result.Status)), result.RunID)
 	}
 	if err != nil {
 		return err
@@ -298,6 +323,19 @@ func writeRunResultText(out io.Writer, result backup.RunResult) error {
 		_, err = fmt.Fprintf(out, "%s: reclaimed %s\n", result.SiteName, humanBytes(result.ReclaimedBytes))
 	}
 	return err
+}
+
+func resultSymbol(status backup.Status) string {
+	switch status {
+	case backup.StatusSuccess:
+		return "[OK]"
+	case backup.StatusNoChange, backup.StatusCancelled:
+		return "[WARN]"
+	case backup.StatusFailed:
+		return "[FAIL]"
+	default:
+		return "[.]"
+	}
 }
 
 func backupProgressForSite(site config.Site) app.BackupRunProgress {
@@ -318,7 +356,7 @@ func writeBackupStartText(out io.Writer, progress app.BackupRunProgress) error {
 		mode = "full"
 	}
 	destinations := strings.Join(progress.Destinations, ", ")
-	_, err := fmt.Fprintf(out, "[→] backup:%s: starting %s backup to %s\n", progress.SiteName, mode, destinations)
+	_, err := fmt.Fprintf(out, "[>] backup:%s: starting %s backup to %s\n", progress.SiteName, mode, destinations)
 	return err
 }
 
@@ -349,7 +387,7 @@ func startBackupProgressHeartbeat(out io.Writer, siteName string) *backupProgres
 					_, _ = fmt.Fprintf(out, "\r[%c] backup:%s: running (%s elapsed)", frames[frame%len(frames)], siteName, elapsed)
 					frame++
 				} else {
-					_, _ = fmt.Fprintf(out, "[⋯] backup:%s: still running (%s elapsed)\n", siteName, elapsed)
+					_, _ = fmt.Fprintf(out, "[...] backup:%s: still running (%s elapsed)\n", siteName, elapsed)
 				}
 			case <-heartbeat.stop:
 				if heartbeat.terminal {
@@ -417,7 +455,7 @@ func writeRestoreText(w io.Writer, result backup.RestoreResult) error {
 	if len(id) > 8 {
 		id = id[:8]
 	}
-	if _, err := fmt.Fprintf(w, "restored snapshot %s to %s (%d files, %s, %.1fs)\n", id, result.Target, result.FilesRestored, humanBytes(result.BytesRestored), result.DurationSeconds); err != nil {
+	if _, err := fmt.Fprintf(w, "[OK] restored snapshot %s to %s (%d files, %s, %.1fs)\n", id, result.Target, result.FilesRestored, humanBytes(result.BytesRestored), result.DurationSeconds); err != nil {
 		return err
 	}
 	for _, skipped := range result.SkippedPaths {

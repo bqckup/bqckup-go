@@ -9,6 +9,8 @@ All notable changes to Bqckup are documented in this file.
   JSON output clean for automation.
 - Simplify text summary headings to the site name without repeating the
   `Backup Summary for` command context.
+- Use ASCII-only status markers (`[OK]`, `[FAIL]`, `[WARN]`) across text CLI
+  output for reliable display in minimal terminals.
 - Added global `server_id` namespacing under `bqckup/<server_id>/<site>/`.
 - Renamed internal incremental packages from `restic` to `incremental` while
   preserving official Restic repository compatibility.

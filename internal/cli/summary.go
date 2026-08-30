@@ -152,13 +152,16 @@ func (c ansiColor) bold(value string) string   { return c.wrap("1", value) }
 func (c ansiColor) dim(value string) string    { return c.wrap("2", value) }
 func (c ansiColor) green(value string) string  { return c.wrap("32", value) }
 func (c ansiColor) yellow(value string) string { return c.wrap("33", value) }
+func (c ansiColor) red(value string) string    { return c.wrap("31", value) }
 
 func (c ansiColor) status(value string) string {
 	switch value {
 	case "disabled":
 		return c.dim(value)
-	case "running":
+	case "running", "no_change":
 		return c.yellow(value)
+	case "failed", "cancelled":
+		return c.red(value)
 	default:
 		return c.green(value)
 	}

@@ -141,7 +141,7 @@ func TestBackupRunReportsTextProgress(t *testing.T) {
 	root, stdout, stderr := commandForTest(t, "--config-dir", configDir, "backup", "run", "example", "--force")
 	require.NoError(t, root.Execute())
 
-	assert.Equal(t, "[→] backup:example: starting full backup to local-primary\n", stderr.String())
+	assert.Equal(t, "[>] backup:example: starting full backup to local-primary\n", stderr.String())
 	assert.Contains(t, stdout.String(), "example: success (run ")
 }
 
