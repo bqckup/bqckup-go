@@ -163,6 +163,7 @@ def convert(args: argparse.Namespace) -> int:
         "temporary_directory": "/var/lib/bqckup/tmp",
         "lock_directory": "/var/lib/bqckup/locks",
         "log_level": "info",
+        "log_file": "/var/log/bqckup/bqckup.log",
     }}
     cnf_path = source / "bqckup.cnf"
     if cnf_path.exists():

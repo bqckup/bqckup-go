@@ -86,6 +86,9 @@ The `configs/sites/failure-test.yaml` example is intentionally enabled and
 uses a missing source path so notification and failure-history behavior can be
 tested with `bqckup backup run failure-test --force`.
 
+The installer creates `/var/log/bqckup` and configures
+`/var/log/bqckup/bqckup.log` as the default operational log.
+
 Credential-bearing YAML files must be regular files, not symbolic links, and
 must have mode `0600`. Never commit real passwords or storage keys.
 
