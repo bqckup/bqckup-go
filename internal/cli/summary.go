@@ -111,7 +111,7 @@ func writeSummaryText(output io.Writer, views []summaryView) error {
 	}
 	color := ansiColor{on: isTerminalWriter(output)}
 	for index, view := range views {
-		if _, err := fmt.Fprintf(output, "%s\n", color.bold("Backup Summary for "+view.Name)); err != nil {
+		if _, err := fmt.Fprintf(output, "%s\n", color.bold(view.Name)); err != nil {
 			return err
 		}
 		lines := []struct {

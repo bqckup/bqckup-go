@@ -132,7 +132,8 @@ func TestWriteSummaryTextPanels(t *testing.T) {
 	require.NoError(t, writeSummaryText(&output, views))
 	text := output.String()
 
-	assert.True(t, strings.Index(text, "Backup Summary for db") < strings.Index(text, "Backup Summary for web"), "sites sorted by name")
+	assert.True(t, strings.Index(text, "db\n") < strings.Index(text, "web\n"), "sites sorted by name")
+	assert.NotContains(t, text, "Backup Summary for")
 	assert.NotContains(t, text, "\x1b[") // colors only on a TTY
 	assert.Contains(t, text, "Status              : disabled\n")
 	assert.Contains(t, text, "Enabled             : no\n")
@@ -201,10 +202,10 @@ func TestBackupSummaryCommandDisabledAndNeverRun(t *testing.T) {
 	root, stdout, _ := commandForTest(t, "--config-dir", configDir, "backup", "summary")
 	require.NoError(t, root.Execute())
 	text := stdout.String()
-	assert.Contains(t, text, "Backup Summary for fresh\n")
+	assert.Contains(t, text, "fresh\n")
 	assert.Contains(t, text, "Last Backup         : -\n")
 	assert.Contains(t, text, "Successful Backups  : 0\n")
-	assert.Contains(t, text, "Backup Summary for site-disabled\n")
+	assert.Contains(t, text, "site-disabled\n")
 	assert.Contains(t, text, "Status              : disabled\n")
 	assert.Contains(t, text, "Enabled             : no\n")
 }
@@ -265,7 +266,7 @@ func TestBackupSummaryCommandEmptyConfig(t *testing.T) {
 func TestAnsiColorWrap(t *testing.T) {
 	assert.Equal(t, "idle", ansiColor{}.status("idle"))
 	on := ansiColor{on: true}
-	assert.Equal(t, "\x1b[1mBackup Summary for web\x1b[0m", on.bold("Backup Summary for web"))
+	assert.Equal(t, "\x1b[1mweb\x1b[0m", on.bold("web"))
 	assert.Equal(t, "\x1b[2mdisabled\x1b[0m", on.status("disabled"))
 	assert.Equal(t, "\x1b[33mrunning\x1b[0m", on.status("running"))
 	assert.Equal(t, "\x1b[32midle\x1b[0m", on.status("idle"))
