@@ -55,6 +55,7 @@ func writeHistoryText(output io.Writer, runs []history.BackupRun, details bool) 
 	}
 
 	table := tabwriter.NewWriter(output, 0, 4, 2, ' ', 0)
+	color := ansiColor{on: isTerminalWriter(output)}
 	if _, err := fmt.Fprintln(table, "STATUS\tSITE\tSTARTED\tDURATION\tPACKAGES\tDESTINATIONS\tLOGICAL SIZE\tRUN ID"); err != nil {
 		return err
 	}
@@ -72,7 +73,7 @@ func writeHistoryText(output io.Writer, runs []history.BackupRun, details bool) 
 		if _, err := fmt.Fprintf(
 			table,
 			"%s\t%s\t%s\t%s\t%d\t%d\t%s\t%s\n",
-			safeHistoryField(strings.ToUpper(string(run.Status))),
+			color.statusLabel(safeHistoryField(string(run.Status))),
 			safeHistoryField(run.SiteName),
 			run.StartedAt.Local().Format("02 Jan 2006, 15:04 MST"),
 			formatRunDuration(run),
@@ -173,6 +174,7 @@ func writePackageDetails(output io.Writer, run history.BackupRun) error {
 	})
 
 	table := tabwriter.NewWriter(output, 0, 4, 2, ' ', 0)
+	color := ansiColor{on: isTerminalWriter(output)}
 	if _, err := fmt.Fprintln(table, "  SOURCE\tDESTINATION\tSTATUS\tSIZE\tOBJECT KEY"); err != nil {
 		return err
 	}
@@ -183,7 +185,7 @@ func writePackageDetails(output io.Writer, run history.BackupRun) error {
 			"  %s\t%s\t%s\t%s\t%s\n",
 			source,
 			safeHistoryField(pkg.Destination),
-			safeHistoryField(strings.ToUpper(string(pkg.Status))),
+			color.statusLabel(safeHistoryField(string(pkg.Status))),
 			humanBytes(pkg.Size),
 			safeHistoryField(pkg.ObjectKey),
 		); err != nil {

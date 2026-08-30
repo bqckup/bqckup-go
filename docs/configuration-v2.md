@@ -22,11 +22,14 @@ app:
   temporary_directory: /var/lib/bqckup/tmp
   lock_directory: /var/lib/bqckup/locks
   log_level: info
+  log_file: /var/log/bqckup/bqckup.log # optional; file mode 0600
 ```
 
 Values inside `bqckup.yaml` are authoritative and are not overridden by
 environment variables. `BQCKUP_CONFIG_DIR` only selects the configuration
-directory when `--config-dir` is omitted.
+directory when `--config-dir` is omitted. `log_level` accepts `debug`, `info`,
+`warn`, or `error`; `log_file` receives operational events and is created with
+mode `0600`.
 
 ## Storage file
 

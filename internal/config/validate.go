@@ -38,6 +38,9 @@ func (c Config) Validate() error {
 	if c.App.LockDirectory == "" {
 		return validationError("bqckup.yaml", "app.lock_directory", "is required")
 	}
+	if c.App.LogLevel != "debug" && c.App.LogLevel != "info" && c.App.LogLevel != "warn" && c.App.LogLevel != "error" {
+		return validationError("bqckup.yaml", "app.log_level", "must be debug, info, warn, or error")
+	}
 	if c.ServerID != "" && !SafeName.MatchString(c.ServerID) {
 		return validationError("bqckup.yaml", "server_id", "contains unsupported characters")
 	}

@@ -61,6 +61,7 @@ type App struct {
 	TemporaryDirectory string `mapstructure:"temporary_directory" yaml:"temporary_directory"`
 	LockDirectory      string `mapstructure:"lock_directory" yaml:"lock_directory"`
 	LogLevel           string `mapstructure:"log_level" yaml:"log_level"`
+	LogFile            string `mapstructure:"log_file" yaml:"log_file"`
 }
 
 type Storage struct {

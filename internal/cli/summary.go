@@ -153,6 +153,7 @@ func (c ansiColor) dim(value string) string    { return c.wrap("2", value) }
 func (c ansiColor) green(value string) string  { return c.wrap("32", value) }
 func (c ansiColor) yellow(value string) string { return c.wrap("33", value) }
 func (c ansiColor) red(value string) string    { return c.wrap("31", value) }
+func (c ansiColor) cyan(value string) string   { return c.wrap("36", value) }
 
 func (c ansiColor) status(value string) string {
 	switch value {
@@ -165,6 +166,10 @@ func (c ansiColor) status(value string) string {
 	default:
 		return c.green(value)
 	}
+}
+
+func (c ansiColor) statusLabel(value string) string {
+	return strings.ToUpper(c.status(strings.ToLower(value)))
 }
 
 func (c ansiColor) wrap(code, value string) string {

@@ -86,10 +86,14 @@ app:
   temporary_directory: /var/lib/bqckup/tmp
   lock_directory: /var/lib/bqckup/locks
   log_level: info
+  log_file: /var/log/bqckup/bqckup.log # optional; file mode 0600
 ```
 
 Relative paths are resolved from the configuration directory. Values inside
 the YAML are authoritative and are not overridden by environment variables.
+`log_level` accepts `debug`, `info`, `warn`, or `error`. When `log_file` is
+set, Bqckup appends operational events to that file and creates it with mode
+`0600`.
 
 ## 4. Configure server and storage
 

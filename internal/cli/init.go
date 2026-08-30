@@ -32,6 +32,7 @@ func initializeConfig(directory string) error {
   temporary_directory: /var/lib/bqckup/tmp
   lock_directory: /var/lib/bqckup/locks
   log_level: info
+  # log_file: /var/log/bqckup/bqckup.log
 `,
 		filepath.Join(directory, "config", "storages.yaml"): `storages:
   local-primary:

@@ -106,6 +106,9 @@ func Load(ctx context.Context, dir string) (Config, error) {
 	root.App.StateDatabase = resolveRootPath(root.App.StateDatabase)
 	root.App.TemporaryDirectory = resolveRootPath(root.App.TemporaryDirectory)
 	root.App.LockDirectory = resolveRootPath(root.App.LockDirectory)
+	if root.App.LogFile != "" {
+		root.App.LogFile = resolveRootPath(root.App.LogFile)
+	}
 	if root.App.LogLevel == "" {
 		root.App.LogLevel = "info"
 	}

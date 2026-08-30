@@ -41,6 +41,8 @@ type App struct {
 	closeOnce     sync.Once
 	closeErr      error
 	closeDatabase func() error
+	logger        *appLogger
+	closeLogger   func() error
 }
 
 func Open(ctx context.Context, configDir string) (*App, error) {
@@ -71,6 +73,11 @@ func Open(ctx context.Context, configDir string) (*App, error) {
 		_ = closeDatabase()
 		return nil, err
 	}
+	logger, closeLogger, err := openAppLogger(configuration.App)
+	if err != nil {
+		_ = closeDatabase()
+		return nil, apperror.Wrap(apperror.CategoryPreflight, "could not open the application log", err)
+	}
 
 	repository := history.NewRepository(database)
 	engine := incrementalfacade.NewEngine()
@@ -96,6 +103,8 @@ func Open(ctx context.Context, configDir string) (*App, error) {
 		snapshots:     engine,
 		restorer:      engine,
 		closeDatabase: closeDatabase,
+		logger:        logger,
+		closeLogger:   closeLogger,
 	}, nil
 }
 
@@ -203,6 +212,7 @@ func buildStores(ctx context.Context, configured map[string]config.Storage) (map
 func (a *App) Configuration() config.Config { return a.configuration }
 
 func (a *App) RunBackup(ctx context.Context, siteName string, force bool) (backup.RunResult, error) {
+	a.logger.write(logInfo, fmt.Sprintf("event=backup_start site=%q force=%t", siteName, force))
 	site, ok := a.configuration.Site(siteName)
 	if !ok {
 		return backup.RunResult{SiteName: siteName, Status: backup.StatusFailed}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q was not found", siteName), nil)
@@ -210,7 +220,13 @@ func (a *App) RunBackup(ctx context.Context, siteName string, force bool) (backu
 	if !site.Enabled {
 		return backup.RunResult{SiteName: siteName, Status: backup.StatusFailed}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q is disabled", siteName), nil)
 	}
-	return a.runner.Run(ctx, site, force)
+	result, err := a.runner.Run(ctx, site, force)
+	if err != nil {
+		a.logger.write(logError, fmt.Sprintf("event=backup_finished site=%q status=%q error=%q", siteName, result.Status, apperror.UserMessage(err)))
+	} else {
+		a.logger.write(logInfo, fmt.Sprintf("event=backup_finished site=%q status=%q run_id=%q", siteName, result.Status, result.RunID))
+	}
+	return result, err
 }
 
 // BackupRunProgress contains only the non-sensitive configuration needed to
@@ -416,6 +432,9 @@ func (a *App) Close() error {
 	a.closeOnce.Do(func() {
 		if a.closeDatabase != nil {
 			a.closeErr = a.closeDatabase()
+		}
+		if a.closeLogger != nil {
+			a.closeErr = errors.Join(a.closeErr, a.closeLogger())
 		}
 	})
 	return a.closeErr

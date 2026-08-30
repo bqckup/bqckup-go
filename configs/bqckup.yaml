@@ -5,6 +5,7 @@ app:
   temporary_directory: tmp
   lock_directory: locks
   log_level: info
+  # log_file: /var/log/bqckup/bqckup.log
 
 # Optional: notify operators when a run reaches a terminal state.
 # Notification credentials and URLs are written directly here. Keep this file

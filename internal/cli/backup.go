@@ -312,9 +312,9 @@ func writeRunResultText(out io.Writer, result backup.RunResult) error {
 	color := ansiColor{on: isTerminalWriter(out)}
 	var err error
 	if result.Status == backup.StatusSkipped {
-		_, err = fmt.Fprintf(out, "[-] %s: %s (%s)\n", result.SiteName, color.status("skipped"), result.SkipReason)
+		_, err = fmt.Fprintf(out, "%s %s: %s (%s)\n", color.yellow("[WARN]"), result.SiteName, color.status("skipped"), result.SkipReason)
 	} else {
-		_, err = fmt.Fprintf(out, "%s %s: %s (run %s)\n", resultSymbol(result.Status), result.SiteName, color.status(string(result.Status)), result.RunID)
+		_, err = fmt.Fprintf(out, "%s %s: %s (run %s)\n", colorResultSymbol(color, result.Status), result.SiteName, color.status(string(result.Status)), result.RunID)
 	}
 	if err != nil {
 		return err
@@ -338,6 +338,20 @@ func resultSymbol(status backup.Status) string {
 	}
 }
 
+func colorResultSymbol(color ansiColor, status backup.Status) string {
+	symbol := resultSymbol(status)
+	switch status {
+	case backup.StatusSuccess:
+		return color.green(symbol)
+	case backup.StatusNoChange, backup.StatusCancelled:
+		return color.yellow(symbol)
+	case backup.StatusFailed:
+		return color.red(symbol)
+	default:
+		return color.cyan(symbol)
+	}
+}
+
 func backupProgressForSite(site config.Site) app.BackupRunProgress {
 	destinations := make([]string, 0, len(site.Destinations))
 	for _, destination := range site.Destinations {
@@ -356,7 +370,8 @@ func writeBackupStartText(out io.Writer, progress app.BackupRunProgress) error {
 		mode = "full"
 	}
 	destinations := strings.Join(progress.Destinations, ", ")
-	_, err := fmt.Fprintf(out, "[>] backup:%s: starting %s backup to %s\n", progress.SiteName, mode, destinations)
+	color := ansiColor{on: isTerminalWriter(out)}
+	_, err := fmt.Fprintf(out, "%s backup:%s: starting %s backup to %s\n", color.yellow("[>]"), progress.SiteName, mode, destinations)
 	return err
 }
 
@@ -455,7 +470,8 @@ func writeRestoreText(w io.Writer, result backup.RestoreResult) error {
 	if len(id) > 8 {
 		id = id[:8]
 	}
-	if _, err := fmt.Fprintf(w, "[OK] restored snapshot %s to %s (%d files, %s, %.1fs)\n", id, result.Target, result.FilesRestored, humanBytes(result.BytesRestored), result.DurationSeconds); err != nil {
+	color := ansiColor{on: isTerminalWriter(w)}
+	if _, err := fmt.Fprintf(w, "%s restored snapshot %s to %s (%d files, %s, %.1fs)\n", color.green("[OK]"), id, result.Target, result.FilesRestored, humanBytes(result.BytesRestored), result.DurationSeconds); err != nil {
 		return err
 	}
 	for _, skipped := range result.SkippedPaths {

@@ -11,6 +11,8 @@ All notable changes to Bqckup are documented in this file.
   `Backup Summary for` command context.
 - Use ASCII-only status markers (`[OK]`, `[FAIL]`, `[WARN]`) across text CLI
   output for reliable display in minimal terminals.
+- Add configurable application logging with `app.log_file` and level filtering
+  for `debug`, `info`, `warn`, and `error`.
 - Added global `server_id` namespacing under `bqckup/<server_id>/<site>/`.
 - Renamed internal incremental packages from `restic` to `incremental` while
   preserving official Restic repository compatibility.
