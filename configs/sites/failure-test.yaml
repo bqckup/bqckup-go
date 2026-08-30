@@ -1,6 +1,6 @@
 site:
-  name: failure-missing-source
-  enabled: false
+  name: failure-test
+  enabled: true
   sources:
     files:
       include:
