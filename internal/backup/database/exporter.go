@@ -109,6 +109,7 @@ func (e *ProcessExporter) arguments(source config.DatabaseSource) []string {
 	port := strconv.Itoa(source.Port)
 	if e.engine == "mysql" {
 		return []string{
+			"--no-defaults",
 			"--host=" + source.Host,
 			"--port=" + port,
 			"--user=" + source.Username,
@@ -169,6 +170,7 @@ func (e *ProcessExporter) probeArguments(source config.DatabaseSource) []string 
 	port := strconv.Itoa(source.Port)
 	if e.engine == "mysql" {
 		return []string{
+			"--no-defaults",
 			"--host=" + source.Host,
 			"--port=" + port,
 			"--user=" + source.Username,

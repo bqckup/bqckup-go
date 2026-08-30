@@ -44,6 +44,8 @@ All notable changes to Bqckup are documented in this file.
 - Normalize legacy database type `postgresql` to the v2 `postgres` engine.
 - Accept uppercase letters in site, storage, database, and notification names
   for compatibility with legacy configurations.
+- Make MySQL exports ignore conflicting client credentials in system option
+  files and use the password supplied by Bqckup configuration.
 - Allow `--force` to regenerate an existing `/etc/bqckup` output from the
   preserved `/etc/bqckup_old` source.
 - Remove duplicate output-path validation so `--force` is handled consistently.
