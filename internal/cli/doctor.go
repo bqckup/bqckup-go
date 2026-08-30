@@ -21,7 +21,7 @@ func newDoctorCommand(opts *options) *cobra.Command {
 			}
 			report, err := checker.Run(cmd.Context(), siteFilter)
 			if err != nil {
-				return fmt.Errorf("%w: %s", ErrInvalidInput, err)
+				return usageError(err.Error(), "bqckup doctor [--site <site>]", "bqckup doctor --site incremental-test")
 			}
 			if opts.output == "json" {
 				if err := writeJSON(cmd, report); err != nil {

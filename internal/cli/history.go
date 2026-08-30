@@ -24,7 +24,7 @@ func newHistoryCommand(opts *options) *cobra.Command {
 		Args:  cobra.NoArgs,
 		PreRunE: func(_ *cobra.Command, _ []string) error {
 			if limit < 1 {
-				return fmt.Errorf("%w: --limit must be at least 1", ErrInvalidInput)
+				return usageError("--limit must be at least 1", "bqckup history list [--site <site>] [--limit <n>]", "bqckup history list --site incremental-test --limit 10")
 			}
 			return nil
 		},

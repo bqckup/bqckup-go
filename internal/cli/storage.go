@@ -119,7 +119,7 @@ func parseExpiryHours(value string) (int, error) {
 }
 
 func invalidExpiryError() error {
-	return fmt.Errorf("%w: --expires must be a whole number of hours between 1 and 24, like 6h", ErrInvalidInput)
+	return usageError("--expires must be a whole number of hours between 1 and 24, like 6h", "bqckup storage link <destination> --key <object-key> [--expires <hours>h]", "bqckup storage link testing --key bqckup/server/site/timestamp/files.tar.gz --expires 6h")
 }
 
 func writeLinkText(stdout, stderr io.Writer, link storage.DownloadLink) error {

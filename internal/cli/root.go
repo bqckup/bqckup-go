@@ -39,7 +39,7 @@ func NewRoot(info buildinfo.Info) *cobra.Command {
 		SilenceErrors: true,
 		PersistentPreRunE: func(_ *cobra.Command, _ []string) error {
 			if opts.output != "text" && opts.output != "json" {
-				return fmt.Errorf("%w: --output must be text or json", ErrInvalidInput)
+				return usageError("--output must be text or json", "bqckup [command] --output text|json", "bqckup --output json backup list")
 			}
 			return nil
 		},
@@ -47,7 +47,7 @@ func NewRoot(info buildinfo.Info) *cobra.Command {
 	root.PersistentFlags().StringVar(&opts.configDir, "config-dir", defaultConfigDir, "configuration directory")
 	root.PersistentFlags().StringVar(&opts.output, "output", "text", "output format: text or json")
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
-		return fmt.Errorf("%w: %v", ErrInvalidInput, err)
+		return usageError(err.Error(), "bqckup <command> [flags]", "bqckup backup run --help")
 	})
 
 	root.AddCommand(newInitCommand(opts))
@@ -79,7 +79,11 @@ func Execute(ctx context.Context, stdout, stderr io.Writer) int {
 	root.SetOut(stdout)
 	root.SetErr(stderr)
 	if err := root.Execute(); err != nil {
-		_, _ = fmt.Fprintln(stderr, formatErrorMessage(err))
+		message := formatErrorMessage(err)
+		if strings.Contains(err.Error(), "unknown command") {
+			message += "\nUsage: bqckup <command> --help\nExample: bqckup backup --help"
+		}
+		_, _ = fmt.Fprintln(stderr, message)
 		return ExitCode(err)
 	}
 	return 0

@@ -64,7 +64,7 @@ func initializeConfig(directory string) error {
 	}
 	for filename := range files {
 		if _, err := os.Lstat(filename); err == nil {
-			return fmt.Errorf("%w: refusing to overwrite %s", ErrInvalidInput, filename)
+			return usageError(fmt.Sprintf("refusing to overwrite %s", filename), "bqckup init --config-dir <directory>", "bqckup init --config-dir /etc/bqckup-new")
 		} else if !errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("inspect initialization target %s: %w", filename, err)
 		}
