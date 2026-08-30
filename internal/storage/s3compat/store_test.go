@@ -155,26 +155,26 @@ func TestListPackagesReturnsEveryObjectUnderTheSet(t *testing.T) {
 	created := time.Date(2026, 11, 10, 3, 0, 12, 0, time.UTC)
 	client := &fakeClient{listOutputs: []*s3.ListObjectsV2Output{
 		{Contents: []types.Object{
-			{Key: aws.String("company/bqckup/site-a/2026-11-10T03-00-00.000000000Z/files.tar.gz"), Size: aws.Int64(100), LastModified: aws.Time(created)},
-			{Key: aws.String("company/bqckup/site-a/2026-11-10T03-00-00.000000000Z/databases/db.sql.gz"), Size: aws.Int64(50), LastModified: aws.Time(created.Add(time.Second))},
+			{Key: aws.String("company/bqckup/site-a/2026-11-10/03-00-12-files.tar.gz"), Size: aws.Int64(100), LastModified: aws.Time(created)},
+			{Key: aws.String("company/bqckup/site-a/2026-11-10/03-00-12-db.sql.gz"), Size: aws.Int64(50), LastModified: aws.Time(created.Add(time.Second))},
 		}, IsTruncated: aws.Bool(true), NextContinuationToken: aws.String("next")},
 		{Contents: []types.Object{
-			{Key: aws.String("company/bqckup/site-a/2026-11-10T03-00-00.000000000Z/databases/db2.sql.gz"), Size: aws.Int64(25), LastModified: aws.Time(created.Add(2 * time.Second))},
+			{Key: aws.String("company/bqckup/site-a/2026-11-10/03-00-12-db2.sql.gz"), Size: aws.Int64(25), LastModified: aws.Time(created.Add(2 * time.Second))},
 		}, IsTruncated: aws.Bool(false)},
 	}}
 	store := newWithClients(Options{Bucket: "backups", Prefix: "company"}, &fakeUploader{}, client, nil)
 
-	packages, err := store.ListPackages(context.Background(), "bqckup/site-a/2026-11-10T03-00-00.000000000Z")
+	packages, err := store.ListPackages(context.Background(), "bqckup/site-a/2026-11-10/03-00-12")
 	require.NoError(t, err)
 	require.Len(t, packages, 3)
-	assert.Equal(t, "bqckup/site-a/2026-11-10T03-00-00.000000000Z/files.tar.gz", packages[0].Key)
+	assert.Equal(t, "bqckup/site-a/2026-11-10/03-00-12-files.tar.gz", packages[0].Key)
 	assert.Equal(t, int64(100), packages[0].Size)
 	assert.Equal(t, created, packages[0].CreatedAt)
-	assert.Equal(t, "bqckup/site-a/2026-11-10T03-00-00.000000000Z/databases/db.sql.gz", packages[1].Key)
-	assert.Equal(t, "bqckup/site-a/2026-11-10T03-00-00.000000000Z/databases/db2.sql.gz", packages[2].Key)
+	assert.Equal(t, "bqckup/site-a/2026-11-10/03-00-12-db.sql.gz", packages[1].Key)
+	assert.Equal(t, "bqckup/site-a/2026-11-10/03-00-12-db2.sql.gz", packages[2].Key)
 	assert.Equal(t, int64(25), packages[2].Size)
 	require.Len(t, client.listInputs, 2)
-	assert.Equal(t, "company/bqckup/site-a/2026-11-10T03-00-00.000000000Z/", aws.ToString(client.listInputs[0].Prefix))
+	assert.Equal(t, "company/bqckup/site-a/2026-11-10/", aws.ToString(client.listInputs[0].Prefix))
 	assert.Equal(t, "next", aws.ToString(client.listInputs[1].ContinuationToken))
 }
 
@@ -182,18 +182,18 @@ func TestListPackagesSkipsKeysOutsideTheSet(t *testing.T) {
 	created := time.Date(2026, 11, 10, 3, 0, 0, 0, time.UTC)
 	client := &fakeClient{listOutputs: []*s3.ListObjectsV2Output{
 		{Contents: []types.Object{
-			{Key: aws.String("company/bqckup/site-a/2026-11-10T03-00-00.000000000Z/files.tar.gz"), Size: aws.Int64(1), LastModified: aws.Time(created)},
+			{Key: aws.String("company/bqckup/site-a/2026-11-10/03-00-00-files.tar.gz"), Size: aws.Int64(1), LastModified: aws.Time(created)},
 			// Foreign keys must not surface: another set, another site, a restic blob prefix.
-			{Key: aws.String("company/bqckup/site-a/2026-11-11T03-00-00.000000000Z/files.tar.gz"), Size: aws.Int64(2), LastModified: aws.Time(created)},
-			{Key: aws.String("company/bqckup/site-b/2026-11-10T03-00-00.000000000Z/files.tar.gz"), Size: aws.Int64(3), LastModified: aws.Time(created)},
+			{Key: aws.String("company/bqckup/site-a/2026-11-11/03-00-00-files.tar.gz"), Size: aws.Int64(2), LastModified: aws.Time(created)},
+			{Key: aws.String("company/bqckup/site-b/2026-11-10/03-00-00-files.tar.gz"), Size: aws.Int64(3), LastModified: aws.Time(created)},
 		}, IsTruncated: aws.Bool(false)},
 	}}
 	store := newWithClients(Options{Bucket: "backups", Prefix: "company"}, &fakeUploader{}, client, nil)
 
-	packages, err := store.ListPackages(context.Background(), "bqckup/site-a/2026-11-10T03-00-00.000000000Z")
+	packages, err := store.ListPackages(context.Background(), "bqckup/site-a/2026-11-10/03-00-00")
 	require.NoError(t, err)
 	require.Len(t, packages, 1)
-	assert.Equal(t, "bqckup/site-a/2026-11-10T03-00-00.000000000Z/files.tar.gz", packages[0].Key)
+	assert.Equal(t, "bqckup/site-a/2026-11-10/03-00-00-files.tar.gz", packages[0].Key)
 }
 
 func TestListPackagesRejectsInvalidPrefixes(t *testing.T) {
@@ -202,7 +202,7 @@ func TestListPackagesRejectsInvalidPrefixes(t *testing.T) {
 		"bqckup",
 		"bqckup/site-a",
 		"bqckup/site-a/not-a-timestamp",
-		"bqckup/site-a/2026-11-10T03-00-00.000000000Z/",
+		"bqckup/site-a/2026-11-10/03-00-00/",
 		"../bqckup/site-a/2026-11-10T03-00-00.000000000Z",
 	} {
 		_, err := store.ListPackages(context.Background(), invalid)

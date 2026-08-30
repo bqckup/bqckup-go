@@ -180,7 +180,7 @@ func (l *Lister) listDatabasePackages(ctx context.Context, destination string, s
 			return nil, apperror.Wrap(apperror.CategoryStorage, "could not list remote database packages", err)
 		}
 		for _, pkg := range rows {
-			if !strings.Contains(pkg.Key, "/databases/") {
+			if !strings.HasSuffix(pkg.Key, ".sql.gz") {
 				continue
 			}
 			packages = append(packages, PackageRow{Destination: destination, Key: pkg.Key, Size: pkg.Size, CreatedAt: pkg.CreatedAt})

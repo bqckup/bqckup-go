@@ -67,6 +67,7 @@ func NewRoot(info buildinfo.Info) *cobra.Command {
 	root.AddCommand(newDoctorCommand(opts))
 	root.AddCommand(newHistoryCommand(opts))
 	root.AddCommand(newStorageCommand(opts))
+	root.AddCommand(newUpdateCommand(opts))
 	root.AddCommand(&cobra.Command{
 		Use:   "version",
 		Short: "Print version information",

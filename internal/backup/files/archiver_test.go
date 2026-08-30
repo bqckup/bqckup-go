@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/bqckup/bqckup-go/internal/backup"
@@ -55,6 +56,27 @@ func TestCreateSupportsRelativeExcludePatterns(t *testing.T) {
 	assert.Contains(t, names, filepath.Base(source)+"/keep.txt")
 	assert.NotContains(t, names, filepath.Base(source)+"/skip.tmp")
 	assert.NotContains(t, names, filepath.Base(source)+"/cache/deep/secret")
+}
+
+func TestCreateDisambiguatesDuplicateSourceBasenames(t *testing.T) {
+	parent := t.TempDir()
+	first := filepath.Join(parent, "one", "crowdsec")
+	second := filepath.Join(parent, "two", "crowdsec")
+	require.NoError(t, os.MkdirAll(first, 0o700))
+	require.NoError(t, os.MkdirAll(second, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(first, "first.txt"), []byte("first"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(second, "second.txt"), []byte("second"), 0o600))
+	out := filepath.Join(t.TempDir(), "files.tar.gz")
+
+	_, err := New().Create(context.Background(), backup.FileSource{
+		Include: []string{first, second},
+	}, out)
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{
+		filepath.ToSlash(strings.TrimPrefix(first, "/")) + "/first.txt",
+		filepath.ToSlash(strings.TrimPrefix(second, "/")) + "/second.txt",
+	}, archiveMembers(t, out))
 }
 
 func TestCreateStoresSymlinkWithoutFollowingByDefault(t *testing.T) {

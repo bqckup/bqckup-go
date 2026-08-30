@@ -261,6 +261,15 @@ func (s *Store) Delete(ctx context.Context, backupSetPrefix string) error {
 		return err
 	}
 	requestPrefix := finalPrefix + "/"
+	flatRun := ""
+	parts := strings.Split(backupSetPrefix, "/")
+	if len(parts) >= 2 {
+		setName := path.Join(parts[len(parts)-2], parts[len(parts)-1])
+		if storage.IsFlatBackupSet(setName) {
+			requestPrefix = path.Dir(finalPrefix) + "/"
+			flatRun = path.Base(finalPrefix) + "-"
+		}
+	}
 	var continuation *string
 	for {
 		output, listErr := s.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
@@ -277,7 +286,7 @@ func (s *Store) Delete(ctx context.Context, backupSetPrefix string) error {
 		identifiers := make([]types.ObjectIdentifier, 0, len(output.Contents))
 		for _, object := range output.Contents {
 			key := aws.ToString(object.Key)
-			if strings.HasPrefix(key, requestPrefix) {
+			if strings.HasPrefix(key, requestPrefix) && (flatRun == "" || strings.HasPrefix(strings.TrimPrefix(key, requestPrefix), flatRun)) {
 				identifiers = append(identifiers, types.ObjectIdentifier{Key: aws.String(key)})
 			}
 		}
@@ -374,6 +383,15 @@ func (s *Store) ListPackages(ctx context.Context, setPrefix string) ([]storage.R
 		return nil, err
 	}
 	requestPrefix := finalPrefix + "/"
+	flatRun := ""
+	parts := strings.Split(setPrefix, "/")
+	if len(parts) >= 2 {
+		setName := path.Join(parts[len(parts)-2], parts[len(parts)-1])
+		if storage.IsFlatBackupSet(setName) {
+			requestPrefix = path.Dir(finalPrefix) + "/"
+			flatRun = path.Base(finalPrefix) + "-"
+		}
+	}
 	var packages []storage.RemotePackage
 	var continuation *string
 	for {
@@ -393,8 +411,12 @@ func (s *Store) ListPackages(ctx context.Context, setPrefix string) ([]storage.R
 			if !strings.HasPrefix(key, requestPrefix) {
 				continue
 			}
+			remainder := strings.TrimPrefix(key, requestPrefix)
+			if flatRun != "" && !strings.HasPrefix(remainder, flatRun) {
+				continue
+			}
 			packages = append(packages, storage.RemotePackage{
-				Key:       setPrefix + "/" + strings.TrimPrefix(key, requestPrefix),
+				Key:       path.Join(path.Dir(setPrefix), remainder),
 				Size:      aws.ToInt64(object.Size),
 				CreatedAt: aws.ToTime(object.LastModified),
 			})
@@ -450,6 +472,11 @@ func validateBackupSetPrefix(prefix string) error {
 
 func parseBackupSetRemainder(remainder string) (string, time.Time, error) {
 	parts := strings.Split(remainder, "/")
+	if len(parts) >= 2 {
+		if setName, createdAt, err := storage.BackupSetForPackage(parts[0], parts[1]); err == nil {
+			return setName, createdAt, nil
+		}
+	}
 	if len(parts) >= 3 {
 		setName := path.Join(parts[0], parts[1])
 		if createdAt, err := storage.ParseBackupSet(setName); err == nil {

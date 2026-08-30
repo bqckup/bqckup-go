@@ -107,7 +107,7 @@ func TestBackupRunSucceedsWhenUnusedNotificationEndpointIsUnreachable(t *testing
 	require.NoError(t, json.Unmarshal(stdout.Bytes(), &result))
 	assert.Equal(t, "success", result["status"], "an unused notification endpoint must never fail a backup run")
 
-	matches, err := filepath.Glob(filepath.Join(backupRoot, "bqckup", "example", "*", "*", "files.tar.gz"))
+	matches, err := filepath.Glob(filepath.Join(backupRoot, "bqckup", "example", "*", "*-files.tar.gz"))
 	require.NoError(t, err)
 	assert.Len(t, matches, 1)
 }
@@ -121,7 +121,7 @@ func TestBackupRunAndHistoryListEndToEnd(t *testing.T) {
 	assert.Equal(t, "success", result["status"])
 	assert.Empty(t, stderr.String(), "JSON backup output must not include progress text")
 
-	matches, err := filepath.Glob(filepath.Join(backupRoot, "bqckup", "example", "*", "*", "files.tar.gz"))
+	matches, err := filepath.Glob(filepath.Join(backupRoot, "bqckup", "example", "*", "*-files.tar.gz"))
 	require.NoError(t, err)
 	assert.Len(t, matches, 1)
 
@@ -170,11 +170,11 @@ func TestBackupRunWithoutSiteRunsEveryEnabledSite(t *testing.T) {
 	assert.Empty(t, stderr.String(), "JSON batch output must not include progress text")
 
 	for _, siteName := range []string{"example", "site-b"} {
-		matches, err := filepath.Glob(filepath.Join(backupRoot, "bqckup", siteName, "*", "*", "files.tar.gz"))
+		matches, err := filepath.Glob(filepath.Join(backupRoot, "bqckup", siteName, "*", "*-files.tar.gz"))
 		require.NoError(t, err)
 		assert.Len(t, matches, 1)
 	}
-	disabledMatches, err := filepath.Glob(filepath.Join(backupRoot, "bqckup", "site-disabled", "*", "files.tar.gz"))
+	disabledMatches, err := filepath.Glob(filepath.Join(backupRoot, "bqckup", "site-disabled", "*", "*-files.tar.gz"))
 	require.NoError(t, err)
 	assert.Empty(t, disabledMatches)
 }

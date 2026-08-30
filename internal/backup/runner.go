@@ -245,7 +245,6 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 		return result, operationErr
 	}
 
-	backupSet := storage.FormatBackupSet(now)
 	sitePrefix := backupSitePrefix(site.Name, r.dependencies.ServerID)
 
 	if site.BackupMode == "incremental" {
@@ -311,7 +310,7 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 			return fail(apperror.Wrap(apperror.CategoryExecution, "could not create the file archive", err))
 		}
 
-		objectKey := path.Join(sitePrefix, backupSet, "files.tar.gz")
+		objectKey := path.Join(sitePrefix, storage.FormatPackageKey(now, "files.tar.gz", run.ID))
 		if err := r.storePackage(ctx, run.ID, archive, objectKey, site.Destinations); err != nil {
 			return fail(err)
 		}
@@ -337,7 +336,7 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 				return fail(apperror.Wrap(apperror.CategoryExecution, "could not prepare database export workspace", err))
 			}
 			databasePackage, exportErr := exporter.Export(ctx, source, destination)
-			databaseKey := path.Join(sitePrefix, backupSet, "databases", source.Name+".sql.gz")
+			databaseKey := path.Join(sitePrefix, storage.FormatPackageKey(now, source.Name+".sql.gz", run.ID))
 			if exportErr != nil {
 				recordErr := r.recordFailedPackage(ctx, run.ID, Package{SourceKind: "database", SourceName: source.Name}, databaseKey, site.Destinations, "could not export database")
 				operationErr := apperror.Wrap(apperror.CategoryExecution, "could not export database", exportErr)
@@ -373,10 +372,9 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 			}
 			result.ReclaimedBytes += reclaimed
 		}
-		// Set retention covers every mode: full sites store the file
-		// archive here, and incremental sites store their database dumps
-		// here. Without this, incremental runs would grow
-		// bqckup/<site>/<timestamp>/databases/ without bound.
+		// Set retention covers every mode: full sites store flat date-folder
+		// packages here, and incremental sites store their database dumps
+		// here. Without this, package objects would grow without bound.
 		if err := r.dependencies.Retainer.Apply(ctx, store, sitePrefix, site.Policy.KeepLast); err != nil {
 			return fail(apperror.Wrap(apperror.CategoryStorage, "backup completed but retention could not be applied", err))
 		}

@@ -98,16 +98,13 @@ SQLite runs with WAL, foreign keys, a five-second busy timeout, and one open con
 Package keys use:
 
 ```text
-bqckup/<server_id>/<site>/<DD-MMMM-YYYY>/<HH-mm-ss>/<package name>
+bqckup/<server_id>/<site>/<YYYY-MM-DD>/<HH-mm-ss>-<package name>
 ```
 
-The date and run directories use UTC, with English month names. Run names
-carry nanosecond resolution so two runs of one site within the same UTC
-second get distinct backup sets; stores are write-once, and a same-second
-second run must not fail on its own first write. Listing and retention also
-recognize the previous readable second-resolution layout and the flat
-`2006-01-02T15-04-05.000000000Z` backup-set directory so existing archives
-remain manageable. Names come from validated configuration, not raw runtime
+The date directory and package time prefixes use UTC. Packages from one run
+share an eight-character run ID after the time prefix, so same-second runs
+remain write-once safe without adding a `Z` or long nanosecond suffix. Names
+come from validated configuration, not raw runtime
 input.
 
 ## Security rules
