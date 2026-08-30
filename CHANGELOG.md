@@ -40,6 +40,7 @@ All notable changes to Bqckup are documented in this file.
   config back to `/etc/bqckup`.
 - Report malformed legacy site files with their path instead of a Python
   traceback.
+- Skip existing schema-v2 site templates found alongside legacy site files.
 - Document the migration layout using `/etc/bqckup_old` as the preserved
   legacy tree and `/etc/bqckup` as the generated active tree.
 - Show each batch failure beside its site and replace the duplicated trailing

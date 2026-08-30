@@ -188,6 +188,9 @@ def convert(args: argparse.Namespace) -> int:
         try:
             with path.open(encoding="utf-8") as handle:
                 document = yaml.safe_load(handle) or {}
+            if isinstance(document, dict) and isinstance(document.get("site"), dict) and "bqckup" not in document:
+                warnings.append(f"skipping existing v2 site file {path}")
+                continue
             converted = legacy_site(document, warnings)
         except (OSError, yaml.YAMLError, ValueError) as error:
             print(f"error: could not convert site file {path}: {error}", file=sys.stderr)

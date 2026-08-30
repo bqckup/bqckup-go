@@ -115,6 +115,9 @@ If a site file is malformed, conversion stops with the exact file path and
 preserves the legacy tree in `/etc/bqckup_old`; fix that file and run the
 converter again.
 
+Existing schema-v2 site files such as the default `example.yaml` are skipped
+automatically when found in the legacy tree.
+
 ## Backup modes
 
 ### Full backup
