@@ -7,7 +7,6 @@ import (
 	"os"
 	"sort"
 	"strings"
-	"text/tabwriter"
 	"time"
 
 	"github.com/bqckup/bqckup-go/internal/app"
@@ -274,8 +273,24 @@ func writeBackupListText(output io.Writer, views []siteView) error {
 		_, err := fmt.Fprintln(output, "No backup sites configured.")
 		return err
 	}
-	table := tabwriter.NewWriter(output, 0, 4, 2, ' ', 0)
-	if _, err := fmt.Fprintln(table, "SITE\tENABLED\tMODE\tFILES\tDESTINATIONS"); err != nil {
+	siteWidth, modeWidth, destinationWidth := len("SITE"), len("MODE"), len("DESTINATIONS")
+	for _, view := range views {
+		mode := view.BackupMode
+		if mode == "" {
+			mode = "full"
+		}
+		destinations := strings.Join(view.Destinations, ", ")
+		if len(view.Name) > siteWidth {
+			siteWidth = len(view.Name)
+		}
+		if len(mode) > modeWidth {
+			modeWidth = len(mode)
+		}
+		if len(destinations) > destinationWidth {
+			destinationWidth = len(destinations)
+		}
+	}
+	if _, err := fmt.Fprintf(output, "%-*s  %-7s  %-*s  %5s  %-*s\n", siteWidth, "SITE", "ENABLED", modeWidth, "MODE", "FILES", destinationWidth, "DESTINATIONS"); err != nil {
 		return err
 	}
 	color := ansiColor{on: isTerminalWriter(output)}
@@ -286,15 +301,20 @@ func writeBackupListText(output io.Writer, views []siteView) error {
 		}
 		enabled := "no"
 		if view.Enabled {
-			enabled = color.green("yes")
-		} else {
-			enabled = color.dim(enabled)
+			enabled = "yes"
 		}
-		if _, err := fmt.Fprintf(table, "%s\t%s\t%s\t%d\t%s\n", view.Name, enabled, mode, view.FileSources, strings.Join(view.Destinations, ", ")); err != nil {
+		enabledField := fmt.Sprintf("%-7s", strings.ToUpper(enabled))
+		if view.Enabled {
+			enabledField = color.green(enabledField)
+		} else {
+			enabledField = color.dim(enabledField)
+		}
+		destinations := strings.Join(view.Destinations, ", ")
+		if _, err := fmt.Fprintf(output, "%-*s  %s  %-*s  %5d  %-*s\n", siteWidth, view.Name, enabledField, modeWidth, mode, view.FileSources, destinationWidth, destinations); err != nil {
 			return err
 		}
 	}
-	return table.Flush()
+	return nil
 }
 
 func writeRunResultText(out io.Writer, result backup.RunResult) error {

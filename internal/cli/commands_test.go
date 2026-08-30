@@ -51,6 +51,14 @@ func TestConfigValidateAndBackupList(t *testing.T) {
 	require.NoError(t, json.Unmarshal(stdout.Bytes(), &sites))
 	require.Len(t, sites, 1)
 	assert.Equal(t, "example", sites[0]["name"])
+
+	root, stdout, _ = commandForTest(t, "--config-dir", configDir, "backup", "list")
+	require.NoError(t, root.Execute())
+	assert.Contains(t, stdout.String(), "SITE")
+	assert.Contains(t, stdout.String(), "ENABLED")
+	assert.Contains(t, stdout.String(), "DESTINATIONS")
+	assert.Contains(t, stdout.String(), "example")
+	assert.Contains(t, stdout.String(), "YES")
 }
 
 func TestConfigValidateAcceptsInlineNotificationURLs(t *testing.T) {
