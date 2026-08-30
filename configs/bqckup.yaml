@@ -7,25 +7,25 @@ app:
   log_level: info
 
 # Optional: notify operators when a run reaches a terminal state.
-# Secrets and URLs are environment-variable references only; plaintext
-# values are rejected. See docs/configuration-v2.md for all rules.
+# Notification credentials and URLs are written directly here. Keep this file
+# owned by the service account with mode 0600. See docs/configuration-v2.md.
 # notifications:
 #   channels:
 #     email:
 #       type: smtp
 #       host: smtp.example.com
 #       port: 587
-#       username: BQCKUP_SMTP_USERNAME
-#       password: BQCKUP_SMTP_PASSWORD
+#       username: backup-user
+#       password: replace-with-smtp-password
 #       from: bqckup@example.com
 #       to:
 #         - ops@example.com
 #     webhook:
 #       type: webhook
-#       url: BQCKUP_WEBHOOK_URL
+#       url: https://hooks.example.com/bqckup
 #     discord:
 #       type: discord
-#       webhook_url: BQCKUP_DISCORD_WEBHOOK_URL
+#       webhook_url: https://discord.com/api/webhooks/replace-me
 #   routes:
 #     - events: [all]
 #       channels: [email, discord, webhook]

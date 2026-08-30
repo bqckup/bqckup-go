@@ -169,9 +169,9 @@ bqckup --config-dir /etc/bqckup --output json config validate
 ```
 
 Unknown keys, invalid paths, unsupported types, and explicit versions other than `2` are rejected.
-`bqckup config validate` additionally fails when an environment variable
-referenced by the `notifications` section is unset or empty; the backup
-command itself never fails for that reason (delivery warns instead).
+`bqckup config validate` additionally checks notification URLs and requires a
+credential-bearing `bqckup.yaml` to be a regular, non-symlink file with mode
+`0600`.
 
 ## Notifications
 
@@ -185,19 +185,19 @@ notifications:
       type: smtp
       host: smtp.example.com
       port: 587
-      username: BQCKUP_SMTP_USERNAME
-      password: BQCKUP_SMTP_PASSWORD
+      username: backup-user
+      password: replace-with-smtp-password
       from: bqckup@example.com
       to:
         - ops@example.com
 
     webhook:
       type: webhook
-      url: BQCKUP_WEBHOOK_URL
+      url: https://hooks.example.com/bqckup
 
     discord:
       type: discord
-      webhook_url: BQCKUP_DISCORD_WEBHOOK_URL
+      webhook_url: https://discord.com/api/webhooks/replace-me
 
   routes:
     - events: [all]
@@ -209,11 +209,11 @@ notifications:
   `discord` requires `webhook_url`. Fields foreign to the channel type
   are rejected, as are `username`/`password` provided one without
   the other.
-- **Secrets and URLs are environment-variable references only**
-  (`username`, `password`, `url`, `webhook_url`). Plaintext
-  values are rejected by strict decoding. Names must match the valid
-  environment-variable pattern. Values are resolved at send time; a missing
-  value is a per-channel warning.
+- **Credentials and URLs are literal config values** (`username`, `password`,
+  `url`, `webhook_url`). Because these values may be sensitive, a root config
+  containing any of them must be a regular, non-symlink file with exact mode
+  `0600`. Webhook URLs must be absolute HTTP(S) URLs; non-loopback endpoints
+  require HTTPS.
 - **Routes** map events to channels. Events are `backup_failed`,
   `backup_cancelled`, and `backup_no_change` (successful runs stay silent); a
   route needs at least one event and may fan out to several channels. A channel

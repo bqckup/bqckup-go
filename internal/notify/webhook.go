@@ -28,35 +28,27 @@ func postJSON(ctx context.Context, client *http.Client, url string, body []byte)
 	return nil
 }
 
-// Webhook posts the shared payload as JSON to a URL taken from an
-// environment variable at send time. Missing or empty env is a per-channel
-// error; the caller warns and moves on.
+// Webhook posts the shared payload as JSON to its configured URL.
 type Webhook struct {
-	name      string
-	urlEnv    string
-	lookupEnv func(string) (string, bool)
-	client    *http.Client
+	name   string
+	url    string
+	client *http.Client
 }
 
-func NewWebhook(name, urlEnv string, lookupEnv func(string) (string, bool)) *Webhook {
+func NewWebhook(name, url string) *Webhook {
 	return &Webhook{
-		name:      name,
-		urlEnv:    urlEnv,
-		lookupEnv: lookupEnv,
-		client:    &http.Client{Timeout: 10 * time.Second},
+		name:   name,
+		url:    url,
+		client: &http.Client{Timeout: 10 * time.Second},
 	}
 }
 
 func (w *Webhook) Name() string { return w.name }
 
 func (w *Webhook) Send(ctx context.Context, payload Payload) error {
-	url, ok := w.lookupEnv(w.urlEnv)
-	if !ok || url == "" {
-		return fmt.Errorf("environment variable %q is not set", w.urlEnv)
-	}
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("encode payload: %w", err)
 	}
-	return postJSON(ctx, w.client, url, body)
+	return postJSON(ctx, w.client, w.url, body)
 }

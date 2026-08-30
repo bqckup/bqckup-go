@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net"
 	"net/url"
-	"os"
 	"path"
 	"path/filepath"
 	"regexp"
@@ -117,17 +116,6 @@ func validateNotificationChannel(name string, channel Channel) error {
 	if !SafeName.MatchString(name) {
 		return validationError("bqckup.yaml", field, "name contains unsupported characters")
 	}
-	envFields := []struct{ name, value string }{
-		{"username", channel.Username},
-		{"password", channel.Password},
-		{"url", channel.URL},
-		{"webhook_url", channel.WebhookURL},
-	}
-	for _, candidate := range envFields {
-		if candidate.value != "" && !validEnvName.MatchString(candidate.value) {
-			return validationError("bqckup.yaml", field+"."+candidate.name, "must be a valid environment variable name")
-		}
-	}
 	switch channel.Type {
 	case "smtp":
 		return validateSMTPChannel(field, channel)
@@ -201,6 +189,9 @@ func validateWebhookChannel(field string, channel Channel) error {
 	if channel.URL == "" {
 		return validationError("bqckup.yaml", field+".url", "url is required")
 	}
+	if err := validateNotificationURL(field+".url", channel.URL); err != nil {
+		return err
+	}
 	return validateNoForeignFields(field, "webhook", channel, "url")
 }
 
@@ -208,43 +199,24 @@ func validateDiscordChannel(field string, channel Channel) error {
 	if channel.WebhookURL == "" {
 		return validationError("bqckup.yaml", field+".webhook_url", "webhook_url is required")
 	}
+	if err := validateNotificationURL(field+".webhook_url", channel.WebhookURL); err != nil {
+		return err
+	}
 	return validateNoForeignFields(field, "discord", channel, "webhook_url")
 }
 
-// ValidateNotificationEnvironment reports every notification environment
-// variable referenced by the configuration that is unset or empty, one error
-// listing all of them. It is called only by the `config validate` command;
-// Config.Validate never checks environment presence, so a missing variable
-// can never hard-fail a backup run (delivery warns instead).
-func ValidateNotificationEnvironment(cfg Config, lookupEnv func(string) (string, bool)) error {
-	if lookupEnv == nil {
-		lookupEnv = os.LookupEnv
+func validateNotificationURL(field, value string) error {
+	parsed, err := url.ParseRequestURI(value)
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "https" && parsed.Scheme != "http") {
+		return validationError("bqckup.yaml", field, "must be an absolute HTTP(S) URL")
 	}
-	seen := make(map[string]struct{})
-	var missing []string
-	add := func(name string) {
-		if name == "" {
-			return
-		}
-		if _, ok := seen[name]; ok {
-			return
-		}
-		seen[name] = struct{}{}
-		if value, ok := lookupEnv(name); !ok || value == "" {
-			missing = append(missing, name)
-		}
+	if parsed.User != nil || parsed.Fragment != "" {
+		return validationError("bqckup.yaml", field, "must not contain user information or a fragment")
 	}
-	for _, channel := range cfg.Notifications.Channels {
-		add(channel.Username)
-		add(channel.Password)
-		add(channel.URL)
-		add(channel.WebhookURL)
+	if parsed.Scheme == "http" && !isLoopbackHost(parsed.Hostname()) {
+		return validationError("bqckup.yaml", field, "must use HTTPS unless the host is loopback")
 	}
-	if len(missing) == 0 {
-		return nil
-	}
-	sort.Strings(missing)
-	return validationError("bqckup.yaml", "notifications", "environment variable(s) not set: %s", strings.Join(missing, ", "))
+	return nil
 }
 
 // ValidateStorage validates one storage document. It is the exported

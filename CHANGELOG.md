@@ -8,6 +8,8 @@ All notable changes to Bqckup are documented in this file.
 - Renamed internal incremental packages from `restic` to `incremental` while
   preserving official Restic repository compatibility.
 - Rebuild releases on every push to `main` by recreating the `v0.0.5` tag.
+- Accept notification credentials and webhook URLs directly in the protected
+  root config, with strict URL checks and mandatory `0600` permissions.
 
 ## v0.0.4
 

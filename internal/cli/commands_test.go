@@ -53,7 +53,7 @@ func TestConfigValidateAndBackupList(t *testing.T) {
 	assert.Equal(t, "example", sites[0]["name"])
 }
 
-func TestConfigValidateFlagsMissingNotificationEnv(t *testing.T) {
+func TestConfigValidateAcceptsInlineNotificationURLs(t *testing.T) {
 	configDir, _ := writeCLIConfig(t)
 	rootPath := filepath.Join(configDir, "bqckup.yaml")
 	root, err := os.ReadFile(rootPath)
@@ -62,32 +62,23 @@ func TestConfigValidateFlagsMissingNotificationEnv(t *testing.T) {
   channels:
     webhook:
       type: webhook
-      url: BQCKUP_WEBHOOK_URL
+      url: https://example.invalid/hook
     discord:
       type: discord
-      webhook_url: BQCKUP_DISCORD_WEBHOOK_URL
+      webhook_url: https://discord.invalid/hook
   routes:
     - events: [backup_failed]
       channels: [webhook, discord]
 `)...), 0o600))
 
-	rootCmd, _, stderr := commandForTest(t, "--config-dir", configDir, "config", "validate")
-	err = rootCmd.Execute()
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "BQCKUP_WEBHOOK_URL")
-	assert.Contains(t, err.Error(), "BQCKUP_DISCORD_WEBHOOK_URL")
-
-	// Both set: validate passes and the output shape is unchanged.
-	t.Setenv("BQCKUP_WEBHOOK_URL", "https://example.invalid/hook")
-	t.Setenv("BQCKUP_DISCORD_WEBHOOK_URL", "https://discord.invalid/hook")
-	rootCmd, stdout, _ := commandForTest(t, "--config-dir", configDir, "config", "validate")
+	rootCmd, stdout, stderr := commandForTest(t, "--config-dir", configDir, "config", "validate")
 	require.NoError(t, rootCmd.Execute())
 	assert.Contains(t, stdout.String(), "1 site")
 	assert.Contains(t, stdout.String(), "1 storage")
 	assert.NotContains(t, stderr.String(), "not set")
 }
 
-func TestBackupRunSucceedsWithUnsetNotificationEnv(t *testing.T) {
+func TestBackupRunSucceedsWhenUnusedNotificationEndpointIsUnreachable(t *testing.T) {
 	configDir, backupRoot := writeCLIConfig(t)
 	rootPath := filepath.Join(configDir, "bqckup.yaml")
 	root, err := os.ReadFile(rootPath)
@@ -96,7 +87,7 @@ func TestBackupRunSucceedsWithUnsetNotificationEnv(t *testing.T) {
   channels:
     webhook:
       type: webhook
-      url: BQCKUP_UNSET_WEBHOOK_URL
+      url: https://unreachable.invalid/bqckup
   routes:
     - events: [backup_failed]
       channels: [webhook]
@@ -106,7 +97,7 @@ func TestBackupRunSucceedsWithUnsetNotificationEnv(t *testing.T) {
 	require.NoError(t, rootCmd.Execute())
 	var result map[string]any
 	require.NoError(t, json.Unmarshal(stdout.Bytes(), &result))
-	assert.Equal(t, "success", result["status"], "a missing notification env must never fail a backup run")
+	assert.Equal(t, "success", result["status"], "an unused notification endpoint must never fail a backup run")
 
 	matches, err := filepath.Glob(filepath.Join(backupRoot, "bqckup", "example", "*", "*", "files.tar.gz"))
 	require.NoError(t, err)

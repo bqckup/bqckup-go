@@ -19,19 +19,18 @@ import (
 
 // SMTP sends one branded HTML email per notification. Transport rules:
 // port 465 is implicit TLS; any other port uses STARTTLS when the server
-// offers it. PLAIN credentials are used only when username/password envs are
+// offers it. PLAIN credentials are used only when username/password values are
 // present and the session is encrypted (implicit TLS or STARTTLS); a server
 // without STARTTLS fails the channel instead of sending credentials in
 // cleartext. Unauthenticated SMTP is allowed.
 type SMTP struct {
-	name        string
-	host        string
-	port        int
-	usernameEnv string
-	passwordEnv string
-	from        string
-	to          []string
-	lookupEnv   func(string) (string, bool)
+	name     string
+	host     string
+	port     int
+	username string
+	password string
+	from     string
+	to       []string
 	// roots overrides the TLS root pool; nil means system roots. Tests
 	// inject a pool containing the fake server's self-signed certificate.
 	roots *x509.CertPool
@@ -40,16 +39,15 @@ type SMTP struct {
 	implicitTLS bool
 }
 
-func NewSMTP(name string, channel config.Channel, lookupEnv func(string) (string, bool), roots *x509.CertPool) *SMTP {
+func NewSMTP(name string, channel config.Channel, roots *x509.CertPool) *SMTP {
 	return &SMTP{
 		name:        name,
 		host:        channel.Host,
 		port:        channel.Port,
-		usernameEnv: channel.Username,
-		passwordEnv: channel.Password,
+		username:    channel.Username,
+		password:    channel.Password,
 		from:        channel.From,
 		to:          channel.To,
-		lookupEnv:   lookupEnv,
 		roots:       roots,
 		implicitTLS: channel.Port == 465,
 	}
@@ -133,21 +131,13 @@ func (s *SMTP) Send(ctx context.Context, payload Payload) error {
 	return client.Quit()
 }
 
-// credentials resolves the SMTP credentials at send time. A missing or empty
-// referenced variable is a per-channel error.
+// credentials returns the SMTP credentials loaded from the protected root
+// configuration file.
 func (s *SMTP) credentials() (username, password string, err error) {
-	if s.usernameEnv == "" {
+	if s.username == "" {
 		return "", "", nil
 	}
-	username, ok := s.lookupEnv(s.usernameEnv)
-	if !ok || username == "" {
-		return "", "", fmt.Errorf("environment variable %q is not set", s.usernameEnv)
-	}
-	password, ok = s.lookupEnv(s.passwordEnv)
-	if !ok || password == "" {
-		return "", "", fmt.Errorf("environment variable %q is not set", s.passwordEnv)
-	}
-	return username, password, nil
+	return s.username, s.password, nil
 }
 
 const logoContentID = "bqckup-logo"

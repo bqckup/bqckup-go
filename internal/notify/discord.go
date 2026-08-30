@@ -36,20 +36,17 @@ type discordFooter struct {
 	Text string `json:"text"`
 }
 
-// Discord posts one embed to a Discord webhook URL taken from an environment
-// variable at send time.
+// Discord posts one embed to its configured Discord webhook URL.
 type Discord struct {
 	name       string
 	webhookURL string
-	lookupEnv  func(string) (string, bool)
 	client     *http.Client
 }
 
-func NewDiscord(name, webhookURL string, lookupEnv func(string) (string, bool)) *Discord {
+func NewDiscord(name, webhookURL string) *Discord {
 	return &Discord{
 		name:       name,
 		webhookURL: webhookURL,
-		lookupEnv:  lookupEnv,
 		client:     &http.Client{Timeout: 10 * time.Second},
 	}
 }
@@ -57,11 +54,6 @@ func NewDiscord(name, webhookURL string, lookupEnv func(string) (string, bool)) 
 func (d *Discord) Name() string { return d.name }
 
 func (d *Discord) Send(ctx context.Context, payload Payload) error {
-	url, ok := d.lookupEnv(d.webhookURL)
-	if !ok || url == "" {
-		return fmt.Errorf("environment variable %q is not set", d.webhookURL)
-	}
-
 	lastSuccess := "No successful backup yet"
 	if payload.LastSuccessfulAt != "" {
 		if t, err := time.Parse(time.RFC3339, payload.LastSuccessfulAt); err == nil {
@@ -107,5 +99,5 @@ func (d *Discord) Send(ctx context.Context, payload Payload) error {
 	if err != nil {
 		return fmt.Errorf("encode embed: %w", err)
 	}
-	return postJSON(ctx, d.client, url, raw)
+	return postJSON(ctx, d.client, d.webhookURL, raw)
 }

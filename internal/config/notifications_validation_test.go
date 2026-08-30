@@ -2,7 +2,8 @@ package config
 
 import (
 	"context"
-	"strings"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -138,13 +139,13 @@ func TestValidateNotificationsRejectsInvalidForms(t *testing.T) {
 			wantErr: "must be provided together",
 		},
 		{
-			name: "invalid env name",
+			name: "invalid webhook url",
 			mutate: func(n *Notifications) {
 				channel := n.Channels["webhook"]
 				channel.URL = "webhook-url"
 				setChannel(n, "webhook", channel)
 			},
-			wantErr: "must be a valid environment variable name",
+			wantErr: "must be an absolute HTTP(S) URL",
 		},
 		{
 			name: "unsafe channel name",
@@ -231,11 +232,11 @@ func validNotifications() Notifications {
 		Channels: map[string]Channel{
 			"email": {
 				Type: "smtp", Host: "smtp.example.com", Port: 587,
-				Username: "BQCKUP_SMTP_USERNAME", Password: "BQCKUP_SMTP_PASSWORD",
+				Username: "backup-user", Password: "smtp-secret",
 				From: "bqckup@example.com", To: []string{"ops@example.com"},
 			},
-			"webhook": {Type: "webhook", URL: "BQCKUP_WEBHOOK_URL"},
-			"discord": {Type: "discord", WebhookURL: "BQCKUP_DISCORD_WEBHOOK_URL"},
+			"webhook": {Type: "webhook", URL: "https://hooks.example.test/bqckup"},
+			"discord": {Type: "discord", WebhookURL: "https://discord.example.test/api/webhooks/1/secret"},
 		},
 		Routes: []Route{
 			{Events: []string{EventBackupFailed, EventBackupCancelled}, Channels: []string{"email", "discord", "webhook"}},
@@ -249,17 +250,17 @@ const validNotificationsYAML = `notifications:
       type: smtp
       host: smtp.example.com
       port: 587
-      username: BQCKUP_SMTP_USERNAME
-      password: BQCKUP_SMTP_PASSWORD
+      username: backup-user
+      password: smtp-secret
       from: bqckup@example.com
       to:
         - ops@example.com
     webhook:
       type: webhook
-      url: BQCKUP_WEBHOOK_URL
+      url: https://hooks.example.test/bqckup
     discord:
       type: discord
-      webhook_url: BQCKUP_DISCORD_WEBHOOK_URL
+      webhook_url: https://discord.example.test/api/webhooks/1/secret
   routes:
     - events: [backup_failed, backup_cancelled]
       channels: [email, discord, webhook]
@@ -275,24 +276,17 @@ func TestLoadDecodesNotificationsSection(t *testing.T) {
 	assert.Equal(t, "smtp.example.com", cfg.Notifications.Channels["email"].Host)
 	assert.Equal(t, 587, cfg.Notifications.Channels["email"].Port)
 	assert.Equal(t, []string{"ops@example.com"}, cfg.Notifications.Channels["email"].To)
-	assert.Equal(t, "BQCKUP_WEBHOOK_URL", cfg.Notifications.Channels["webhook"].URL)
+	assert.Equal(t, "https://hooks.example.test/bqckup", cfg.Notifications.Channels["webhook"].URL)
 	require.Len(t, cfg.Notifications.Routes, 1)
 	assert.Equal(t, []string{EventBackupFailed, EventBackupCancelled}, cfg.Notifications.Routes[0].Events)
 }
 
-func TestLoadRejectsPlaintextNotificationCredentials(t *testing.T) {
-	plaintext := []string{
-		"    email:\n      type: smtp\n      host: smtp.example.com\n      port: 587\n      password: hunter2\n      from: bqckup@example.com\n      to: [ops@example.com]\n",
-		"    webhook:\n      type: webhook\n      url: https://example.invalid/hook?token=secret\n",
-		"    discord:\n      type: discord\n      webhook_url: https://discord.invalid/api/webhooks/1/secret\n",
-	}
-	for _, channel := range plaintext {
-		t.Run(strings.TrimSpace(channel), func(t *testing.T) {
-			dir := writeConfigTree(t, "version: 2\napp:\n  state_database: data/bqckup.db\n  temporary_directory: tmp\n  lock_directory: locks\nnotifications:\n  channels:\n"+channel, localStorageYAML, validSiteYAML(t))
+func TestLoadRequires0600ForInlineNotificationCredentials(t *testing.T) {
+	dir := writeConfigTree(t, "version: 2\napp:\n  state_database: data/bqckup.db\n  temporary_directory: tmp\n  lock_directory: locks\n"+validNotificationsYAML, localStorageYAML, validSiteYAML(t))
+	rootPath := filepath.Join(dir, "bqckup.yaml")
+	require.NoError(t, os.Chmod(rootPath, 0o644))
 
-			_, err := Load(context.Background(), dir)
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), "bqckup.yaml")
-		})
-	}
+	_, err := Load(context.Background(), dir)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "must have mode 0600")
 }

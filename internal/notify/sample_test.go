@@ -24,8 +24,8 @@ import (
 //
 // The email body is written to a temp HTML file (open it in a browser; the
 // path is printed). The Discord embed is posted to a real webhook when
-// BQCKUP_SAMPLE_WEBHOOK is set (no config change needed — the URL env is
-// read at send time); otherwise the embed JSON is printed for pasting into
+// BQCKUP_SAMPLE_WEBHOOK is set (no config change needed); otherwise the
+// embed JSON is printed for pasting into
 // an embed visualizer. Tweak ErrorCategory/ErrorMessage/Status to preview
 // other variants.
 func TestSampleFailureOutput(t *testing.T) {
@@ -45,7 +45,7 @@ func TestSampleFailureOutput(t *testing.T) {
 
 	fmt.Println("=== DISCORD ===")
 	if url, ok := os.LookupEnv("BQCKUP_SAMPLE_WEBHOOK"); ok && url != "" {
-		discord := NewDiscord("discord", "BQCKUP_SAMPLE_WEBHOOK", os.LookupEnv)
+		discord := NewDiscord("discord", url)
 		require.NoError(t, discord.Send(context.Background(), payload))
 		fmt.Println("posted to webhook — lihat di Discord server kamu")
 	} else {
@@ -55,7 +55,7 @@ func TestSampleFailureOutput(t *testing.T) {
 			w.WriteHeader(http.StatusNoContent)
 		}))
 		t.Cleanup(server.Close)
-		discord := NewDiscord("discord", "BQCKUP_DISCORD_WEBHOOK_URL", func(string) (string, bool) { return server.URL, true })
+		discord := NewDiscord("discord", server.URL)
 		require.NoError(t, discord.Send(context.Background(), payload))
 		raw, err := json.MarshalIndent(embed, "", "  ")
 		require.NoError(t, err)
@@ -95,7 +95,7 @@ func TestSampleCancelledOutput(t *testing.T) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	t.Cleanup(server.Close)
-	discord := NewDiscord("discord", "BQCKUP_DISCORD_WEBHOOK_URL", func(string) (string, bool) { return server.URL, true })
+	discord := NewDiscord("discord", server.URL)
 	require.NoError(t, discord.Send(context.Background(), payload))
 	raw, err := json.MarshalIndent(embed, "", "  ")
 	require.NoError(t, err)
@@ -138,7 +138,7 @@ func TestSampleNoChangeOutput(t *testing.T) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	t.Cleanup(server.Close)
-	discord := NewDiscord("discord", "BQCKUP_DISCORD_WEBHOOK_URL", func(string) (string, bool) { return server.URL, true })
+	discord := NewDiscord("discord", server.URL)
 	require.NoError(t, discord.Send(context.Background(), payload))
 	raw, err := json.MarshalIndent(embed, "", "  ")
 	require.NoError(t, err)
@@ -153,6 +153,9 @@ func TestSampleNoChangeOutput(t *testing.T) {
 
 func sendLiveNotification(t *testing.T, input backup.NotifyInput) {
 	t.Helper()
+	if os.Getenv("BQCKUP_RUN_LIVE_NOTIFICATION_TESTS") != "1" {
+		t.Skip("set BQCKUP_RUN_LIVE_NOTIFICATION_TESTS=1 to send live notifications")
+	}
 	ctx := context.Background()
 
 	configDir := os.Getenv("BQCKUP_CONFIG_DIR")
@@ -178,11 +181,11 @@ func sendLiveNotification(t *testing.T, input backup.NotifyInput) {
 		for name, ch := range cfg.Notifications.Channels {
 			switch ch.Type {
 			case "smtp":
-				channels[name] = NewSMTP(name, ch, os.LookupEnv, nil)
+				channels[name] = NewSMTP(name, ch, nil)
 			case "webhook":
-				channels[name] = NewWebhook(name, ch.URL, os.LookupEnv)
+				channels[name] = NewWebhook(name, ch.URL)
 			case "discord":
-				channels[name] = NewDiscord(name, ch.WebhookURL, os.LookupEnv)
+				channels[name] = NewDiscord(name, ch.WebhookURL)
 			}
 		}
 
@@ -200,12 +203,12 @@ func sendLiveNotification(t *testing.T, input backup.NotifyInput) {
 	payload := NewPayload(input)
 
 	if webhookURL, ok := os.LookupEnv("BQCKUP_DISCORD_WEBHOOK_URL"); ok && webhookURL != "" {
-		discord := NewDiscord("discord", "BQCKUP_DISCORD_WEBHOOK_URL", os.LookupEnv)
+		discord := NewDiscord("discord", webhookURL)
 		require.NoError(t, discord.Send(ctx, payload))
 		t.Logf("Discord %s notification sent successfully via BQCKUP_DISCORD_WEBHOOK_URL.", input.Event)
 		delivered++
 	} else if sampleURL, ok := os.LookupEnv("BQCKUP_SAMPLE_WEBHOOK"); ok && sampleURL != "" {
-		discord := NewDiscord("discord", "BQCKUP_SAMPLE_WEBHOOK", os.LookupEnv)
+		discord := NewDiscord("discord", sampleURL)
 		require.NoError(t, discord.Send(ctx, payload))
 		t.Logf("Discord %s notification sent successfully via BQCKUP_SAMPLE_WEBHOOK.", input.Event)
 		delivered++

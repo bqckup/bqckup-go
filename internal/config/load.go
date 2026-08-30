@@ -46,6 +46,9 @@ func Load(ctx context.Context, dir string) (Config, error) {
 	if err := decode(rootPath, &root, bindRootEnvironment); err != nil {
 		return Config{}, err
 	}
+	if err := validateNotificationCredentialFile(rootPath, root.Notifications); err != nil {
+		return Config{}, err
+	}
 
 	storagePath, err := storagePath(dir)
 	if err != nil {
@@ -126,6 +129,33 @@ func Load(ctx context.Context, dir string) (Config, error) {
 		return Config{}, err
 	}
 	return cfg, nil
+}
+
+func validateNotificationCredentialFile(path string, notifications Notifications) error {
+	hasCredential := false
+	for _, channel := range notifications.Channels {
+		if channel.Username != "" || channel.Password != "" || channel.URL != "" || channel.WebhookURL != "" {
+			hasCredential = true
+			break
+		}
+	}
+	if !hasCredential {
+		return nil
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return &Error{File: path, Kind: ErrorRead, Err: err}
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return validationError(path, "notifications", "credential-bearing root file must not be a symlink")
+	}
+	if !info.Mode().IsRegular() {
+		return validationError(path, "notifications", "credential-bearing root file must be a regular file")
+	}
+	if info.Mode().Perm() != 0o600 {
+		return validationError(path, "notifications", "credential-bearing root file must have mode 0600")
+	}
+	return nil
 }
 
 func versionOrDefault(version *int) int {

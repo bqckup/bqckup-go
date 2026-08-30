@@ -19,9 +19,6 @@ func newConfigCommand(opts *options) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := appconfig.ValidateNotificationEnvironment(configuration, nil); err != nil {
-				return err
-			}
 			if opts.output == "json" {
 				return writeJSON(cmd, map[string]any{
 					"valid": true, "version": configuration.Version,

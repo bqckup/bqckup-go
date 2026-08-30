@@ -293,21 +293,21 @@ func TestBuildNotifierConstructsChannelsFromConfiguration(t *testing.T) {
 	configuration.Notifications = config.Notifications{
 		Channels: map[string]config.Channel{
 			"email":   {Type: "smtp", Host: "smtp.example.com", Port: 587, From: "bqckup@example.com", To: []string{"ops@example.com"}},
-			"webhook": {Type: "webhook", URL: "BQCKUP_WEBHOOK_URL"},
-			"discord": {Type: "discord", WebhookURL: "BQCKUP_DISCORD_WEBHOOK_URL"},
+			"webhook": {Type: "webhook", URL: "https://hooks.example.test/bqckup"},
+			"discord": {Type: "discord", WebhookURL: "https://discord.example.test/api/webhooks/1/secret"},
 		},
 		Routes: []config.Route{
 			{Events: []string{config.EventBackupFailed}, Channels: []string{"webhook"}},
 		},
 	}
 
-	notifier := buildNotifier(configuration.Notifications, os.LookupEnv)
+	notifier := buildNotifier(configuration.Notifications)
 	require.NotNil(t, notifier)
 	assert.IsType(t, &notify.Dispatcher{}, notifier)
 }
 
 func TestBuildNotifierReturnsNilWithoutNotifications(t *testing.T) {
-	assert.Nil(t, buildNotifier(config.Notifications{}, os.LookupEnv))
+	assert.Nil(t, buildNotifier(config.Notifications{}))
 }
 
 func TestOpenDeliversBackupFailedThroughConfiguredWebhook(t *testing.T) {
@@ -317,8 +317,6 @@ func TestOpenDeliversBackupFailedThroughConfiguredWebhook(t *testing.T) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	t.Cleanup(server.Close)
-	t.Setenv("BQCKUP_WEBHOOK_URL", server.URL)
-
 	configDir, _ := writeApplicationConfig(t)
 	rootPath := filepath.Join(configDir, "bqckup.yaml")
 	root, err := os.ReadFile(rootPath)
@@ -327,7 +325,7 @@ func TestOpenDeliversBackupFailedThroughConfiguredWebhook(t *testing.T) {
   channels:
     webhook:
       type: webhook
-      url: BQCKUP_WEBHOOK_URL
+      url: `+server.URL+`
   routes:
     - events: [backup_failed]
       channels: [webhook]

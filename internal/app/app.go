@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -85,7 +84,7 @@ func Open(ctx context.Context, configDir string) (*App, error) {
 		Storages:           configuration.Storages,
 		Retainer:           retentionAdapter{},
 		Locker:             lock.New(configuration.App.LockDirectory),
-		Notifier:           buildNotifier(configuration.Notifications, os.LookupEnv),
+		Notifier:           buildNotifier(configuration.Notifications),
 		Clock:              clock.System{},
 		TemporaryDirectory: configuration.App.TemporaryDirectory,
 	})
@@ -103,7 +102,7 @@ func Open(ctx context.Context, configDir string) (*App, error) {
 // buildNotifier constructs the notification dispatcher from the configured
 // channels and routes. A config without a notifications section yields nil,
 // which the runner treats as a no-op.
-func buildNotifier(notifications config.Notifications, lookupEnv func(string) (string, bool)) backup.Notifier {
+func buildNotifier(notifications config.Notifications) backup.Notifier {
 	if len(notifications.Channels) == 0 {
 		return nil
 	}
@@ -111,11 +110,11 @@ func buildNotifier(notifications config.Notifications, lookupEnv func(string) (s
 	for name, channel := range notifications.Channels {
 		switch channel.Type {
 		case "smtp":
-			channels[name] = notify.NewSMTP(name, channel, lookupEnv, nil)
+			channels[name] = notify.NewSMTP(name, channel, nil)
 		case "webhook":
-			channels[name] = notify.NewWebhook(name, channel.URL, lookupEnv)
+			channels[name] = notify.NewWebhook(name, channel.URL)
 		case "discord":
-			channels[name] = notify.NewDiscord(name, channel.WebhookURL, lookupEnv)
+			channels[name] = notify.NewDiscord(name, channel.WebhookURL)
 		}
 	}
 	return notify.NewDispatcher(channels, notifications.Routes)

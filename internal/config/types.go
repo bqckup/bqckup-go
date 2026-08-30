@@ -36,7 +36,8 @@ type Notifications struct {
 // Channel is one configured delivery channel. All fields share one struct;
 // validation enforces the per-type allowed field set, so fields foreign to a
 // channel type (for example host on a webhook channel) are rejected.
-// Credentials and URLs are environment-variable references only.
+// Notification credentials and URLs are literal values loaded from the
+// protected root configuration file.
 type Channel struct {
 	Type       string   `mapstructure:"type" yaml:"type"`
 	Host       string   `mapstructure:"host" yaml:"host"`

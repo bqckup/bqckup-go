@@ -121,12 +121,12 @@ subcommand with `--help` to see all available options.
 Add a `notifications:` section to `bqckup.yaml` to get an email, generic
 webhook, or Discord webhook when a run finishes. Three events exist:
 `backup_failed`, `backup_cancelled`, and `backup_no_change` (successful runs stay
-silent). Routes map events to channels; secrets and webhook URLs are
-environment-variable references only (`username`, `password`, `url`,
-`webhook_url`), never plaintext in YAML. Delivery is best effort: a failing
+silent). Routes map events to channels; SMTP credentials and webhook URLs are
+written directly as `username`, `password`, `url`, and `webhook_url`. A root
+config containing these values must be a regular file with mode `0600`. Delivery is best effort: a failing
 channel prints a warning and never changes the run result or history. Skipped
-runs and preflight failures send nothing. `bqckup config validate` reports
-notification environment variables that are not set.
+runs and preflight failures send nothing. `bqckup config validate` checks the
+notification URL format and protected file permissions.
 
 ## Scheduling
 
