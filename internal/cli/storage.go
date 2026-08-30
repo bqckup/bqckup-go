@@ -129,10 +129,13 @@ func writeLinkText(stdout, stderr io.Writer, link storage.DownloadLink) error {
 	if _, err := fmt.Fprintln(stdout, link.URL); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(stderr, "Link expires at %s.\n", link.ExpiresAt.UTC().Format(time.RFC3339)); err != nil {
+	if _, err := fmt.Fprintln(stderr, "DOWNLOAD LINK"); err != nil {
 		return err
 	}
-	_, err := fmt.Fprintln(stderr, "Anyone with this link can download the file.")
+	if _, err := fmt.Fprintf(stderr, "  Expires: %s\n", link.ExpiresAt.UTC().Format(time.RFC3339)); err != nil {
+		return err
+	}
+	_, err := fmt.Fprintln(stderr, "  Access:  anyone with this link can download the file.")
 	return err
 }
 

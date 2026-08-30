@@ -25,6 +25,7 @@ All notable changes to Bqckup are documented in this file.
 - Resolve `storage link` site names from the current
   `bqckup/<server_id>/<site>/...` object-key layout and clarify that package
   keys must be supplied with `--key`.
+- Format text download-link metadata with a clear heading and aligned labels.
 - Added global `server_id` namespacing under `bqckup/<server_id>/<site>/`.
 - Renamed internal incremental packages from `restic` to `incremental` while
   preserving official Restic repository compatibility.
