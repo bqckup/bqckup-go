@@ -22,8 +22,7 @@ const (
 var (
 	// SafeName matches names safe to use as site names, storage names,
 	// and file-system path segments.
-	SafeName     = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
-	validEnvName = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
+	SafeName = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
 )
 
 func (c Config) Validate() error {
@@ -331,12 +330,26 @@ func validateCredentialSource(field string, value Storage) (bool, error) {
 		return false, validationError("config/storages.yaml", field+".credentials.source", "source must be remote")
 	}
 	if credentials.URL == "" {
-		return false, validationError("config/storages.yaml", field+".credentials.url", "url environment variable is required")
+		return false, validationError("config/storages.yaml", field+".credentials.url", "url is required")
 	}
-	if !validEnvName.MatchString(credentials.URL) {
-		return false, validationError("config/storages.yaml", field+".credentials.url", "must be a valid environment variable name")
+	if err := validateRemoteProviderURL(field+".credentials.url", credentials.URL); err != nil {
+		return false, err
 	}
 	return true, nil
+}
+
+func validateRemoteProviderURL(field, raw string) error {
+	parsed, err := url.ParseRequestURI(raw)
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "https" && parsed.Scheme != "http") {
+		return validationError("config/storages.yaml", field, "must be an absolute HTTP(S) URL")
+	}
+	if parsed.User != nil || parsed.Fragment != "" {
+		return validationError("config/storages.yaml", field, "must not contain user information or a fragment")
+	}
+	if parsed.Scheme == "http" && !isLoopbackHost(parsed.Hostname()) {
+		return validationError("config/storages.yaml", field, "must use HTTPS unless the host is loopback")
+	}
+	return nil
 }
 
 func validateRemotePlaceholders(field string, value Storage) error {
@@ -454,9 +467,6 @@ func (c Config) validateSite(site Site, seen map[string]struct{}) error {
 	if site.BackupMode == "incremental" {
 		if site.Incremental.Password == "" {
 			return validationError(file, baseField+".incremental.password", "is required")
-		}
-		if !validEnvName.MatchString(site.Incremental.Password) {
-			return validationError(file, baseField+".incremental.password", "must be a valid environment variable name")
 		}
 	}
 	if len(site.Sources.Files.Include) == 0 {

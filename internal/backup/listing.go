@@ -3,7 +3,6 @@ package backup
 import (
 	"context"
 	"fmt"
-	"os"
 	"sort"
 	"time"
 
@@ -58,14 +57,6 @@ type Listing struct {
 type Lister struct {
 	ServerID  string
 	Snapshots SnapshotLister
-	EnvLookup func(string) (string, bool)
-}
-
-func (l *Lister) lookupEnv(key string) (string, bool) {
-	if l.EnvLookup != nil {
-		return l.EnvLookup(key)
-	}
-	return os.LookupEnv(key)
 }
 
 // List branches on the site's backup mode: full lists stored packages
@@ -142,7 +133,7 @@ func (l *Lister) listSnapshots(ctx context.Context, destination string, site con
 	if l.Snapshots == nil {
 		return Listing{}, apperror.Wrap(apperror.CategoryInternal, "incremental backup engine is unavailable", nil)
 	}
-	repo, err := buildRepoConfig(site, storageConfig, l.lookupEnv, true, l.ServerID)
+	repo, err := buildRepoConfig(site, storageConfig, true, l.ServerID)
 	if err != nil {
 		return Listing{}, apperror.Wrap(apperror.CategoryPreflight, "could not build repository configuration", err)
 	}

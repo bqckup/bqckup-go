@@ -54,7 +54,6 @@ func testConfig(t *testing.T) *config.Config {
 }
 
 func TestRunPassesOnValidConfiguration(t *testing.T) {
-	t.Setenv("TEST_RESTIC_PASS", "secret-value")
 	checker := &Checker{Cfg: testConfig(t), Runner: &fakeRunner{paths: map[string]string{}},
 		Stores: map[string]storage.Store{"local-primary": &fakeProbeStore{}}}
 
@@ -66,10 +65,10 @@ func TestRunPassesOnValidConfiguration(t *testing.T) {
 		names = append(names, check.Name)
 		assert.Equal(t, "ok", check.Status, check.Name)
 	}
-	assert.Equal(t, []string{"config", "temp_dir", "lock_dir", "state_db_dir", "engine:test-site", "secret:test-site:TEST_RESTIC_PASS", "storage:local-primary"}, names)
+	assert.Equal(t, []string{"config", "temp_dir", "lock_dir", "state_db_dir", "engine:test-site", "secret:test-site:incremental", "storage:local-primary"}, names)
 }
 
-func TestRunFailsWhenPasswordIsMissing(t *testing.T) {
+func TestRunTreatsIncrementalPasswordAsLiteralConfig(t *testing.T) {
 	_ = os.Unsetenv("UNSET_DOCTOR_PASS_VAR")
 	cfg := testConfig(t)
 	cfg.Sites[0].Incremental.Password = "UNSET_DOCTOR_PASS_VAR"
@@ -78,12 +77,11 @@ func TestRunFailsWhenPasswordIsMissing(t *testing.T) {
 
 	report, err := checker.Run(context.Background(), "")
 	require.NoError(t, err)
-	assert.False(t, report.Passed)
-	assert.Equal(t, "fail", checkStatus(report, "secret:test-site:UNSET_DOCTOR_PASS_VAR"))
+	assert.True(t, report.Passed)
+	assert.Equal(t, "ok", checkStatus(report, "secret:test-site:incremental"))
 }
 
 func TestRunBinaryChecksFollowLookPath(t *testing.T) {
-	t.Setenv("TEST_RESTIC_PASS", "secret-value")
 	cfg := testConfig(t)
 	cfg.Sites[0].BackupMode = "full"
 	cfg.Sites[0].Sources.Databases = []config.DatabaseSource{
@@ -128,7 +126,6 @@ func TestRunReportsConfigLoadFailure(t *testing.T) {
 }
 
 func TestRunValidatesSiteFilter(t *testing.T) {
-	t.Setenv("TEST_RESTIC_PASS", "secret-value")
 	cfg := testConfig(t)
 	cfg.Sites = append(cfg.Sites, config.Site{Name: "disabled-site", Enabled: false, SchemaVersion: 2})
 	checker := &Checker{Cfg: cfg, Runner: &fakeRunner{paths: map[string]string{}}}
@@ -225,7 +222,6 @@ func probeConfig(t *testing.T) *config.Config {
 
 func probeChecker(t *testing.T, cfg *config.Config) (*Checker, *fakeDBProber, *fakeDBProber, map[string]*fakeProbeStore) {
 	t.Helper()
-	t.Setenv("DOCTOR_PROBE_PASS", "secret-value")
 	mysqlProber := &fakeDBProber{}
 	postgresProber := &fakeDBProber{}
 	stores := map[string]*fakeProbeStore{
@@ -263,7 +259,7 @@ func TestRunProbesHealthyConfiguration(t *testing.T) {
 	}
 	assert.Equal(t, []string{
 		"config", "temp_dir", "lock_dir", "state_db_dir",
-		"engine:site-b", "secret:site-b:DOCTOR_PROBE_PASS",
+		"engine:site-b", "secret:site-b:incremental",
 		"binary:mysqldump", "binary:pg_dump",
 		"database:site-a:db1", "database:site-a:db2", "database:site-b:db1",
 		"storage:a-storage", "storage:m-storage", "storage:z-storage",

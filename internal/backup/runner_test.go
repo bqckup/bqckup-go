@@ -193,7 +193,6 @@ type dependencyFakes struct {
 	clock             fakeClock
 	tempRoot          string
 	databaseExporters map[string]Exporter
-	envLookup         func(string) (string, bool)
 	notifier          *fakeNotifier
 }
 
@@ -209,12 +208,6 @@ func successfulDependencies(t *testing.T) *dependencyFakes {
 		lock:        &fakeLocker{acquired: true},
 		clock:       fakeClock{now: time.Date(2026, 7, 23, 3, 45, 0, 0, time.UTC)},
 		tempRoot:    t.TempDir(),
-		envLookup: func(key string) (string, bool) {
-			if key == "RESTIC_PASSWORD" {
-				return "test-secret-password", true
-			}
-			return "", false
-		},
 	}
 }
 
@@ -237,7 +230,6 @@ func (d *dependencyFakes) dependencies() Dependencies {
 		Clock:              d.clock,
 		TemporaryDirectory: d.tempRoot,
 		DatabaseExporters:  d.databaseExporters,
-		EnvLookup:          d.envLookup,
 	}
 }
 
@@ -469,7 +461,7 @@ func TestRunnerIncrementalBackupRetainsDatabasePackages(t *testing.T) {
 
 	site := validSite()
 	site.BackupMode = "incremental"
-	site.Incremental = config.Incremental{Password: "RESTIC_PASSWORD"}
+	site.Incremental = config.Incremental{Password: "test-secret-password"}
 	site.Sources.Databases = []config.DatabaseSource{
 		{Name: "application-mysql", Enabled: true, Engine: "mysql"},
 	}
@@ -515,7 +507,7 @@ func TestRunnerIncrementalPackageRecordsSnapshotSize(t *testing.T) {
 
 	site := validSite()
 	site.BackupMode = "incremental"
-	site.Incremental = config.Incremental{Password: "RESTIC_PASSWORD"}
+	site.Incremental = config.Incremental{Password: "test-secret-password"}
 
 	result, err := runner.Run(context.Background(), site, false)
 	require.NoError(t, err)
@@ -534,7 +526,7 @@ func TestRunnerIncrementalBackupSuccess(t *testing.T) {
 	site := validSite()
 	site.BackupMode = "incremental"
 	site.Incremental = config.Incremental{
-		Password: "RESTIC_PASSWORD",
+		Password: "test-secret-password",
 	}
 
 	result, err := runner.Run(context.Background(), site, false)
@@ -553,13 +545,12 @@ func TestRunnerIncrementalBackupSuccess(t *testing.T) {
 
 func TestRunnerIncrementalBackupMissingPassword(t *testing.T) {
 	deps := successfulDependencies(t)
-	deps.envLookup = func(string) (string, bool) { return "", false }
 	runner := NewRunner(deps.dependencies())
 
 	site := validSite()
 	site.BackupMode = "incremental"
 	site.Incremental = config.Incremental{
-		Password: "UNSET_VAR",
+		Password: "",
 	}
 
 	result, err := runner.Run(context.Background(), site, false)
@@ -577,7 +568,7 @@ func TestRunnerIncrementalBackupFailureDoesNotRetain(t *testing.T) {
 	site := validSite()
 	site.BackupMode = "incremental"
 	site.Incremental = config.Incremental{
-		Password: "RESTIC_PASSWORD",
+		Password: "test-secret-password",
 	}
 
 	result, err := runner.Run(context.Background(), site, false)
@@ -598,7 +589,7 @@ func TestRunnerIncrementalFailureNotifiesCleanMessage(t *testing.T) {
 
 	site := validSite()
 	site.BackupMode = "incremental"
-	site.Incremental = config.Incremental{Password: "RESTIC_PASSWORD"}
+	site.Incremental = config.Incremental{Password: "test-secret-password"}
 
 	result, err := runner.Run(context.Background(), site, false)
 	require.Error(t, err)
@@ -1008,7 +999,7 @@ func TestRunnerIncrementalNeverClassifiesAsNoChange(t *testing.T) {
 
 	site := validSite()
 	site.BackupMode = "incremental"
-	site.Incremental = config.Incremental{Password: "RESTIC_PASSWORD"}
+	site.Incremental = config.Incremental{Password: "test-secret-password"}
 
 	anchorID := "anchor-run-1"
 	deps.repository.lastSuccessful = &history.BackupRun{

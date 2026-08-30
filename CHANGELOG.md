@@ -10,6 +10,10 @@ All notable changes to Bqckup are documented in this file.
 - Rebuild releases on every push to `main` by recreating the `v0.0.5` tag.
 - Accept notification credentials and webhook URLs directly in the protected
   root config, with strict URL checks and mandatory `0600` permissions.
+- Read incremental repository passwords and remote storage provider URLs
+  directly from protected YAML instead of resolving environment variables.
+- Make YAML values authoritative by removing environment overrides for root
+  application paths and log level.
 
 ## v0.0.4
 

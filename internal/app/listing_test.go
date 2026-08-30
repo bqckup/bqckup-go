@@ -133,8 +133,7 @@ func TestListRemoteContentsFullModeListsPackages(t *testing.T) {
 func TestListRemoteContentsIncrementalModeWiresRepositoryConfig(t *testing.T) {
 	site := remoteSite()
 	site.BackupMode = "incremental"
-	site.Incremental = config.Incremental{Password: "TEST_REPO_PASSWORD"}
-	t.Setenv("TEST_REPO_PASSWORD", "secret")
+	site.Incremental = config.Incremental{Password: "secret"}
 	snapshots := &appSnapshotLister{snapshots: []incremental.Snapshot{
 		{ID: "0123456789abcdef", Paths: []string{"/var/www"}, Size: 7, CreatedAt: time.Now()},
 	}}

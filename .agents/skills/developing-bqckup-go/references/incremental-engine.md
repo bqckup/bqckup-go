@@ -11,8 +11,8 @@ compatibility, and runner tests relevant to the request.
 
 - `backup_mode: incremental` requires `incremental.password`; there is no
   engine selector.
-- Read the repository password from the named environment variable and keep it
-  in memory. Never persist or log it.
+- Read the repository password directly from protected site YAML and keep it
+  in memory. Never log it or persist it outside that file.
 - Support local, S3, and R2 backends through the same repository semantics.
 - Repository paths are `<local directory>/restic/<site>` or the equivalent
   `<prefix>/restic/<site>` object prefix.

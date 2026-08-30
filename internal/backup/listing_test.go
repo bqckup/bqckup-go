@@ -112,15 +112,11 @@ func TestListIncrementalModeTruncatesIDsAndNewestFirst(t *testing.T) {
 		{ID: strings.Repeat("a", 64), Paths: []string{"/old"}, Size: 10, CreatedAt: older},
 		{ID: strings.Repeat("b", 64), Paths: []string{"/new", "/extra"}, Size: 20, CreatedAt: newer},
 	}}
-	envLookup := func(key string) (string, bool) {
-		assert.Equal(t, "RESTIC_PASSWORD", key)
-		return "secret", true
-	}
 	site := config.Site{
 		Name: "site-b", Enabled: true, BackupMode: "incremental",
-		Incremental: config.Incremental{Password: "RESTIC_PASSWORD"},
+		Incremental: config.Incremental{Password: "secret"},
 	}
-	lister := &Lister{Snapshots: snapshots, EnvLookup: envLookup}
+	lister := &Lister{Snapshots: snapshots}
 
 	listing, err := lister.List(context.Background(), "s3-primary", site, config.Storage{
 		Type: "s3", Bucket: "backups", Prefix: "company",
@@ -139,9 +135,9 @@ func TestListIncrementalModeTruncatesIDsAndNewestFirst(t *testing.T) {
 func TestListIncrementalRequiresPassword(t *testing.T) {
 	site := config.Site{
 		Name: "site-b", Enabled: true, BackupMode: "incremental",
-		Incremental: config.Incremental{Password: "MISSING_PASSWORD_ENV"},
+		Incremental: config.Incremental{Password: ""},
 	}
-	lister := &Lister{Snapshots: &fakeSnapshotLister{}, EnvLookup: func(string) (string, bool) { return "", false }}
+	lister := &Lister{Snapshots: &fakeSnapshotLister{}}
 
 	_, err := lister.List(context.Background(), "s3-primary", site, config.Storage{Type: "s3", Bucket: "backups"}, &fakeRemoteLister{})
 	require.Error(t, err)
@@ -179,7 +175,7 @@ func TestListRejectsUnknownBackupMode(t *testing.T) {
 func incrementalSite() config.Site {
 	return config.Site{
 		Name: "site-b", Enabled: true, BackupMode: "incremental",
-		Incremental: config.Incremental{Password: "RESTIC_PASSWORD"},
+		Incremental: config.Incremental{Password: "secret"},
 	}
 }
 
@@ -187,11 +183,7 @@ func TestListSiteSnapshotsLocalDestinationSucceeds(t *testing.T) {
 	snapshots := &fakeSnapshotLister{snapshots: []incremental.Snapshot{
 		{ID: strings.Repeat("a", 64), Paths: []string{"/old"}, Size: 10, CreatedAt: time.Date(2026, 12, 10, 6, 0, 0, 0, time.UTC)},
 	}}
-	envLookup := func(key string) (string, bool) {
-		assert.Equal(t, "RESTIC_PASSWORD", key)
-		return "secret", true
-	}
-	lister := &Lister{Snapshots: snapshots, EnvLookup: envLookup}
+	lister := &Lister{Snapshots: snapshots}
 
 	listing, err := lister.ListSiteSnapshots(context.Background(), "local-primary", incrementalSite(), config.Storage{Type: "local", Directory: "/srv/repos"})
 	require.NoError(t, err)
@@ -221,8 +213,8 @@ func TestListSiteSnapshotsRejectsUnknownMode(t *testing.T) {
 
 func TestListSiteSnapshotsRequiresPassword(t *testing.T) {
 	site := incrementalSite()
-	site.Incremental.Password = "MISSING_PASSWORD_ENV"
-	lister := &Lister{Snapshots: &fakeSnapshotLister{}, EnvLookup: func(string) (string, bool) { return "", false }}
+	site.Incremental.Password = ""
+	lister := &Lister{Snapshots: &fakeSnapshotLister{}}
 
 	_, err := lister.ListSiteSnapshots(context.Background(), "local-primary", site, config.Storage{Type: "local", Directory: "/srv/repos"})
 	require.Error(t, err)
@@ -231,7 +223,7 @@ func TestListSiteSnapshotsRequiresPassword(t *testing.T) {
 
 func TestListSiteSnapshotsKeepsEngineFailureRedacted(t *testing.T) {
 	cause := errors.New("endpoint secret leaked here")
-	lister := &Lister{Snapshots: &fakeSnapshotLister{err: apperror.Hide("engine failure", cause)}, EnvLookup: func(string) (string, bool) { return "secret", true }}
+	lister := &Lister{Snapshots: &fakeSnapshotLister{err: apperror.Hide("engine failure", cause)}}
 
 	_, err := lister.ListSiteSnapshots(context.Background(), "local-primary", incrementalSite(), config.Storage{Type: "local", Directory: "/srv/repos"})
 	require.Error(t, err)

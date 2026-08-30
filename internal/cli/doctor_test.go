@@ -13,7 +13,7 @@ import (
 )
 
 func TestDoctorCommand(t *testing.T) {
-	t.Run("passes on valid configuration and available secrets", func(t *testing.T) {
+	t.Run("passes with password in protected site config", func(t *testing.T) {
 		tempDir := t.TempDir()
 		sourceDir := filepath.Join(tempDir, "source")
 		backupDir := filepath.Join(tempDir, "backups")
@@ -26,7 +26,7 @@ site:
   enabled: true
   backup_mode: incremental
   incremental:
-    password: TEST_RESTIC_PASS
+    password: my-secret-password
   sources:
     files:
       include:
@@ -50,8 +50,6 @@ app:
     directory: %s
 `, backupDir), siteYAML)
 
-		t.Setenv("TEST_RESTIC_PASS", "my-secret-password")
-
 		var stdout, stderr bytes.Buffer
 		root := NewRoot(buildinfo.Info{})
 		root.SetOut(&stdout)
@@ -60,10 +58,10 @@ app:
 
 		_ = root.Execute()
 		assert.Contains(t, stdout.String(), `"name":"config"`)
-		assert.Contains(t, stdout.String(), `"secret:test-site:TEST_RESTIC_PASS"`)
+		assert.Contains(t, stdout.String(), `"secret:test-site:incremental"`)
 	})
 
-	t.Run("fails when password is missing for incremental site", func(t *testing.T) {
+	t.Run("does not interpret password as environment variable", func(t *testing.T) {
 		tempDir := t.TempDir()
 		sourceDir := filepath.Join(tempDir, "source")
 		backupDir := filepath.Join(tempDir, "backups")
@@ -108,10 +106,8 @@ app:
 		root.SetErr(&stderr)
 		root.SetArgs([]string{"doctor", "--config-dir", tempDir})
 
-		err := root.Execute()
-		require.Error(t, err)
-		assert.Contains(t, stdout.String(), "[✗]")
-		assert.Contains(t, stdout.String(), "secret:test-site:UNSET_DOCTOR_PASS_VAR")
+		require.NoError(t, root.Execute())
+		assert.Contains(t, stdout.String(), "[✓] secret:test-site:incremental")
 	})
 }
 
@@ -326,7 +322,7 @@ app:
     type: s3
     credentials:
       source: remote
-      url: BQCKUP_DOCTOR_URL
+      url: https://127.0.0.1:1/storage
 `, fmt.Sprintf(`version: 2
 site:
   name: test-site
@@ -340,8 +336,6 @@ site:
     minimum_interval: 24h
     keep_last: 7
 `, sourceDir))
-
-	t.Setenv("BQCKUP_DOCTOR_URL", "") // empty → resolver fails without dialing
 
 	var stdout, stderr bytes.Buffer
 	root := NewRoot(buildinfo.Info{})

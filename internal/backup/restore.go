@@ -34,14 +34,6 @@ type Restorer struct {
 	ServerID  string
 	Snapshots SnapshotLister
 	Engine    SnapshotRestorer
-	EnvLookup func(string) (string, bool)
-}
-
-func (r *Restorer) lookupEnv(key string) (string, bool) {
-	if r.EnvLookup != nil {
-		return r.EnvLookup(key)
-	}
-	return os.LookupEnv(key)
 }
 
 // RestoreSiteSnapshot restores the configured file paths of one snapshot
@@ -60,7 +52,7 @@ func (r *Restorer) RestoreSiteSnapshot(ctx context.Context, destination string, 
 	if r.Snapshots == nil || r.Engine == nil {
 		return RestoreResult{}, apperror.Wrap(apperror.CategoryInternal, "incremental backup engine is unavailable", nil)
 	}
-	repo, err := buildRepoConfig(site, storageConfig, r.lookupEnv, true, r.ServerID)
+	repo, err := buildRepoConfig(site, storageConfig, true, r.ServerID)
 	if err != nil {
 		return RestoreResult{}, apperror.Wrap(apperror.CategoryPreflight, "could not build repository configuration", err)
 	}

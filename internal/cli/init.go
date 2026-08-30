@@ -41,6 +41,10 @@ func initializeConfig(directory string) error {
 		filepath.Join(directory, "sites", "example.yaml"): `site:
   name: example
   enabled: false
+  # For incremental backups, uncomment these fields and keep this file at 0600.
+  # backup_mode: incremental
+  # incremental:
+  #   password: replace-with-a-strong-repository-password
   sources:
     files:
       include:

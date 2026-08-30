@@ -21,12 +21,10 @@ func TestResolverLoadsRemoteStorageConfigurationIntoMemory(t *testing.T) {
 		_, _ = w.Write([]byte(`{"bucket":"remote-bucket","access_key_id":"remote-key","secret_access_key":"remote-secret","endpoint":"https://objects.example.invalid","region":"us-east-1"}`))
 	}))
 	t.Cleanup(server.Close)
-	t.Setenv("BQCKUP_REMOTE_URL", server.URL)
-
 	resolved, err := New().Resolve(context.Background(), map[string]config.Storage{
 		"remote": {
 			Type: "s3", Prefix: "tenant", Primary: true,
-			Credentials: config.StorageCredentials{Source: "remote", URL: "BQCKUP_REMOTE_URL"},
+			Credentials: config.StorageCredentials{Source: "remote", URL: server.URL},
 		},
 	})
 	require.NoError(t, err)
@@ -55,11 +53,10 @@ func TestResolverLeavesInlineAndLocalStoragesUnchanged(t *testing.T) {
 func TestResolverHonorsCancellation(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	t.Cleanup(server.Close)
-	t.Setenv("BQCKUP_REMOTE_URL", server.URL)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := New().Resolve(ctx, remoteStorage())
+	_, err := New().Resolve(ctx, remoteStorage(server.URL))
 	require.ErrorIs(t, err, context.Canceled)
 	assert.NotContains(t, err.Error(), server.URL)
 }
@@ -69,11 +66,10 @@ func TestResolverAppliesHTTPTimeoutWithoutLeakingURL(t *testing.T) {
 		<-request.Context().Done()
 	}))
 	t.Cleanup(server.Close)
-	t.Setenv("BQCKUP_REMOTE_URL", server.URL)
 	resolver := New()
 	resolver.client.Timeout = time.Millisecond
 
-	_, err := resolver.Resolve(context.Background(), remoteStorage())
+	_, err := resolver.Resolve(context.Background(), remoteStorage(server.URL))
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 	assert.Equal(t, "remote storage configuration request canceled", err.Error())
 	assert.NotContains(t, err.Error(), server.URL)
@@ -84,14 +80,13 @@ func TestResolverRejectsUnsafeOrUnavailableProviderWithoutLeakingIt(t *testing.T
 		name string
 		url  string
 	}{
-		{name: "missing environment", url: ""},
+		{name: "empty URL", url: ""},
 		{name: "non HTTPS remote", url: "http://provider.example.invalid/credentials?token=leaked"},
 		{name: "URL user information", url: "https://user:password@provider.example.invalid/credentials"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			t.Setenv("BQCKUP_REMOTE_URL", test.url)
-			_, err := New().Resolve(context.Background(), remoteStorage())
+			_, err := New().Resolve(context.Background(), remoteStorage(test.url))
 			require.Error(t, err)
 			assert.Equal(t, "remote storage configuration is unavailable", err.Error())
 			if test.url != "" {
@@ -119,9 +114,7 @@ func TestResolverRedactsProviderFailuresAndRejectsInvalidBodies(t *testing.T) {
 				_, _ = w.Write([]byte(test.body))
 			}))
 			t.Cleanup(server.Close)
-			t.Setenv("BQCKUP_REMOTE_URL", server.URL)
-
-			_, err := New().Resolve(context.Background(), remoteStorage())
+			_, err := New().Resolve(context.Background(), remoteStorage(server.URL))
 			require.Error(t, err)
 			assert.Equal(t, "remote storage configuration is unavailable", err.Error())
 			assert.NotContains(t, err.Error(), server.URL)
@@ -131,8 +124,8 @@ func TestResolverRedactsProviderFailuresAndRejectsInvalidBodies(t *testing.T) {
 	}
 }
 
-func remoteStorage() map[string]config.Storage {
+func remoteStorage(providerURL string) map[string]config.Storage {
 	return map[string]config.Storage{
-		"remote": {Type: "s3", Credentials: config.StorageCredentials{Source: "remote", URL: "BQCKUP_REMOTE_URL"}},
+		"remote": {Type: "s3", Credentials: config.StorageCredentials{Source: "remote", URL: providerURL}},
 	}
 }

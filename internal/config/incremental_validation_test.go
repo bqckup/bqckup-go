@@ -1,6 +1,8 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -24,7 +26,7 @@ func TestValidateIncrementalBackupMode(t *testing.T) {
 		cfg := validConfig(t)
 		cfg.Sites[0].BackupMode = "incremental"
 		cfg.Sites[0].Incremental = Incremental{
-			Password: "RESTIC_PASSWORD",
+			Password: "test-secret-password",
 		}
 		require.NoError(t, cfg.Validate())
 	})
@@ -48,16 +50,13 @@ func TestValidateIncrementalBackupMode(t *testing.T) {
 		assert.Contains(t, err.Error(), "is required")
 	})
 
-	t.Run("rejects incremental mode with invalid password name", func(t *testing.T) {
+	t.Run("accepts literal password characters", func(t *testing.T) {
 		cfg := validConfig(t)
 		cfg.Sites[0].BackupMode = "incremental"
 		cfg.Sites[0].Incremental = Incremental{
-			Password: "invalid-env-name!",
+			Password: "correct horse battery staple!",
 		}
-		err := cfg.Validate()
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "incremental.password")
-		assert.Contains(t, err.Error(), "valid environment variable name")
+		require.NoError(t, cfg.Validate())
 	})
 }
 
@@ -68,7 +67,7 @@ site:
   enabled: true
   backup_mode: incremental
   incremental:
-    password: RESTIC_PASSWORD
+    password: "test-secret-password"
   sources:
     files:
       include:
@@ -94,7 +93,32 @@ app:
 	require.NoError(t, err)
 	require.Len(t, cfg.Sites, 1)
 	assert.Equal(t, "incremental", cfg.Sites[0].BackupMode)
-	assert.Equal(t, "RESTIC_PASSWORD", cfg.Sites[0].Incremental.Password)
+	assert.Equal(t, "test-secret-password", cfg.Sites[0].Incremental.Password)
+}
+
+func TestLoadRequires0600ForIncrementalPassword(t *testing.T) {
+	dir := writeConfigTree(t, `app:
+  state_database: data/bqckup.db
+  temporary_directory: tmp
+  lock_directory: locks
+`, localStorageYAML, `site:
+  name: example
+  enabled: true
+  backup_mode: incremental
+  incremental:
+    password: "literal-secret"
+  sources:
+    files:
+      include: [/var/www/html]
+  destinations:
+    - storage: local-primary
+`)
+	sitePath := filepath.Join(dir, "sites", "example.yaml")
+	require.NoError(t, os.Chmod(sitePath, 0o644))
+
+	_, err := Load(t.Context(), dir)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "credential-bearing site file must have mode 0600")
 }
 
 func TestLoadRejectsRemovedIncrementalEngineField(t *testing.T) {
@@ -105,7 +129,7 @@ site:
   backup_mode: incremental
   incremental:
     engine: restic
-    password: RESTIC_PASSWORD
+    password: "test-secret-password"
   sources:
     files:
       include:

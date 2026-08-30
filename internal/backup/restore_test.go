@@ -36,17 +36,8 @@ func taggedSnapshot(id, tag string, createdAt time.Time) incremental.Snapshot {
 func restoreSite() config.Site {
 	return config.Site{
 		Name: "site-b", Enabled: true, BackupMode: "incremental",
-		Incremental: config.Incremental{Password: "RESTIC_PASSWORD"},
+		Incremental: config.Incremental{Password: "secret"},
 		Sources:     config.Sources{Files: config.FileSource{Include: []string{"/srv/example/data"}}},
-	}
-}
-
-func restoreEnvLookup() func(string) (string, bool) {
-	return func(key string) (string, bool) {
-		if key == "RESTIC_PASSWORD" {
-			return "secret", true
-		}
-		return "", false
 	}
 }
 
@@ -59,7 +50,7 @@ func TestRestoreResolvesLatestBySiteTag(t *testing.T) {
 		taggedSnapshot(strings.Repeat("c", 64), "site:site-c", newer.Add(time.Hour)),
 	}}
 	engine := &fakeSnapshotRestorer{summary: incremental.RestoreSummary{SnapshotID: strings.Repeat("b", 64)}}
-	restorer := &Restorer{Snapshots: snapshots, Engine: engine, EnvLookup: restoreEnvLookup()}
+	restorer := &Restorer{Snapshots: snapshots, Engine: engine}
 
 	result, err := restorer.RestoreSiteSnapshot(context.Background(), "local-primary", "latest", "/tmp/restore", restoreSite(), config.Storage{Type: "local", Directory: "/srv/repos"}, nil)
 	require.NoError(t, err)
@@ -74,7 +65,7 @@ func TestRestoreResolvesIDPrefix(t *testing.T) {
 		taggedSnapshot(strings.Repeat("e", 64), "site:site-b", time.Date(2026, 12, 11, 6, 0, 0, 0, time.UTC)),
 	}}
 	engine := &fakeSnapshotRestorer{summary: incremental.RestoreSummary{SnapshotID: full}}
-	restorer := &Restorer{Snapshots: snapshots, Engine: engine, EnvLookup: restoreEnvLookup()}
+	restorer := &Restorer{Snapshots: snapshots, Engine: engine}
 
 	_, err := restorer.RestoreSiteSnapshot(context.Background(), "local-primary", "abcd1234", "/tmp/restore", restoreSite(), config.Storage{Type: "local", Directory: "/srv/repos"}, nil)
 	require.NoError(t, err)
@@ -85,7 +76,7 @@ func TestRestoreUnknownSnapshotFails(t *testing.T) {
 	snapshots := &fakeSnapshotLister{snapshots: []incremental.Snapshot{
 		taggedSnapshot(strings.Repeat("a", 64), "site:site-b", time.Date(2026, 12, 10, 6, 0, 0, 0, time.UTC)),
 	}}
-	restorer := &Restorer{Snapshots: snapshots, Engine: &fakeSnapshotRestorer{}, EnvLookup: restoreEnvLookup()}
+	restorer := &Restorer{Snapshots: snapshots, Engine: &fakeSnapshotRestorer{}}
 
 	_, err := restorer.RestoreSiteSnapshot(context.Background(), "local-primary", "ffff", "/tmp/restore", restoreSite(), config.Storage{Type: "local", Directory: "/srv/repos"}, nil)
 	require.Error(t, err)
@@ -97,7 +88,7 @@ func TestRestoreAmbiguousPrefixFails(t *testing.T) {
 		taggedSnapshot(strings.Repeat("a", 64), "site:site-b", time.Date(2026, 12, 10, 6, 0, 0, 0, time.UTC)),
 		taggedSnapshot("aaaa"+strings.Repeat("b", 60), "site:site-b", time.Date(2026, 12, 11, 6, 0, 0, 0, time.UTC)),
 	}}
-	restorer := &Restorer{Snapshots: snapshots, Engine: &fakeSnapshotRestorer{}, EnvLookup: restoreEnvLookup()}
+	restorer := &Restorer{Snapshots: snapshots, Engine: &fakeSnapshotRestorer{}}
 
 	_, err := restorer.RestoreSiteSnapshot(context.Background(), "local-primary", "aaaa", "/tmp/restore", restoreSite(), config.Storage{Type: "local", Directory: "/srv/repos"}, nil)
 	require.Error(t, err)
@@ -114,8 +105,8 @@ func TestRestoreRejectsFullMode(t *testing.T) {
 
 func TestRestoreRequiresPassword(t *testing.T) {
 	site := restoreSite()
-	site.Incremental.Password = "MISSING_PASSWORD_ENV"
-	restorer := &Restorer{Snapshots: &fakeSnapshotLister{}, Engine: &fakeSnapshotRestorer{}, EnvLookup: func(string) (string, bool) { return "", false }}
+	site.Incremental.Password = ""
+	restorer := &Restorer{Snapshots: &fakeSnapshotLister{}, Engine: &fakeSnapshotRestorer{}}
 
 	_, err := restorer.RestoreSiteSnapshot(context.Background(), "local-primary", "latest", "/tmp/restore", site, config.Storage{Type: "local", Directory: "/srv/repos"}, nil)
 	require.Error(t, err)
@@ -127,7 +118,7 @@ func TestRestoreRejectsFileTarget(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, targetFile.Close())
 
-	restorer := &Restorer{Snapshots: &fakeSnapshotLister{}, Engine: &fakeSnapshotRestorer{}, EnvLookup: restoreEnvLookup()}
+	restorer := &Restorer{Snapshots: &fakeSnapshotLister{}, Engine: &fakeSnapshotRestorer{}}
 	_, err = restorer.RestoreSiteSnapshot(context.Background(), "local-primary", "latest", targetFile.Name(), restoreSite(), config.Storage{Type: "local", Directory: "/srv/repos"}, nil)
 	require.Error(t, err)
 	assert.Equal(t, apperror.CategoryPreflight, apperror.CategoryOf(err))
@@ -139,7 +130,7 @@ func TestRestorePassesConfiguredPaths(t *testing.T) {
 	}}
 	engine := &fakeSnapshotRestorer{summary: incremental.RestoreSummary{SnapshotID: strings.Repeat("a", 64)}}
 	confirm := func([]string) error { return nil }
-	restorer := &Restorer{Snapshots: snapshots, Engine: engine, EnvLookup: restoreEnvLookup()}
+	restorer := &Restorer{Snapshots: snapshots, Engine: engine}
 
 	_, err := restorer.RestoreSiteSnapshot(context.Background(), "local-primary", "latest", "/tmp/restore", restoreSite(), config.Storage{Type: "local", Directory: "/srv/repos"}, confirm)
 	require.NoError(t, err)
@@ -153,7 +144,7 @@ func TestRestorePassesConfirmErrorThrough(t *testing.T) {
 		taggedSnapshot(strings.Repeat("a", 64), "site:site-b", time.Date(2026, 12, 10, 6, 0, 0, 0, time.UTC)),
 	}}
 	engine := &fakeSnapshotRestorer{err: apperror.Wrap(apperror.CategoryCancellation, "restore cancelled by user", nil)}
-	restorer := &Restorer{Snapshots: snapshots, Engine: engine, EnvLookup: restoreEnvLookup()}
+	restorer := &Restorer{Snapshots: snapshots, Engine: engine}
 
 	_, err := restorer.RestoreSiteSnapshot(context.Background(), "local-primary", "latest", "/tmp/restore", restoreSite(), config.Storage{Type: "local", Directory: "/srv/repos"}, nil)
 	require.Error(t, err)
@@ -167,7 +158,7 @@ func TestRestoreKeepsEngineFailureRedacted(t *testing.T) {
 		taggedSnapshot(strings.Repeat("a", 64), "site:site-b", time.Date(2026, 12, 10, 6, 0, 0, 0, time.UTC)),
 	}}
 	engine := &fakeSnapshotRestorer{err: apperror.Hide("engine failure", cause)}
-	restorer := &Restorer{Snapshots: snapshots, Engine: engine, EnvLookup: restoreEnvLookup()}
+	restorer := &Restorer{Snapshots: snapshots, Engine: engine}
 
 	_, err := restorer.RestoreSiteSnapshot(context.Background(), "local-primary", "latest", "/tmp/restore", restoreSite(), config.Storage{Type: "local", Directory: "/srv/repos"}, nil)
 	require.Error(t, err)
@@ -181,7 +172,7 @@ func TestRestoreCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	engine := &fakeSnapshotRestorer{}
-	_, err := (&Restorer{Snapshots: &fakeSnapshotLister{}, Engine: engine, EnvLookup: restoreEnvLookup()}).RestoreSiteSnapshot(ctx, "local-primary", "latest", "/tmp/restore", restoreSite(), config.Storage{Type: "local"}, nil)
+	_, err := (&Restorer{Snapshots: &fakeSnapshotLister{}, Engine: engine}).RestoreSiteSnapshot(ctx, "local-primary", "latest", "/tmp/restore", restoreSite(), config.Storage{Type: "local"}, nil)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, context.Canceled)
 	assert.Empty(t, engine.snapshotID)

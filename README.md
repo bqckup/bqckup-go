@@ -97,8 +97,8 @@ compressed `.sql.gz` database dumps below
 
 Incremental mode stores encrypted, deduplicated file snapshots below
 `bqckup/<server_id>/<site>/incremental-backup/` in each destination. Set `backup_mode: incremental` and set
-`incremental.password` to the name of an environment variable containing
-the repository password. The built-in engine is always used.
+`incremental.password` directly to the repository password. Keep the site YAML
+as a regular, non-symlink file with mode `0600`. The built-in engine is always used.
 
 ## Commands
 

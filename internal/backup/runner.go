@@ -113,7 +113,6 @@ type Dependencies struct {
 	Notifier           Notifier
 	Clock              clock.Clock
 	TemporaryDirectory string
-	EnvLookup          func(string) (string, bool)
 }
 
 type Runner struct{ dependencies Dependencies }
@@ -127,24 +126,15 @@ func backupSitePrefix(siteName, serverID string) string {
 
 func NewRunner(dependencies Dependencies) *Runner { return &Runner{dependencies: dependencies} }
 
-func (r *Runner) lookupEnv(key string) (string, bool) {
-	if r.dependencies.EnvLookup != nil {
-		return r.dependencies.EnvLookup(key)
-	}
-	return os.LookupEnv(key)
-}
-
 // buildRepo constructs the engine repository configuration for one
-// destination. requirePassword mirrors the run-time rule that the
-// repository password environment variable must be set.
+// destination. requirePassword enforces a configured repository password.
 func (r *Runner) buildRepo(site config.Site, storageConfig config.Storage, requirePassword bool) (incremental.RepoConfig, error) {
-	return buildRepoConfig(site, storageConfig, r.lookupEnv, requirePassword, r.dependencies.ServerID)
+	return buildRepoConfig(site, storageConfig, requirePassword, r.dependencies.ServerID)
 }
 
 // buildRepoConfig constructs the engine repository configuration for one
-// destination. requirePassword mirrors the run-time rule that the
-// repository password environment variable must be set.
-func buildRepoConfig(site config.Site, storageConfig config.Storage, lookupEnv func(string) (string, bool), requirePassword bool, serverID ...string) (incremental.RepoConfig, error) {
+// destination from values already loaded from protected YAML files.
+func buildRepoConfig(site config.Site, storageConfig config.Storage, requirePassword bool, serverID ...string) (incremental.RepoConfig, error) {
 	server := ""
 	if len(serverID) > 0 {
 		server = serverID[0]
@@ -153,9 +143,9 @@ func buildRepoConfig(site config.Site, storageConfig config.Storage, lookupEnv f
 	if err != nil {
 		return incremental.RepoConfig{}, err
 	}
-	password, ok := lookupEnv(site.Incremental.Password)
-	if requirePassword && (!ok || password == "") {
-		return incremental.RepoConfig{}, apperror.Wrap(apperror.CategoryPreflight, fmt.Sprintf("environment variable %q for incremental repository password is not set or empty", site.Incremental.Password), nil)
+	password := site.Incremental.Password
+	if requirePassword && password == "" {
+		return incremental.RepoConfig{}, apperror.Wrap(apperror.CategoryPreflight, "incremental repository password is not configured", nil)
 	}
 	return incremental.RepoConfig{
 		URL:             repoURL,
@@ -264,9 +254,8 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 		if engine == nil {
 			return fail(apperror.Wrap(apperror.CategoryInternal, "incremental backup engine is unavailable", nil))
 		}
-		password, ok := r.lookupEnv(site.Incremental.Password)
-		if !ok || password == "" {
-			return fail(apperror.Wrap(apperror.CategoryPreflight, fmt.Sprintf("environment variable %q for incremental repository password is not set or empty", site.Incremental.Password), nil))
+		if site.Incremental.Password == "" {
+			return fail(apperror.Wrap(apperror.CategoryPreflight, "incremental repository password is not configured", nil))
 		}
 		for _, destination := range site.Destinations {
 			storageConfig, ok := r.dependencies.Storages[destination.Storage]

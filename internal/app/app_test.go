@@ -36,7 +36,7 @@ func (f fakeRemoteStorageResolver) Resolve(context.Context, map[string]config.St
 func TestResolveRemoteStorageConfigurationValidatesResolvedValues(t *testing.T) {
 	configuration := validApplicationConfig(t)
 	configuration.Storages = map[string]config.Storage{
-		"remote": {Type: "s3", Credentials: config.StorageCredentials{Source: "remote", URL: "BQCKUP_REMOTE_URL"}},
+		"remote": {Type: "s3", Credentials: config.StorageCredentials{Source: "remote", URL: "https://provider.invalid/storage"}},
 	}
 	configuration.Sites[0].Destinations = []config.Destination{{Storage: "remote"}}
 	resolvedStorage := config.Storage{
@@ -75,15 +75,14 @@ func TestOpenResolvesRemoteStorageBeforeBuildingDestinations(t *testing.T) {
 		_, _ = w.Write([]byte(`{"bucket":"remote-bucket","access_key_id":"remote-key","secret_access_key":"remote-secret","region":"us-east-1"}`))
 	}))
 	t.Cleanup(server.Close)
-	t.Setenv("BQCKUP_REMOTE_URL", server.URL)
 	configDir, _ := writeApplicationConfig(t)
-	require.NoError(t, os.WriteFile(filepath.Join(configDir, "config", "storages.yaml"), []byte(`storages:
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, "config", "storages.yaml"), fmt.Appendf(nil, `storages:
   remote:
     type: s3
     credentials:
       source: remote
-      url: BQCKUP_REMOTE_URL
-`), 0o600))
+      url: %s
+`, server.URL), 0o600))
 	sitePath := filepath.Join(configDir, "sites", "example.yaml")
 	siteBody, err := os.ReadFile(sitePath)
 	require.NoError(t, err)
@@ -241,10 +240,9 @@ func TestListSiteSnapshotsUnusedDestinationFails(t *testing.T) {
 }
 
 func TestListSiteSnapshotsSucceedsWithLocalStorageDocument(t *testing.T) {
-	t.Setenv("RESTIC_PASSWORD", "secret")
 	site := config.Site{
 		Name: "example", Enabled: true, BackupMode: "incremental",
-		Incremental:  config.Incremental{Password: "RESTIC_PASSWORD"},
+		Incremental:  config.Incremental{Password: "secret"},
 		Destinations: []config.Destination{{Storage: "local-primary"}},
 	}
 	lister := &fakeSnapshotLister{snapshots: []incremental.Snapshot{{
@@ -428,7 +426,7 @@ func (f *fakeSnapshotRestorer) RestoreSnapshot(_ context.Context, _ incremental.
 func restoreSite() config.Site {
 	return config.Site{
 		Name: "example", Enabled: true, BackupMode: "incremental",
-		Incremental:  config.Incremental{Password: "RESTIC_PASSWORD"},
+		Incremental:  config.Incremental{Password: "secret"},
 		Sources:      config.Sources{Files: config.FileSource{Include: []string{"/var/www/html"}}},
 		Destinations: []config.Destination{{Storage: "local-primary"}},
 	}
@@ -489,7 +487,6 @@ func TestRestoreUnusedDestinationFails(t *testing.T) {
 }
 
 func TestRestoreSucceedsThroughEngine(t *testing.T) {
-	t.Setenv("RESTIC_PASSWORD", "secret")
 	site := restoreSite()
 	lister := &fakeSnapshotLister{snapshots: []incremental.Snapshot{{
 		ID: strings.Repeat("a", 64), Paths: []string{"/var/www/html"}, Size: 100,

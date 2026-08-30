@@ -24,7 +24,9 @@ app:
   log_level: info
 ```
 
-Environment overrides: `BQCKUP_STATE_DATABASE`, `BQCKUP_TEMPORARY_DIRECTORY`, `BQCKUP_LOCK_DIRECTORY`, and `BQCKUP_LOG_LEVEL`.
+Values inside `bqckup.yaml` are authoritative and are not overridden by
+environment variables. `BQCKUP_CONFIG_DIR` only selects the configuration
+directory when `--config-dir` is omitted.
 
 ## Storage file
 
@@ -61,12 +63,12 @@ storages:
     primary: false
 
   # S3-compatible settings loaded from an HTTPS provider at startup.
-  # `url` names an environment variable; it is not a literal URL.
+  # `url` is the literal provider URL.
   managed-s3:
     type: s3
     credentials:
       source: remote
-      url: BQCKUP_MANAGED_S3_CREDENTIAL_URL
+      url: https://credentials.example.com/bqckup/storage
     prefix: prod-backups                         # optional local override
     primary: false
 ```
@@ -74,11 +76,10 @@ storages:
 - **Cloudflare R2**: Use `type: r2` with an HTTPS endpoint (`https://<account_id>.r2.cloudflarestorage.com`) and `region: auto`. Credentials must be dedicated **R2 API Tokens** with *Object Read & Write* permissions.
 - **AWS S3 / S3-Compatible**: Use `type: s3`. For custom endpoints (e.g. MinIO, Wasabi), set `endpoint` and standard `region`.
 - **Remote provider**: `credentials.source: remote` requires `credentials.url`
-  to contain a valid environment-variable name. That variable must hold an
-  absolute HTTPS URL. Remote credentials cannot be mixed with `bucket`,
+  to contain an absolute HTTPS URL directly. Remote credentials cannot be mixed with `bucket`,
   `access_key_id`, `secret_access_key`, `region`, or `endpoint` in YAML.
   `prefix` and `primary` remain local settings.
-- **Security**: Keep storage files containing inline credentials as regular
+- **Security**: Keep storage files containing inline credentials or provider URLs as regular
   non-symlink files with mode `0600`. A remote provider response is retained
   only in process memory and is never written back to YAML, logs, history, or
   command output.
@@ -119,9 +120,9 @@ site:
   # backup_mode accepts 'full' (default) or 'incremental'
   backup_mode: incremental
   incremental:
-    # Name of the environment variable containing the repository password.
+    # Literal repository password; protect this file with mode 0600.
     # Incremental backup always uses Bqckup's built-in pure-Go engine.
-    password: RESTIC_PASSWORD
+    password: replace-with-a-strong-repository-password
   sources:
     files:
       include:
@@ -147,7 +148,7 @@ site:
 ```
 
 - **Backup Mode**: `backup_mode` defaults to `full` (`.tar.gz` archive). When set to `incremental`, Bqckup's built-in pure-Go engine creates Restic-format-v2 deduplicated file snapshots; no external Restic executable is required.
-- **Incremental Password**: `incremental.password` references the runtime environment variable holding the repository encryption password (plaintext passwords in YAML are strictly rejected).
+- **Incremental Password**: `incremental.password` contains the repository encryption password directly. The site file must be a regular, non-symlink file with exact mode `0600`; the value is never logged or printed.
 - **File Excludes**: `sources.files.exclude` accepts absolute paths or glob patterns relative to each include root. Basename globs such as `*.tmp` match at any depth; use a trailing `/**`, for example `cache/**`, to exclude a directory recursively. These semantics are shared by full and incremental backups.
 - **Removed field**: `incremental.engine` is no longer accepted. Remove it from existing site files. Restic format-v1 repositories must be migrated to format v2 separately before use.
 - **Database engines**: `mysql` and `postgres`. MySQL/MariaDB uses `mysqldump`; PostgreSQL uses `pg_dump`. Passwords are passed through `MYSQL_PWD` or `PGPASSWORD`. A password-bearing site file must be a regular file with mode `0600`.
