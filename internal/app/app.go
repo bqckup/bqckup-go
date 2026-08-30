@@ -237,6 +237,7 @@ type BackupRunProgress struct {
 	BackupMode   string
 	Destinations []string
 	Result       *backup.RunResult
+	Error        error
 }
 
 type BackupRunObserver func(BackupRunProgress)
@@ -268,6 +269,7 @@ func (a *App) RunEnabledBackups(ctx context.Context, force bool, observer Backup
 		result, err := a.RunBackup(ctx, site.Name, force)
 		if observer != nil {
 			progress.Result = &result
+			progress.Error = err
 			observer(progress)
 		}
 		results = append(results, result)

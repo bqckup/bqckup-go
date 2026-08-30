@@ -155,6 +155,9 @@ func newBackupCommand(opts *options) *cobra.Command {
 							heartbeat = nil
 						}
 						progressErr = writeRunResultText(cmd.OutOrStdout(), *progress.Result)
+						if progressErr == nil && progress.Error != nil {
+							_, progressErr = fmt.Fprintf(cmd.ErrOrStderr(), "  Reason: %s\n", formatErrorMessage(progress.Error))
+						}
 					}
 				}
 				results, runErr := application.RunEnabledBackups(cmd.Context(), force, observer)
@@ -166,7 +169,10 @@ func newBackupCommand(opts *options) *cobra.Command {
 						return err
 					}
 				}
-				return runErr
+				if runErr != nil {
+					return apperror.Wrap(apperror.CategoryOf(runErr), "one or more backups failed", nil)
+				}
+				return nil
 			})
 		},
 	}
