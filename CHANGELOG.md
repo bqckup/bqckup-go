@@ -36,7 +36,8 @@ All notable changes to Bqckup are documented in this file.
 - Let the converter auto-detect `/etc/bqckup_old` as input and `/etc/bqckup`
   as output when no paths are supplied.
 - Detect legacy files still located in `/etc/bqckup` and use
-  `/etc/bqckup-v2` as a safe automatic output directory.
+  `/etc/bqckup_old` as the preserved source before writing the converted
+  config back to `/etc/bqckup`.
 - Document the migration layout using `/etc/bqckup_old` as the preserved
   legacy tree and `/etc/bqckup` as the generated active tree.
 - Show each batch failure beside its site and replace the duplicated trailing

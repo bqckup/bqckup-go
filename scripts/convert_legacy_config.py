@@ -119,7 +119,15 @@ def legacy_site(document: dict[str, Any], warnings: list[str]) -> dict[str, Any]
 
 
 def convert(args: argparse.Namespace) -> int:
-    source, target = resolve_paths(args)
+    source, target, relocate_legacy = resolve_paths(args)
+    if relocate_legacy:
+        legacy_backup = Path("/etc/bqckup_old")
+        if legacy_backup.exists():
+            print(f"error: cannot preserve legacy config; {legacy_backup} already exists", file=sys.stderr)
+            return 2
+        source.rename(legacy_backup)
+        source = legacy_backup
+        print(f"moved legacy config to {legacy_backup}")
     if not source.is_dir():
         print(f"error: input directory does not exist: {source}", file=sys.stderr)
         return 2
@@ -201,21 +209,23 @@ def convert(args: argparse.Namespace) -> int:
     return 0
 
 
-def resolve_paths(args: argparse.Namespace) -> tuple[Path, Path]:
+def resolve_paths(args: argparse.Namespace) -> tuple[Path, Path, bool]:
     if args.input_dir:
         source = Path(args.input_dir).resolve()
     else:
         legacy_default = Path("/etc/bqckup_old")
         active_default = Path("/etc/bqckup")
+        relocate_legacy = False
         if is_legacy_tree(legacy_default):
             source = legacy_default.resolve()
             default_target = active_default.resolve()
         elif is_legacy_tree(active_default):
             source = active_default.resolve()
-            default_target = Path("/etc/bqckup-v2").resolve()
+            default_target = active_default.resolve()
+            relocate_legacy = True
             print(
-                "warning: legacy config is still in /etc/bqckup; "
-                "writing converted config to /etc/bqckup-v2",
+                "legacy config detected in /etc/bqckup; it will be moved to "
+                "/etc/bqckup_old before conversion",
                 file=sys.stderr,
             )
         else:
@@ -225,19 +235,19 @@ def resolve_paths(args: argparse.Namespace) -> tuple[Path, Path]:
             target = Path(args.output_dir).resolve()
         else:
             target = default_target
-            if target.exists():
+            if target.exists() and not relocate_legacy:
                 print(
                     f"error: active config already exists at {target}; "
                     "pass --force to replace it or use --output-dir",
                     file=sys.stderr,
                 )
                 raise SystemExit(2)
-        return source, target
+        return source, target, relocate_legacy
     target = Path(args.output_dir or "/etc/bqckup").resolve()
     if source == target:
         print("error: input and output directories must be different", file=sys.stderr)
         raise SystemExit(2)
-    return source, target
+    return source, target, False
 
 
 def is_legacy_tree(directory: Path) -> bool:

@@ -102,9 +102,10 @@ sudo bqckup --config-dir /etc/bqckup config validate
 ```
 
 Without arguments, the converter prefers legacy files in `/etc/bqckup_old` and
-writes `/etc/bqckup`. If legacy files are still in `/etc/bqckup`, it detects
-that layout and writes safely to `/etc/bqckup-v2`. A current schema-v2 tree is
-not treated as legacy. Use `--input-dir` and `--output-dir` for another layout.
+writes `/etc/bqckup`. If legacy files are still in `/etc/bqckup`, it first
+moves them to `/etc/bqckup_old`, then writes the converted config back to
+`/etc/bqckup`. A current schema-v2 tree is not treated as legacy. Use
+`--input-dir` and `--output-dir` for another layout.
 
 The converter does not modify the legacy tree or print credentials. Review
 warnings—especially undefined legacy destinations such as `dummy`—before
