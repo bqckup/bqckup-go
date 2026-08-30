@@ -300,9 +300,11 @@ Ignore `minimum_interval` for one run:
 bqckup backup run website --force
 ```
 
-Text output immediately shows which site and backup mode are running, then
-prints that site's result when it finishes. `--output json` suppresses these
-progress lines so stdout remains valid machine-readable JSON.
+Text output immediately shows which site and backup mode are running, shows a
+loading spinner in an interactive terminal (or a heartbeat every five seconds
+when redirected), then prints that site's result when it finishes. `--output
+json` suppresses these progress lines so stdout remains valid machine-readable
+JSON.
 
 List recent history:
 

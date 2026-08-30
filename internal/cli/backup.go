@@ -112,15 +112,21 @@ func newBackupCommand(opts *options) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return withApplication(cmd, opts.configDir, func(application *app.App) error {
 				if len(args) == 1 {
+					var heartbeat *backupProgressHeartbeat
 					if opts.output != "json" {
 						site, ok := application.Configuration().Site(args[0])
 						if ok {
-							if err := writeBackupStartText(cmd.ErrOrStderr(), backupProgressForSite(site)); err != nil {
+							progress := backupProgressForSite(site)
+							if err := writeBackupStartText(cmd.ErrOrStderr(), progress); err != nil {
 								return err
 							}
+							heartbeat = startBackupProgressHeartbeat(cmd.ErrOrStderr(), progress.SiteName)
 						}
 					}
 					result, err := application.RunBackup(cmd.Context(), args[0], force)
+					if heartbeat != nil {
+						heartbeat.Stop()
+					}
 					if err != nil {
 						return err
 					}
@@ -141,6 +147,7 @@ func newBackupCommand(opts *options) *cobra.Command {
 
 				var progressErr error
 				var observer app.BackupRunObserver
+				var heartbeat *backupProgressHeartbeat
 				if opts.output != "json" {
 					observer = func(progress app.BackupRunProgress) {
 						if progressErr != nil {
@@ -148,7 +155,14 @@ func newBackupCommand(opts *options) *cobra.Command {
 						}
 						if progress.Result == nil {
 							progressErr = writeBackupStartText(cmd.ErrOrStderr(), progress)
+							if progressErr == nil {
+								heartbeat = startBackupProgressHeartbeat(cmd.ErrOrStderr(), progress.SiteName)
+							}
 							return
+						}
+						if heartbeat != nil {
+							heartbeat.Stop()
+							heartbeat = nil
 						}
 						progressErr = writeRunResultText(cmd.OutOrStdout(), *progress.Result)
 					}
@@ -306,6 +320,51 @@ func writeBackupStartText(out io.Writer, progress app.BackupRunProgress) error {
 	destinations := strings.Join(progress.Destinations, ", ")
 	_, err := fmt.Fprintf(out, "[→] backup:%s: starting %s backup to %s\n", progress.SiteName, mode, destinations)
 	return err
+}
+
+type backupProgressHeartbeat struct {
+	stop     chan struct{}
+	done     chan struct{}
+	terminal bool
+}
+
+func startBackupProgressHeartbeat(out io.Writer, siteName string) *backupProgressHeartbeat {
+	heartbeat := &backupProgressHeartbeat{stop: make(chan struct{}), done: make(chan struct{}), terminal: isTerminalWriter(out)}
+	go func() {
+		defer close(heartbeat.done)
+		interval := 5 * time.Second
+		if heartbeat.terminal {
+			interval = 250 * time.Millisecond
+		}
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		started := time.Now()
+		frame := 0
+		for {
+			select {
+			case <-ticker.C:
+				elapsed := time.Since(started).Round(time.Second)
+				if heartbeat.terminal {
+					frames := "|/-\\"
+					_, _ = fmt.Fprintf(out, "\r[%c] backup:%s: running (%s elapsed)", frames[frame%len(frames)], siteName, elapsed)
+					frame++
+				} else {
+					_, _ = fmt.Fprintf(out, "[⋯] backup:%s: still running (%s elapsed)\n", siteName, elapsed)
+				}
+			case <-heartbeat.stop:
+				if heartbeat.terminal {
+					_, _ = fmt.Fprint(out, "\r\033[2K\n")
+				}
+				return
+			}
+		}
+	}()
+	return heartbeat
+}
+
+func (h *backupProgressHeartbeat) Stop() {
+	close(h.stop)
+	<-h.done
 }
 
 // resticRestoreOverwrite implements the engine's conflict confirmation: it

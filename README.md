@@ -115,8 +115,9 @@ bqckup version
 
 Use `--output json` for machine-readable output. Run `bqckup --help` or any
 subcommand with `--help` to see all available options. In text mode,
-`backup run` reports each site as soon as it starts and prints its result as
-soon as it finishes; JSON mode suppresses progress text.
+`backup run` reports each site as soon as it starts, shows a loading spinner in
+an interactive terminal (or a five-second heartbeat when redirected), and
+prints its result as soon as it finishes; JSON mode suppresses progress text.
 
 ## Notifications
 
