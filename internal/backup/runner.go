@@ -153,9 +153,9 @@ func buildRepoConfig(site config.Site, storageConfig config.Storage, lookupEnv f
 	if err != nil {
 		return incremental.RepoConfig{}, err
 	}
-	password, ok := lookupEnv(site.Incremental.PasswordEnv)
+	password, ok := lookupEnv(site.Incremental.Password)
 	if requirePassword && (!ok || password == "") {
-		return incremental.RepoConfig{}, apperror.Wrap(apperror.CategoryPreflight, fmt.Sprintf("environment variable %q for incremental repository password is not set or empty", site.Incremental.PasswordEnv), nil)
+		return incremental.RepoConfig{}, apperror.Wrap(apperror.CategoryPreflight, fmt.Sprintf("environment variable %q for incremental repository password is not set or empty", site.Incremental.Password), nil)
 	}
 	return incremental.RepoConfig{
 		URL:             repoURL,
@@ -264,9 +264,9 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 		if engine == nil {
 			return fail(apperror.Wrap(apperror.CategoryInternal, "incremental backup engine is unavailable", nil))
 		}
-		password, ok := r.lookupEnv(site.Incremental.PasswordEnv)
+		password, ok := r.lookupEnv(site.Incremental.Password)
 		if !ok || password == "" {
-			return fail(apperror.Wrap(apperror.CategoryPreflight, fmt.Sprintf("environment variable %q for incremental repository password is not set or empty", site.Incremental.PasswordEnv), nil))
+			return fail(apperror.Wrap(apperror.CategoryPreflight, fmt.Sprintf("environment variable %q for incremental repository password is not set or empty", site.Incremental.Password), nil))
 		}
 		for _, destination := range site.Destinations {
 			storageConfig, ok := r.dependencies.Storages[destination.Storage]

@@ -27,7 +27,7 @@ site:
   enabled: true
   backup_mode: incremental
   incremental:
-    password_env: `+passwordEnv+`
+    password: `+passwordEnv+`
   sources:
     files:
       include: [/srv/example/data]
@@ -69,7 +69,7 @@ func TestBackupSnapshotsFullModeSiteFails(t *testing.T) {
 	assert.Contains(t, message, "--details")
 }
 
-func TestBackupSnapshotsMissingPasswordEnvFails(t *testing.T) {
+func TestBackupSnapshotsMissingPasswordFails(t *testing.T) {
 	configDir, _ := writeCLIConfig(t)
 	writeIncrementalSiteConfig(t, configDir, "MISSING_PASSWORD_ENV")
 	root, _, _ := commandForTest(t, "--config-dir", configDir, "backup", "snapshots", "site-b", "--destination", "local-primary")
@@ -129,7 +129,7 @@ func TestRestoreFullModeSiteFails(t *testing.T) {
 	assert.Contains(t, message, "--details")
 }
 
-func TestRestoreMissingPasswordEnvFails(t *testing.T) {
+func TestRestoreMissingPasswordFails(t *testing.T) {
 	configDir, _ := writeCLIConfig(t)
 	writeIncrementalSiteConfig(t, configDir, "MISSING_PASSWORD_ENV")
 	root, _, _ := commandForTest(t, "--config-dir", configDir, "backup", "restore", "site-b", "--destination", "local-primary", "--target", "/tmp/restore")

@@ -97,7 +97,7 @@ compressed `.sql.gz` database dumps below
 
 Incremental mode stores encrypted, deduplicated file snapshots below
 `bqckup/<server_id>/<site>/incremental-backup/` in each destination. Set `backup_mode: incremental` and set
-`incremental.password_env` to the name of an environment variable containing
+`incremental.password` to the name of an environment variable containing
 the repository password. The built-in engine is always used.
 
 ## Commands
@@ -122,8 +122,8 @@ Add a `notifications:` section to `bqckup.yaml` to get an email, generic
 webhook, or Discord webhook when a run finishes. Three events exist:
 `backup_failed`, `backup_cancelled`, and `backup_no_change` (successful runs stay
 silent). Routes map events to channels; secrets and webhook URLs are
-environment-variable references only (`username_env`, `password_env`, `url_env`,
-`webhook_url_env`), never plaintext in YAML. Delivery is best effort: a failing
+environment-variable references only (`username`, `password`, `url`,
+`webhook_url`), never plaintext in YAML. Delivery is best effort: a failing
 channel prints a warning and never changes the run result or history. Skipped
 runs and preflight failures send nothing. `bqckup config validate` reports
 notification environment variables that are not set.

@@ -121,7 +121,7 @@ site:
   incremental:
     # Name of the environment variable containing the repository password.
     # Incremental backup always uses Bqckup's built-in pure-Go engine.
-    password_env: RESTIC_PASSWORD
+    password: RESTIC_PASSWORD
   sources:
     files:
       include:
@@ -147,7 +147,7 @@ site:
 ```
 
 - **Backup Mode**: `backup_mode` defaults to `full` (`.tar.gz` archive). When set to `incremental`, Bqckup's built-in pure-Go engine creates Restic-format-v2 deduplicated file snapshots; no external Restic executable is required.
-- **Incremental Password**: `incremental.password_env` references the runtime environment variable holding the repository encryption password (plaintext passwords in YAML are strictly rejected).
+- **Incremental Password**: `incremental.password` references the runtime environment variable holding the repository encryption password (plaintext passwords in YAML are strictly rejected).
 - **File Excludes**: `sources.files.exclude` accepts absolute paths or glob patterns relative to each include root. Basename globs such as `*.tmp` match at any depth; use a trailing `/**`, for example `cache/**`, to exclude a directory recursively. These semantics are shared by full and incremental backups.
 - **Removed field**: `incremental.engine` is no longer accepted. Remove it from existing site files. Restic format-v1 repositories must be migrated to format v2 separately before use.
 - **Database engines**: `mysql` and `postgres`. MySQL/MariaDB uses `mysqldump`; PostgreSQL uses `pg_dump`. Passwords are passed through `MYSQL_PWD` or `PGPASSWORD`. A password-bearing site file must be a regular file with mode `0600`.
@@ -185,19 +185,19 @@ notifications:
       type: smtp
       host: smtp.example.com
       port: 587
-      username_env: BQCKUP_SMTP_USERNAME
-      password_env: BQCKUP_SMTP_PASSWORD
+      username: BQCKUP_SMTP_USERNAME
+      password: BQCKUP_SMTP_PASSWORD
       from: bqckup@example.com
       to:
         - ops@example.com
 
     webhook:
       type: webhook
-      url_env: BQCKUP_WEBHOOK_URL
+      url: BQCKUP_WEBHOOK_URL
 
     discord:
       type: discord
-      webhook_url_env: BQCKUP_DISCORD_WEBHOOK_URL
+      webhook_url: BQCKUP_DISCORD_WEBHOOK_URL
 
   routes:
     - events: [backup_failed, backup_cancelled, backup_no_change]
@@ -205,12 +205,12 @@ notifications:
 ```
 
 - **Channels** are named, one of three types. `smtp` requires `host`,
-  `port`, `from`, and a non-empty `to`; `webhook` requires `url_env`;
-  `discord` requires `webhook_url_env`. Fields foreign to the channel type
-  are rejected, as are `username_env`/`password_env` provided one without
+  `port`, `from`, and a non-empty `to`; `webhook` requires `url`;
+  `discord` requires `webhook_url`. Fields foreign to the channel type
+  are rejected, as are `username`/`password` provided one without
   the other.
 - **Secrets and URLs are environment-variable references only**
-  (`username_env`, `password_env`, `url_env`, `webhook_url_env`). Plaintext
+  (`username`, `password`, `url`, `webhook_url`). Plaintext
   values are rejected by strict decoding. Names must match the valid
   environment-variable pattern. Values are resolved at send time; a missing
   value is a per-channel warning.

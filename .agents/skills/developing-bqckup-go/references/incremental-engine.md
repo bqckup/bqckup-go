@@ -9,7 +9,7 @@ compatibility, and runner tests relevant to the request.
 
 ## Contracts
 
-- `backup_mode: incremental` requires `incremental.password_env`; there is no
+- `backup_mode: incremental` requires `incremental.password`; there is no
   engine selector.
 - Read the repository password from the named environment variable and keep it
   in memory. Never persist or log it.

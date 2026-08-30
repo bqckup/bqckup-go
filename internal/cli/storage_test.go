@@ -138,7 +138,7 @@ site:
   enabled: true
   backup_mode: incremental
   incremental:
-    password_env: RESTIC_PASSWORD
+    password: RESTIC_PASSWORD
   sources:
     files:
       include: [/srv/example/data]

@@ -23,7 +23,7 @@ guide.
    in site YAML. Any credential-bearing file must be regular, non-symlink, and
    mode `0600`. Errors must not reveal values.
 9. Incremental repository passwords are values of the environment variable
-   named by `incremental.password_env`; they are never stored in YAML.
+   named by `incremental.password`; they are never stored in YAML.
 10. Update structs, strict-load and validation tests, runtime behavior,
     `configs/`, initialization templates, `README.md`, and `USER-GUIDE.md`
     together when their public contract changes.

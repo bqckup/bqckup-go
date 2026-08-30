@@ -119,11 +119,11 @@ func (c *Checker) Run(ctx context.Context, siteFilter string) (DoctorReport, err
 		}
 		if site.BackupMode == "incremental" {
 			addCheck(fmt.Sprintf("engine:%s", site.Name), "ok", "built-in incremental engine")
-			if val, ok := os.LookupEnv(site.Incremental.PasswordEnv); !ok || val == "" {
-				addCheck(fmt.Sprintf("secret:%s:%s", site.Name, site.Incremental.PasswordEnv), "fail",
-					fmt.Sprintf("password environment variable %q is not set or empty", site.Incremental.PasswordEnv))
+			if val, ok := os.LookupEnv(site.Incremental.Password); !ok || val == "" {
+				addCheck(fmt.Sprintf("secret:%s:%s", site.Name, site.Incremental.Password), "fail",
+					fmt.Sprintf("password environment variable %q is not set or empty", site.Incremental.Password))
 			} else {
-				addCheck(fmt.Sprintf("secret:%s:%s", site.Name, site.Incremental.PasswordEnv), "ok", "environment variable is set")
+				addCheck(fmt.Sprintf("secret:%s:%s", site.Name, site.Incremental.Password), "ok", "environment variable is set")
 			}
 		}
 		for _, db := range site.Sources.Databases {

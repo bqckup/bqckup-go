@@ -113,9 +113,9 @@ func buildNotifier(notifications config.Notifications, lookupEnv func(string) (s
 		case "smtp":
 			channels[name] = notify.NewSMTP(name, channel, lookupEnv, nil)
 		case "webhook":
-			channels[name] = notify.NewWebhook(name, channel.URLEnv, lookupEnv)
+			channels[name] = notify.NewWebhook(name, channel.URL, lookupEnv)
 		case "discord":
-			channels[name] = notify.NewDiscord(name, channel.WebhookURLEnv, lookupEnv)
+			channels[name] = notify.NewDiscord(name, channel.WebhookURL, lookupEnv)
 		}
 	}
 	return notify.NewDispatcher(channels, notifications.Routes)

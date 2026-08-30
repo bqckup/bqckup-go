@@ -36,7 +36,7 @@ func taggedSnapshot(id, tag string, createdAt time.Time) incremental.Snapshot {
 func restoreSite() config.Site {
 	return config.Site{
 		Name: "site-b", Enabled: true, BackupMode: "incremental",
-		Incremental: config.Incremental{PasswordEnv: "RESTIC_PASSWORD"},
+		Incremental: config.Incremental{Password: "RESTIC_PASSWORD"},
 		Sources:     config.Sources{Files: config.FileSource{Include: []string{"/srv/example/data"}}},
 	}
 }
@@ -112,9 +112,9 @@ func TestRestoreRejectsFullMode(t *testing.T) {
 	assert.Contains(t, err.Error(), "--details")
 }
 
-func TestRestoreRequiresPasswordEnv(t *testing.T) {
+func TestRestoreRequiresPassword(t *testing.T) {
 	site := restoreSite()
-	site.Incremental.PasswordEnv = "MISSING_PASSWORD_ENV"
+	site.Incremental.Password = "MISSING_PASSWORD_ENV"
 	restorer := &Restorer{Snapshots: &fakeSnapshotLister{}, Engine: &fakeSnapshotRestorer{}, EnvLookup: func(string) (string, bool) { return "", false }}
 
 	_, err := restorer.RestoreSiteSnapshot(context.Background(), "local-primary", "latest", "/tmp/restore", site, config.Storage{Type: "local", Directory: "/srv/repos"}, nil)

@@ -469,7 +469,7 @@ func TestRunnerIncrementalBackupRetainsDatabasePackages(t *testing.T) {
 
 	site := validSite()
 	site.BackupMode = "incremental"
-	site.Incremental = config.Incremental{PasswordEnv: "RESTIC_PASSWORD"}
+	site.Incremental = config.Incremental{Password: "RESTIC_PASSWORD"}
 	site.Sources.Databases = []config.DatabaseSource{
 		{Name: "application-mysql", Enabled: true, Engine: "mysql"},
 	}
@@ -515,7 +515,7 @@ func TestRunnerIncrementalPackageRecordsSnapshotSize(t *testing.T) {
 
 	site := validSite()
 	site.BackupMode = "incremental"
-	site.Incremental = config.Incremental{PasswordEnv: "RESTIC_PASSWORD"}
+	site.Incremental = config.Incremental{Password: "RESTIC_PASSWORD"}
 
 	result, err := runner.Run(context.Background(), site, false)
 	require.NoError(t, err)
@@ -534,7 +534,7 @@ func TestRunnerIncrementalBackupSuccess(t *testing.T) {
 	site := validSite()
 	site.BackupMode = "incremental"
 	site.Incremental = config.Incremental{
-		PasswordEnv: "RESTIC_PASSWORD",
+		Password: "RESTIC_PASSWORD",
 	}
 
 	result, err := runner.Run(context.Background(), site, false)
@@ -551,7 +551,7 @@ func TestRunnerIncrementalBackupSuccess(t *testing.T) {
 	assert.Empty(t, deps.repository.packages[0].SHA256)
 }
 
-func TestRunnerIncrementalBackupMissingPasswordEnv(t *testing.T) {
+func TestRunnerIncrementalBackupMissingPassword(t *testing.T) {
 	deps := successfulDependencies(t)
 	deps.envLookup = func(string) (string, bool) { return "", false }
 	runner := NewRunner(deps.dependencies())
@@ -559,7 +559,7 @@ func TestRunnerIncrementalBackupMissingPasswordEnv(t *testing.T) {
 	site := validSite()
 	site.BackupMode = "incremental"
 	site.Incremental = config.Incremental{
-		PasswordEnv: "UNSET_VAR",
+		Password: "UNSET_VAR",
 	}
 
 	result, err := runner.Run(context.Background(), site, false)
@@ -577,7 +577,7 @@ func TestRunnerIncrementalBackupFailureDoesNotRetain(t *testing.T) {
 	site := validSite()
 	site.BackupMode = "incremental"
 	site.Incremental = config.Incremental{
-		PasswordEnv: "RESTIC_PASSWORD",
+		Password: "RESTIC_PASSWORD",
 	}
 
 	result, err := runner.Run(context.Background(), site, false)
@@ -598,7 +598,7 @@ func TestRunnerIncrementalFailureNotifiesCleanMessage(t *testing.T) {
 
 	site := validSite()
 	site.BackupMode = "incremental"
-	site.Incremental = config.Incremental{PasswordEnv: "RESTIC_PASSWORD"}
+	site.Incremental = config.Incremental{Password: "RESTIC_PASSWORD"}
 
 	result, err := runner.Run(context.Background(), site, false)
 	require.Error(t, err)
@@ -1008,7 +1008,7 @@ func TestRunnerIncrementalNeverClassifiesAsNoChange(t *testing.T) {
 
 	site := validSite()
 	site.BackupMode = "incremental"
-	site.Incremental = config.Incremental{PasswordEnv: "RESTIC_PASSWORD"}
+	site.Incremental = config.Incremental{Password: "RESTIC_PASSWORD"}
 
 	anchorID := "anchor-run-1"
 	deps.repository.lastSuccessful = &history.BackupRun{

@@ -33,7 +33,7 @@ done
 
 for contract in \
     "backup_mode: incremental" \
-    "password_env:" \
+    "password:" \
     "engine: mysql" \
     "engine: postgres" \
     "MYSQL_PWD" \

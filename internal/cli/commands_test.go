@@ -62,10 +62,10 @@ func TestConfigValidateFlagsMissingNotificationEnv(t *testing.T) {
   channels:
     webhook:
       type: webhook
-      url_env: BQCKUP_WEBHOOK_URL
+      url: BQCKUP_WEBHOOK_URL
     discord:
       type: discord
-      webhook_url_env: BQCKUP_DISCORD_WEBHOOK_URL
+      webhook_url: BQCKUP_DISCORD_WEBHOOK_URL
   routes:
     - events: [backup_failed]
       channels: [webhook, discord]
@@ -96,7 +96,7 @@ func TestBackupRunSucceedsWithUnsetNotificationEnv(t *testing.T) {
   channels:
     webhook:
       type: webhook
-      url_env: BQCKUP_UNSET_WEBHOOK_URL
+      url: BQCKUP_UNSET_WEBHOOK_URL
   routes:
     - events: [backup_failed]
       channels: [webhook]

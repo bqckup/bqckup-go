@@ -118,7 +118,7 @@ func TestListIncrementalModeTruncatesIDsAndNewestFirst(t *testing.T) {
 	}
 	site := config.Site{
 		Name: "site-b", Enabled: true, BackupMode: "incremental",
-		Incremental: config.Incremental{PasswordEnv: "RESTIC_PASSWORD"},
+		Incremental: config.Incremental{Password: "RESTIC_PASSWORD"},
 	}
 	lister := &Lister{Snapshots: snapshots, EnvLookup: envLookup}
 
@@ -136,10 +136,10 @@ func TestListIncrementalModeTruncatesIDsAndNewestFirst(t *testing.T) {
 	assert.Equal(t, "backups", snapshots.gotRepo.Bucket)
 }
 
-func TestListIncrementalRequiresPasswordEnv(t *testing.T) {
+func TestListIncrementalRequiresPassword(t *testing.T) {
 	site := config.Site{
 		Name: "site-b", Enabled: true, BackupMode: "incremental",
-		Incremental: config.Incremental{PasswordEnv: "MISSING_PASSWORD_ENV"},
+		Incremental: config.Incremental{Password: "MISSING_PASSWORD_ENV"},
 	}
 	lister := &Lister{Snapshots: &fakeSnapshotLister{}, EnvLookup: func(string) (string, bool) { return "", false }}
 
@@ -179,7 +179,7 @@ func TestListRejectsUnknownBackupMode(t *testing.T) {
 func incrementalSite() config.Site {
 	return config.Site{
 		Name: "site-b", Enabled: true, BackupMode: "incremental",
-		Incremental: config.Incremental{PasswordEnv: "RESTIC_PASSWORD"},
+		Incremental: config.Incremental{Password: "RESTIC_PASSWORD"},
 	}
 }
 
@@ -219,9 +219,9 @@ func TestListSiteSnapshotsRejectsUnknownMode(t *testing.T) {
 	assert.Equal(t, apperror.CategoryConfig, apperror.CategoryOf(err))
 }
 
-func TestListSiteSnapshotsRequiresPasswordEnv(t *testing.T) {
+func TestListSiteSnapshotsRequiresPassword(t *testing.T) {
 	site := incrementalSite()
-	site.Incremental.PasswordEnv = "MISSING_PASSWORD_ENV"
+	site.Incremental.Password = "MISSING_PASSWORD_ENV"
 	lister := &Lister{Snapshots: &fakeSnapshotLister{}, EnvLookup: func(string) (string, bool) { return "", false }}
 
 	_, err := lister.ListSiteSnapshots(context.Background(), "local-primary", site, config.Storage{Type: "local", Directory: "/srv/repos"})

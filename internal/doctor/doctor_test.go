@@ -46,7 +46,7 @@ func testConfig(t *testing.T) *config.Config {
 		Storages: map[string]config.Storage{"local-primary": {Type: "local"}},
 		Sites: []config.Site{{
 			Name: "test-site", Enabled: true, BackupMode: "incremental",
-			Incremental:   config.Incremental{PasswordEnv: "TEST_RESTIC_PASS"},
+			Incremental:   config.Incremental{Password: "TEST_RESTIC_PASS"},
 			Destinations:  []config.Destination{{Storage: "local-primary"}},
 			SchemaVersion: 2,
 		}},
@@ -69,10 +69,10 @@ func TestRunPassesOnValidConfiguration(t *testing.T) {
 	assert.Equal(t, []string{"config", "temp_dir", "lock_dir", "state_db_dir", "engine:test-site", "secret:test-site:TEST_RESTIC_PASS", "storage:local-primary"}, names)
 }
 
-func TestRunFailsWhenPasswordEnvIsMissing(t *testing.T) {
+func TestRunFailsWhenPasswordIsMissing(t *testing.T) {
 	_ = os.Unsetenv("UNSET_DOCTOR_PASS_VAR")
 	cfg := testConfig(t)
-	cfg.Sites[0].Incremental.PasswordEnv = "UNSET_DOCTOR_PASS_VAR"
+	cfg.Sites[0].Incremental.Password = "UNSET_DOCTOR_PASS_VAR"
 	checker := &Checker{Cfg: cfg, Runner: &fakeRunner{paths: map[string]string{}},
 		Stores: map[string]storage.Store{"local-primary": &fakeProbeStore{}}}
 
@@ -215,7 +215,7 @@ func probeConfig(t *testing.T) *config.Config {
 		},
 		{
 			Name: "site-b", Enabled: true, BackupMode: "incremental", SchemaVersion: 2,
-			Incremental:  config.Incremental{PasswordEnv: "DOCTOR_PROBE_PASS"},
+			Incremental:  config.Incremental{Password: "DOCTOR_PROBE_PASS"},
 			Sources:      config.Sources{Databases: []config.DatabaseSource{{Name: "db1", Enabled: true, Engine: "mysql", Username: "user-b1"}}},
 			Destinations: []config.Destination{{Storage: "a-storage"}, {Storage: "m-storage"}},
 		},

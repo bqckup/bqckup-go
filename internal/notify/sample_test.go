@@ -180,9 +180,9 @@ func sendLiveNotification(t *testing.T, input backup.NotifyInput) {
 			case "smtp":
 				channels[name] = NewSMTP(name, ch, os.LookupEnv, nil)
 			case "webhook":
-				channels[name] = NewWebhook(name, ch.URLEnv, os.LookupEnv)
+				channels[name] = NewWebhook(name, ch.URL, os.LookupEnv)
 			case "discord":
-				channels[name] = NewDiscord(name, ch.WebhookURLEnv, os.LookupEnv)
+				channels[name] = NewDiscord(name, ch.WebhookURL, os.LookupEnv)
 			}
 		}
 

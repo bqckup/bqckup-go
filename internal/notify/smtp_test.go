@@ -311,7 +311,7 @@ func TestSMTPUsesSTARTTLSAndAuthWhenConfigured(t *testing.T) {
 	server := newFakeSMTPServer(t, true, false)
 	channel := smtpChannel(t, config.Channel{
 		Type: "smtp", Host: "127.0.0.1", Port: portOf(t, server.addr),
-		UsernameEnv: "BQCKUP_SMTP_USERNAME", PasswordEnv: "BQCKUP_SMTP_PASSWORD",
+		Username: "BQCKUP_SMTP_USERNAME", Password: "BQCKUP_SMTP_PASSWORD",
 		From: "bqckup@example.com", To: []string{"ops@example.com"},
 	}, func(key string) (string, bool) {
 		switch key {
@@ -337,7 +337,7 @@ func TestSMTPRefusesAuthWithoutSTARTTLS(t *testing.T) {
 	server := newFakeSMTPServer(t, false, false)
 	channel := smtpChannel(t, config.Channel{
 		Type: "smtp", Host: "127.0.0.1", Port: portOf(t, server.addr),
-		UsernameEnv: "BQCKUP_SMTP_USERNAME", PasswordEnv: "BQCKUP_SMTP_PASSWORD",
+		Username: "BQCKUP_SMTP_USERNAME", Password: "BQCKUP_SMTP_PASSWORD",
 		From: "bqckup@example.com", To: []string{"ops@example.com"},
 	}, func(key string) (string, bool) {
 		if key == "BQCKUP_SMTP_USERNAME" || key == "BQCKUP_SMTP_PASSWORD" {
@@ -357,7 +357,7 @@ func TestSMTPImplicitTLSOnPort465(t *testing.T) {
 	server := newFakeSMTPServer(t, false, true)
 	channel := smtpChannel(t, config.Channel{
 		Type: "smtp", Host: "127.0.0.1", Port: portOf(t, server.addr),
-		UsernameEnv: "BQCKUP_SMTP_USERNAME", PasswordEnv: "BQCKUP_SMTP_PASSWORD",
+		Username: "BQCKUP_SMTP_USERNAME", Password: "BQCKUP_SMTP_PASSWORD",
 		From: "bqckup@example.com", To: []string{"ops@example.com"},
 	}, func(key string) (string, bool) {
 		if key == "BQCKUP_SMTP_USERNAME" || key == "BQCKUP_SMTP_PASSWORD" {
@@ -387,7 +387,7 @@ func TestSMTPMissingEnvIsAnError(t *testing.T) {
 	server := newFakeSMTPServer(t, true, false)
 	channel := smtpChannel(t, config.Channel{
 		Type: "smtp", Host: "127.0.0.1", Port: portOf(t, server.addr),
-		UsernameEnv: "BQCKUP_SMTP_USERNAME", PasswordEnv: "BQCKUP_SMTP_PASSWORD",
+		Username: "BQCKUP_SMTP_USERNAME", Password: "BQCKUP_SMTP_PASSWORD",
 		From: "bqckup@example.com", To: []string{"ops@example.com"},
 	}, func(string) (string, bool) { return "", false }, server.roots)
 

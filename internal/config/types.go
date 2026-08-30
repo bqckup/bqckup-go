@@ -37,15 +37,15 @@ type Notifications struct {
 // channel type (for example host on a webhook channel) are rejected.
 // Credentials and URLs are environment-variable references only.
 type Channel struct {
-	Type          string   `mapstructure:"type" yaml:"type"`
-	Host          string   `mapstructure:"host" yaml:"host"`
-	Port          int      `mapstructure:"port" yaml:"port"`
-	UsernameEnv   string   `mapstructure:"username_env" yaml:"username_env"`
-	PasswordEnv   string   `mapstructure:"password_env" yaml:"password_env"`
-	From          string   `mapstructure:"from" yaml:"from"`
-	To            []string `mapstructure:"to" yaml:"to"`
-	URLEnv        string   `mapstructure:"url_env" yaml:"url_env"`
-	WebhookURLEnv string   `mapstructure:"webhook_url_env" yaml:"webhook_url_env"`
+	Type       string   `mapstructure:"type" yaml:"type"`
+	Host       string   `mapstructure:"host" yaml:"host"`
+	Port       int      `mapstructure:"port" yaml:"port"`
+	Username   string   `mapstructure:"username" yaml:"username"`
+	Password   string   `mapstructure:"password" yaml:"password"`
+	From       string   `mapstructure:"from" yaml:"from"`
+	To         []string `mapstructure:"to" yaml:"to"`
+	URL        string   `mapstructure:"url" yaml:"url"`
+	WebhookURL string   `mapstructure:"webhook_url" yaml:"webhook_url"`
 }
 
 // Route maps one or more events to one or more channels.
@@ -92,7 +92,7 @@ type Site struct {
 }
 
 type Incremental struct {
-	PasswordEnv string `mapstructure:"password_env" yaml:"password_env"`
+	Password string `mapstructure:"password" yaml:"password"`
 }
 
 type Sources struct {

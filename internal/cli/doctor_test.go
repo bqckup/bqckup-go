@@ -26,7 +26,7 @@ site:
   enabled: true
   backup_mode: incremental
   incremental:
-    password_env: TEST_RESTIC_PASS
+    password: TEST_RESTIC_PASS
   sources:
     files:
       include:
@@ -63,7 +63,7 @@ app:
 		assert.Contains(t, stdout.String(), `"secret:test-site:TEST_RESTIC_PASS"`)
 	})
 
-	t.Run("fails when password_env is missing for incremental site", func(t *testing.T) {
+	t.Run("fails when password is missing for incremental site", func(t *testing.T) {
 		tempDir := t.TempDir()
 		sourceDir := filepath.Join(tempDir, "source")
 		backupDir := filepath.Join(tempDir, "backups")
@@ -76,7 +76,7 @@ site:
   enabled: true
   backup_mode: incremental
   incremental:
-    password_env: UNSET_DOCTOR_PASS_VAR
+    password: UNSET_DOCTOR_PASS_VAR
   sources:
     files:
       include:
@@ -150,7 +150,7 @@ site:
   enabled: true
   backup_mode: incremental
   incremental:
-    password_env: TEST_RESTIC_PASS
+    password: TEST_RESTIC_PASS
   sources:
     files:
       include:
@@ -191,7 +191,7 @@ site:
   enabled: true
   backup_mode: incremental
   incremental:
-    password_env: TEST_RESTIC_PASS
+    password: TEST_RESTIC_PASS
   sources:
     files:
       include:
@@ -264,7 +264,7 @@ site:
   enabled: true
   backup_mode: incremental
   incremental:
-    password_env: TEST_RESTIC_PASS
+    password: TEST_RESTIC_PASS
   sources:
     files:
       include:

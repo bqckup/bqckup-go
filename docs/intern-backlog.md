@@ -436,7 +436,7 @@ new dependencies (`net/smtp`, `net/http`), no history schema change,
 `RunResult` JSON contract unchanged.
 
 **In scope:** config types, strict decode and validation (per-type fields,
-`*_env` references only, both-or-neither SMTP auth, route/channel
+`*` references only, both-or-neither SMTP auth, route/channel
 references); `internal/notify` package (dispatcher, shared payload with
 distinct-source artifact aggregation, webhook, Discord embed, SMTP with
 STARTTLS and implicit TLS on 465, PLAIN auth only over encrypted sessions);

@@ -244,7 +244,7 @@ func TestListSiteSnapshotsSucceedsWithLocalStorageDocument(t *testing.T) {
 	t.Setenv("RESTIC_PASSWORD", "secret")
 	site := config.Site{
 		Name: "example", Enabled: true, BackupMode: "incremental",
-		Incremental:  config.Incremental{PasswordEnv: "RESTIC_PASSWORD"},
+		Incremental:  config.Incremental{Password: "RESTIC_PASSWORD"},
 		Destinations: []config.Destination{{Storage: "local-primary"}},
 	}
 	lister := &fakeSnapshotLister{snapshots: []incremental.Snapshot{{
@@ -293,8 +293,8 @@ func TestBuildNotifierConstructsChannelsFromConfiguration(t *testing.T) {
 	configuration.Notifications = config.Notifications{
 		Channels: map[string]config.Channel{
 			"email":   {Type: "smtp", Host: "smtp.example.com", Port: 587, From: "bqckup@example.com", To: []string{"ops@example.com"}},
-			"webhook": {Type: "webhook", URLEnv: "BQCKUP_WEBHOOK_URL"},
-			"discord": {Type: "discord", WebhookURLEnv: "BQCKUP_DISCORD_WEBHOOK_URL"},
+			"webhook": {Type: "webhook", URL: "BQCKUP_WEBHOOK_URL"},
+			"discord": {Type: "discord", WebhookURL: "BQCKUP_DISCORD_WEBHOOK_URL"},
 		},
 		Routes: []config.Route{
 			{Events: []string{config.EventBackupFailed}, Channels: []string{"webhook"}},
@@ -327,7 +327,7 @@ func TestOpenDeliversBackupFailedThroughConfiguredWebhook(t *testing.T) {
   channels:
     webhook:
       type: webhook
-      url_env: BQCKUP_WEBHOOK_URL
+      url: BQCKUP_WEBHOOK_URL
   routes:
     - events: [backup_failed]
       channels: [webhook]
@@ -430,7 +430,7 @@ func (f *fakeSnapshotRestorer) RestoreSnapshot(_ context.Context, _ incremental.
 func restoreSite() config.Site {
 	return config.Site{
 		Name: "example", Enabled: true, BackupMode: "incremental",
-		Incremental:  config.Incremental{PasswordEnv: "RESTIC_PASSWORD"},
+		Incremental:  config.Incremental{Password: "RESTIC_PASSWORD"},
 		Sources:      config.Sources{Files: config.FileSource{Include: []string{"/var/www/html"}}},
 		Destinations: []config.Destination{{Storage: "local-primary"}},
 	}

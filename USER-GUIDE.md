@@ -240,7 +240,7 @@ site:
   enabled: true
   backup_mode: incremental
   incremental:
-    password_env: BQCKUP_REPOSITORY_PASSWORD
+    password: BQCKUP_REPOSITORY_PASSWORD
   sources:
     files:
       include:

@@ -24,7 +24,7 @@ func TestValidateIncrementalBackupMode(t *testing.T) {
 		cfg := validConfig(t)
 		cfg.Sites[0].BackupMode = "incremental"
 		cfg.Sites[0].Incremental = Incremental{
-			PasswordEnv: "RESTIC_PASSWORD",
+			Password: "RESTIC_PASSWORD",
 		}
 		require.NoError(t, cfg.Validate())
 	})
@@ -38,25 +38,25 @@ func TestValidateIncrementalBackupMode(t *testing.T) {
 		assert.Contains(t, err.Error(), "must be 'full' or 'incremental'")
 	})
 
-	t.Run("rejects incremental mode with missing password_env", func(t *testing.T) {
+	t.Run("rejects incremental mode with missing password", func(t *testing.T) {
 		cfg := validConfig(t)
 		cfg.Sites[0].BackupMode = "incremental"
 		cfg.Sites[0].Incremental = Incremental{}
 		err := cfg.Validate()
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "incremental.password_env")
+		assert.Contains(t, err.Error(), "incremental.password")
 		assert.Contains(t, err.Error(), "is required")
 	})
 
-	t.Run("rejects incremental mode with invalid password_env name", func(t *testing.T) {
+	t.Run("rejects incremental mode with invalid password name", func(t *testing.T) {
 		cfg := validConfig(t)
 		cfg.Sites[0].BackupMode = "incremental"
 		cfg.Sites[0].Incremental = Incremental{
-			PasswordEnv: "invalid-env-name!",
+			Password: "invalid-env-name!",
 		}
 		err := cfg.Validate()
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "incremental.password_env")
+		assert.Contains(t, err.Error(), "incremental.password")
 		assert.Contains(t, err.Error(), "valid environment variable name")
 	})
 }
@@ -68,7 +68,7 @@ site:
   enabled: true
   backup_mode: incremental
   incremental:
-    password_env: RESTIC_PASSWORD
+    password: RESTIC_PASSWORD
   sources:
     files:
       include:
@@ -94,7 +94,7 @@ app:
 	require.NoError(t, err)
 	require.Len(t, cfg.Sites, 1)
 	assert.Equal(t, "incremental", cfg.Sites[0].BackupMode)
-	assert.Equal(t, "RESTIC_PASSWORD", cfg.Sites[0].Incremental.PasswordEnv)
+	assert.Equal(t, "RESTIC_PASSWORD", cfg.Sites[0].Incremental.Password)
 }
 
 func TestLoadRejectsRemovedIncrementalEngineField(t *testing.T) {
@@ -105,7 +105,7 @@ site:
   backup_mode: incremental
   incremental:
     engine: restic
-    password_env: RESTIC_PASSWORD
+    password: RESTIC_PASSWORD
   sources:
     files:
       include:

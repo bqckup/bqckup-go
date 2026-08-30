@@ -118,10 +118,10 @@ func validateNotificationChannel(name string, channel Channel) error {
 		return validationError("bqckup.yaml", field, "name contains unsupported characters")
 	}
 	envFields := []struct{ name, value string }{
-		{"username_env", channel.UsernameEnv},
-		{"password_env", channel.PasswordEnv},
-		{"url_env", channel.URLEnv},
-		{"webhook_url_env", channel.WebhookURLEnv},
+		{"username", channel.Username},
+		{"password", channel.Password},
+		{"url", channel.URL},
+		{"webhook_url", channel.WebhookURL},
 	}
 	for _, candidate := range envFields {
 		if candidate.value != "" && !validEnvName.MatchString(candidate.value) {
@@ -150,12 +150,12 @@ func presentChannelFields(channel Channel) []channelField {
 	return []channelField{
 		{"host", channel.Host != ""},
 		{"port", channel.Port != 0},
-		{"username_env", channel.UsernameEnv != ""},
-		{"password_env", channel.PasswordEnv != ""},
+		{"username", channel.Username != ""},
+		{"password", channel.Password != ""},
 		{"from", channel.From != ""},
 		{"to", len(channel.To) > 0},
-		{"url_env", channel.URLEnv != ""},
-		{"webhook_url_env", channel.WebhookURLEnv != ""},
+		{"url", channel.URL != ""},
+		{"webhook_url", channel.WebhookURL != ""},
 	}
 }
 
@@ -191,24 +191,24 @@ func validateSMTPChannel(field string, channel Channel) error {
 	if len(channel.To) == 0 {
 		return validationError("bqckup.yaml", field+".to", "at least one recipient is required")
 	}
-	if (channel.UsernameEnv == "") != (channel.PasswordEnv == "") {
-		return validationError("bqckup.yaml", field, "username_env and password_env must be provided together")
+	if (channel.Username == "") != (channel.Password == "") {
+		return validationError("bqckup.yaml", field, "username and password must be provided together")
 	}
-	return validateNoForeignFields(field, "smtp", channel, "host", "port", "username_env", "password_env", "from", "to")
+	return validateNoForeignFields(field, "smtp", channel, "host", "port", "username", "password", "from", "to")
 }
 
 func validateWebhookChannel(field string, channel Channel) error {
-	if channel.URLEnv == "" {
-		return validationError("bqckup.yaml", field+".url_env", "url_env is required")
+	if channel.URL == "" {
+		return validationError("bqckup.yaml", field+".url", "url is required")
 	}
-	return validateNoForeignFields(field, "webhook", channel, "url_env")
+	return validateNoForeignFields(field, "webhook", channel, "url")
 }
 
 func validateDiscordChannel(field string, channel Channel) error {
-	if channel.WebhookURLEnv == "" {
-		return validationError("bqckup.yaml", field+".webhook_url_env", "webhook_url_env is required")
+	if channel.WebhookURL == "" {
+		return validationError("bqckup.yaml", field+".webhook_url", "webhook_url is required")
 	}
-	return validateNoForeignFields(field, "discord", channel, "webhook_url_env")
+	return validateNoForeignFields(field, "discord", channel, "webhook_url")
 }
 
 // ValidateNotificationEnvironment reports every notification environment
@@ -235,10 +235,10 @@ func ValidateNotificationEnvironment(cfg Config, lookupEnv func(string) (string,
 		}
 	}
 	for _, channel := range cfg.Notifications.Channels {
-		add(channel.UsernameEnv)
-		add(channel.PasswordEnv)
-		add(channel.URLEnv)
-		add(channel.WebhookURLEnv)
+		add(channel.Username)
+		add(channel.Password)
+		add(channel.URL)
+		add(channel.WebhookURL)
 	}
 	if len(missing) == 0 {
 		return nil
@@ -480,11 +480,11 @@ func (c Config) validateSite(site Site, seen map[string]struct{}) error {
 		return validationError(file, baseField+".backup_mode", "must be 'full' or 'incremental'")
 	}
 	if site.BackupMode == "incremental" {
-		if site.Incremental.PasswordEnv == "" {
-			return validationError(file, baseField+".incremental.password_env", "is required")
+		if site.Incremental.Password == "" {
+			return validationError(file, baseField+".incremental.password", "is required")
 		}
-		if !validEnvName.MatchString(site.Incremental.PasswordEnv) {
-			return validationError(file, baseField+".incremental.password_env", "must be a valid environment variable name")
+		if !validEnvName.MatchString(site.Incremental.Password) {
+			return validationError(file, baseField+".incremental.password", "must be a valid environment variable name")
 		}
 	}
 	if len(site.Sources.Files.Include) == 0 {
