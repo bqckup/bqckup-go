@@ -3,6 +3,8 @@ package cli
 import (
 	"bytes"
 	"errors"
+	"fmt"
+	"os"
 
 	"testing"
 
@@ -66,4 +68,10 @@ func TestFormatErrorMessageDescendsIntoJoinNestedInCause(t *testing.T) {
 
 func TestFormatErrorMessagePassesThroughNonAppErrors(t *testing.T) {
 	assert.Equal(t, "plain failure", formatErrorMessage(errors.New("plain failure")))
+}
+
+func TestFormatErrorMessageAvoidsRepeatedWrappedPathErrors(t *testing.T) {
+	cause := fmt.Errorf("inspect archive source /missing: %w", os.ErrNotExist)
+	err := apperror.Wrap(apperror.CategoryExecution, "could not create the file archive", cause)
+	assert.Equal(t, "could not create the file archive: inspect archive source /missing: file does not exist", formatErrorMessage(err))
 }

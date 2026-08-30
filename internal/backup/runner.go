@@ -7,7 +7,6 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/bqckup/bqckup-go/internal/apperror"
@@ -396,17 +395,13 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 				fmt.Fprintf(os.Stderr, "warning: could not load current backup packages: %v\n", currErr)
 			} else if unchangedSizes(currPkgs, prevPkgs) {
 				seenSources := make(map[[2]string]struct{})
-				var details []string
 				for _, p := range currPkgs {
 					k := [2]string{p.SourceKind, p.SourceName}
 					if _, seen := seenSources[k]; seen {
 						continue
 					}
 					seenSources[k] = struct{}{}
-					name := path.Base(p.ObjectKey)
-					details = append(details, fmt.Sprintf("%s (%d B)", name, p.Size))
 				}
-				fmt.Fprintf(os.Stderr, "warning: backup for %s is unchanged: %s — same sizes as the previous run\n", site.Name, strings.Join(details, ", "))
 
 				count := len(seenSources)
 				var msg string

@@ -114,6 +114,7 @@ func formatErrorMessage(err error) string {
 	}
 	message = apperror.UserMessage(err)
 	seen := map[string]bool{message: true}
+	previous := ""
 	var walk func(error)
 	walk = func(e error) {
 		if e == nil {
@@ -125,9 +126,10 @@ func formatErrorMessage(err error) string {
 			}
 			return
 		}
-		if text := e.Error(); text != "" && !seen[text] {
+		if text := e.Error(); text != "" && !seen[text] && !strings.Contains(previous, text) {
 			seen[text] = true
 			message += ": " + text
+			previous = text
 		}
 		walk(errors.Unwrap(e))
 	}
