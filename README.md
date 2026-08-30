@@ -82,6 +82,12 @@ The default configuration directory is `/etc/bqckup`:
 Ready-to-edit examples are in [`configs/`](configs/). Use
 `--config-dir <directory>` to load a different configuration tree.
 
+Disabled failure fixtures are included in `configs/sites/` for testing a
+missing source, an unreadable source, or an unavailable database. Enable only
+the fixture being tested, then run `bqckup backup run <site> --force`. The
+database fixture requires a real test password and `enabled: true` in a
+protected local copy; do not commit credentials.
+
 Credential-bearing YAML files must be regular files, not symbolic links, and
 must have mode `0600`. Never commit real passwords or storage keys.
 

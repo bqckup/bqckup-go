@@ -28,6 +28,8 @@ All notable changes to Bqckup are documented in this file.
 - Format text download-link metadata with a clear heading and aligned labels.
 - Use one compact UTC format (`02 Jan 2006 15:04 UTC`) for human-readable CLI
   timestamps; structured JSON retains machine-readable RFC3339 timestamps.
+- Add disabled configuration fixtures for missing-file, unreadable-file, and
+  unavailable-database backup failure testing.
 - Added global `server_id` namespacing under `bqckup/<server_id>/<site>/`.
 - Renamed internal incremental packages from `restic` to `incremental` while
   preserving official Restic repository compatibility.

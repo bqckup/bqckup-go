@@ -1,0 +1,14 @@
+site:
+  name: failure-missing-source
+  enabled: false
+  sources:
+    files:
+      include:
+        - /var/lib/bqckup-test/does-not-exist
+      follow_symlinks: false
+    databases: []
+  destinations:
+    - storage: local-main
+  policy:
+    minimum_interval: 1h
+    keep_last: 1
