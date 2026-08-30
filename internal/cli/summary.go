@@ -193,7 +193,7 @@ func (v summaryView) lastBackupText() string {
 	if v.LastBackupAt == nil {
 		return "-"
 	}
-	return v.LastBackupAt.Local().Format("02 Jan 2006, 15:04 MST")
+	return formatCLITime(*v.LastBackupAt)
 }
 
 func (v summaryView) lastStatusText() string {

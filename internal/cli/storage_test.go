@@ -240,7 +240,7 @@ func TestWriteLinkTextSplitsURLAndInfo(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	require.NoError(t, writeLinkText(&stdout, &stderr, link))
 	assert.Equal(t, "https://example.test/signed\n", stdout.String())
-	assert.Equal(t, "DOWNLOAD LINK\n  Expires: 2026-08-06T03:00:00Z\n  Access:  anyone with this link can download the file.\n", stderr.String())
+	assert.Equal(t, "DOWNLOAD LINK\n  Expires: 06 Aug 2026 03:00 UTC\n  Access:  anyone with this link can download the file.\n", stderr.String())
 }
 
 func TestWriteLinkJSONSchema(t *testing.T) {

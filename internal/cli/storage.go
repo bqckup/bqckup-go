@@ -17,6 +17,10 @@ import (
 
 const storageTimeLayout = "02 Jan 2006 15:04"
 
+func formatCLITime(value time.Time) string {
+	return value.UTC().Format(storageTimeLayout)
+}
+
 type packageJSON struct {
 	Destination string    `json:"destination"`
 	Key         string    `json:"key"`
@@ -132,7 +136,7 @@ func writeLinkText(stdout, stderr io.Writer, link storage.DownloadLink) error {
 	if _, err := fmt.Fprintln(stderr, "DOWNLOAD LINK"); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(stderr, "  Expires: %s\n", link.ExpiresAt.UTC().Format(time.RFC3339)); err != nil {
+	if _, err := fmt.Fprintf(stderr, "  Expires: %s UTC\n", formatCLITime(link.ExpiresAt)); err != nil {
 		return err
 	}
 	_, err := fmt.Fprintln(stderr, "  Access:  anyone with this link can download the file.")
@@ -221,7 +225,7 @@ func writeSnapshotText(output io.Writer, listing backup.Listing) error {
 				size = humanBytes(snapshot.Size)
 			}
 			if _, err := fmt.Fprintf(table, "%s\t%s\t%s\t%s\n",
-				snapshot.ID, strings.Join(snapshot.Paths, ", "), size, snapshot.CreatedAt.UTC().Format(storageTimeLayout)); err != nil {
+				snapshot.ID, strings.Join(snapshot.Paths, ", "), size, formatCLITime(snapshot.CreatedAt)); err != nil {
 				return err
 			}
 		}
@@ -252,7 +256,7 @@ func writePackageRows(output io.Writer, packages []backup.PackageRow) error {
 	}
 	for _, pkg := range packages {
 		if _, err := fmt.Fprintf(table, "%s\t%s\t%s\t%s\n",
-			pkg.Destination, pkg.Key, humanBytes(pkg.Size), pkg.CreatedAt.UTC().Format(storageTimeLayout)); err != nil {
+			pkg.Destination, pkg.Key, humanBytes(pkg.Size), formatCLITime(pkg.CreatedAt)); err != nil {
 			return err
 		}
 	}

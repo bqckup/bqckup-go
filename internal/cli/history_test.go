@@ -51,7 +51,7 @@ func TestWriteHistoryTextRendersInvestigationSummary(t *testing.T) {
 	for _, status := range []string{"SUCCESS", "FAILED", "CANCELLED", "RUNNING"} {
 		assert.Contains(t, text, status)
 	}
-	assert.Contains(t, text, started.Local().Format("02 Jan 2006, 15:04 MST"))
+	assert.Contains(t, text, formatCLITime(started))
 	assert.Contains(t, text, "1.25s")
 	assert.Contains(t, text, "in progress")
 	assert.Regexp(t, `SUCCESS\s+multi-destination\s+.+\s+1\.25s\s+2\s+2\s+3\.0 KiB\s+success-run`, text)

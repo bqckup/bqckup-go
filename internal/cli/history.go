@@ -76,7 +76,7 @@ func writeHistoryText(output io.Writer, runs []history.BackupRun, details bool) 
 			"%s\t%s\t%s\t%s\t%d\t%d\t%s\t%s\n",
 			color.statusLabel(safeHistoryField(string(run.Status))),
 			safeHistoryField(run.SiteName),
-			run.StartedAt.Local().Format("02 Jan 2006, 15:04 MST"),
+			formatCLITime(run.StartedAt),
 			formatRunDuration(run),
 			summary.logicalCount,
 			len(summary.destinations),
