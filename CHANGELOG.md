@@ -38,6 +38,8 @@ All notable changes to Bqckup are documented in this file.
 - Detect legacy files still located in `/etc/bqckup` and use
   `/etc/bqckup_old` as the preserved source before writing the converted
   config back to `/etc/bqckup`.
+- Report malformed legacy site files with their path instead of a Python
+  traceback.
 - Document the migration layout using `/etc/bqckup_old` as the preserved
   legacy tree and `/etc/bqckup` as the generated active tree.
 - Show each batch failure beside its site and replace the duplicated trailing

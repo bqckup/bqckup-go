@@ -111,6 +111,10 @@ The converter does not modify the legacy tree or print credentials. Review
 warnings—especially undefined legacy destinations such as `dummy`—before
 switching the service to the generated configuration.
 
+If a site file is malformed, conversion stops with the exact file path and
+preserves the legacy tree in `/etc/bqckup_old`; fix that file and run the
+converter again.
+
 ## Backup modes
 
 ### Full backup

@@ -185,9 +185,13 @@ def convert(args: argparse.Namespace) -> int:
 
     site_docs: list[tuple[str, dict[str, Any]]] = []
     for path in sorted((source / "sites").glob("*.y*ml")):
-        with path.open(encoding="utf-8") as handle:
-            document = yaml.safe_load(handle) or {}
-        converted = legacy_site(document, warnings)
+        try:
+            with path.open(encoding="utf-8") as handle:
+                document = yaml.safe_load(handle) or {}
+            converted = legacy_site(document, warnings)
+        except (OSError, yaml.YAMLError, ValueError) as error:
+            print(f"error: could not convert site file {path}: {error}", file=sys.stderr)
+            return 2
         name = converted["site"]["name"]
         destination_names = {item["storage"] for item in converted["site"]["destinations"]}
         missing = sorted(destination_names - storages.keys())
