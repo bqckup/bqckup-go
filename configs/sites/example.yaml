@@ -1,6 +1,11 @@
 site:
   name: example
   enabled: true
+  # For incremental backups, uncomment these fields and set the password
+  # environment variable before running Bqckup. Full mode is the default.
+  # backup_mode: incremental
+  # incremental:
+  #   password: BQCKUP_REPOSITORY_PASSWORD
   sources:
     files:
       include:
