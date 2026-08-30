@@ -32,6 +32,8 @@ All notable changes to Bqckup are documented in this file.
   testing backup failure notifications and history.
 - Show each batch failure beside its site and replace the duplicated trailing
   error detail with one concise batch-failure message.
+- Shorten run IDs in text output and wrap long failure reasons for narrow
+  terminals; JSON keeps the complete run IDs.
 - Added global `server_id` namespacing under `bqckup/<server_id>/<site>/`.
 - Renamed internal incremental packages from `restic` to `incremental` while
   preserving official Restic repository compatibility.

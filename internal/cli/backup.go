@@ -156,7 +156,7 @@ func newBackupCommand(opts *options) *cobra.Command {
 						}
 						progressErr = writeRunResultText(cmd.OutOrStdout(), *progress.Result)
 						if progressErr == nil && progress.Error != nil {
-							_, progressErr = fmt.Fprintf(cmd.ErrOrStderr(), "  Reason: %s\n", formatErrorMessage(progress.Error))
+							progressErr = writeFailureReason(cmd.ErrOrStderr(), progress.Error)
 						}
 					}
 				}
@@ -330,7 +330,7 @@ func writeRunResultText(out io.Writer, result backup.RunResult) error {
 	if result.Status == backup.StatusSkipped {
 		_, err = fmt.Fprintf(out, "%s %s: %s (%s)\n", color.yellow("[WARN]"), result.SiteName, color.status("skipped"), result.SkipReason)
 	} else {
-		_, err = fmt.Fprintf(out, "%s %s: %s (run %s)\n", colorResultSymbol(color, result.Status), result.SiteName, color.status(string(result.Status)), result.RunID)
+		_, err = fmt.Fprintf(out, "%s %s: %s (run %s)\n", colorResultSymbol(color, result.Status), result.SiteName, color.status(string(result.Status)), shortRunID(result.RunID))
 	}
 	if err != nil {
 		return err
@@ -339,6 +339,13 @@ func writeRunResultText(out io.Writer, result backup.RunResult) error {
 		_, err = fmt.Fprintf(out, "%s: reclaimed %s\n", result.SiteName, humanBytes(result.ReclaimedBytes))
 	}
 	return err
+}
+
+func shortRunID(id string) string {
+	if len(id) > 8 {
+		return id[:8]
+	}
+	return id
 }
 
 func resultSymbol(status backup.Status) string {
@@ -366,6 +373,24 @@ func colorResultSymbol(color ansiColor, status backup.Status) string {
 	default:
 		return color.cyan(symbol)
 	}
+}
+
+func writeFailureReason(out io.Writer, err error) error {
+	const width = 96
+	words := strings.Fields(formatErrorMessage(err))
+	line := "  Reason:"
+	for _, word := range words {
+		if len(line)+1+len(word) > width && line != "  Reason:" {
+			if _, writeErr := fmt.Fprintln(out, line); writeErr != nil {
+				return writeErr
+			}
+			line = "           " + word
+			continue
+		}
+		line += " " + word
+	}
+	_, writeErr := fmt.Fprintln(out, line)
+	return writeErr
 }
 
 func backupProgressForSite(site config.Site) app.BackupRunProgress {
