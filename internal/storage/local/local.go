@@ -123,10 +123,34 @@ func (s *Store) Delete(ctx context.Context, key string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.RemoveAll(target); err != nil {
-		return fmt.Errorf("delete storage object %q: %w", key, err)
+	if info, statErr := os.Stat(target); statErr == nil && info.IsDir() {
+		if err := os.RemoveAll(target); err != nil {
+			return fmt.Errorf("delete storage object %q: %w", key, err)
+		}
+		return syncDirectory(filepath.Dir(target))
+	} else if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
+		return fmt.Errorf("inspect storage object %q: %w", key, statErr)
 	}
-	return syncDirectory(filepath.Dir(target))
+	// New full-backup keys use a logical set prefix (date/time) while the
+	// objects live directly below the date directory.
+	dateDirectory := filepath.Dir(target)
+	runPrefix := filepath.Base(target) + "-"
+	entries, err := os.ReadDir(dateDirectory)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("list storage objects %q: %w", key, err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasPrefix(entry.Name(), runPrefix) {
+			continue
+		}
+		if err := os.Remove(filepath.Join(dateDirectory, entry.Name())); err != nil {
+			return fmt.Errorf("delete storage object %q: %w", key, err)
+		}
+	}
+	return syncDirectory(dateDirectory)
 }
 
 // Probe verifies the destination is writable by creating and immediately
@@ -164,7 +188,7 @@ func (s *Store) ListBackupSets(ctx context.Context, sitePrefix string) ([]storag
 	if err != nil {
 		return nil, fmt.Errorf("list backup sets %q: %w", sitePrefix, err)
 	}
-	sets := make([]storage.BackupSet, 0, len(entries))
+	setsByKey := make(map[string]storage.BackupSet)
 	for _, entry := range entries {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -173,15 +197,15 @@ func (s *Store) ListBackupSets(ctx context.Context, sitePrefix string) ([]storag
 			continue
 		}
 		if createdAt, parseErr := storage.ParseBackupSet(entry.Name()); parseErr == nil {
-			sets = append(sets, storage.BackupSet{
-				Key:       path.Join(sitePrefix, entry.Name()),
-				CreatedAt: createdAt,
-			})
+			setKey := path.Join(sitePrefix, entry.Name())
+			setsByKey[setKey] = storage.BackupSet{Key: setKey, CreatedAt: createdAt}
 			continue
 		}
-
 		date, dateErr := time.Parse(storage.BackupDateLayout, entry.Name())
 		if dateErr != nil || date.Format(storage.BackupDateLayout) != entry.Name() {
+			date, dateErr = time.Parse("02-January-2006", entry.Name())
+		}
+		if dateErr != nil {
 			continue
 		}
 		runs, readErr := os.ReadDir(filepath.Join(directory, entry.Name()))
@@ -192,19 +216,26 @@ func (s *Store) ListBackupSets(ctx context.Context, sitePrefix string) ([]storag
 			if err := ctx.Err(); err != nil {
 				return nil, err
 			}
-			if !run.IsDir() {
+			if run.IsDir() {
+				setName := path.Join(entry.Name(), run.Name())
+				createdAt, parseErr := storage.ParseBackupSet(setName)
+				if parseErr == nil {
+					setKey := path.Join(sitePrefix, setName)
+					setsByKey[setKey] = storage.BackupSet{Key: setKey, CreatedAt: createdAt}
+				}
 				continue
 			}
-			setName := path.Join(entry.Name(), run.Name())
-			createdAt, parseErr := storage.ParseBackupSet(setName)
+			setName, createdAt, parseErr := storage.BackupSetForPackage(entry.Name(), run.Name())
 			if parseErr != nil {
 				continue
 			}
-			sets = append(sets, storage.BackupSet{
-				Key:       path.Join(sitePrefix, setName),
-				CreatedAt: createdAt,
-			})
+			setKey := path.Join(sitePrefix, setName)
+			setsByKey[setKey] = storage.BackupSet{Key: setKey, CreatedAt: createdAt}
 		}
+	}
+	sets := make([]storage.BackupSet, 0, len(setsByKey))
+	for _, set := range setsByKey {
+		sets = append(sets, set)
 	}
 	sort.Slice(sets, func(i, j int) bool { return sets[i].CreatedAt.Before(sets[j].CreatedAt) })
 	return sets, nil

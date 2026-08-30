@@ -127,7 +127,7 @@ Legacy database type `postgresql` is normalized to the v2 engine name
 
 Full mode is the default. It creates portable `.tar.gz` file archives and
 compressed `.sql.gz` database dumps below
-`bqckup/<server_id>/<site>/<UTC timestamp>/` in each destination.
+`bqckup/<server_id>/<site>/<YYYY-MM-DD>/<HH-mm-ss>-<package>.gz` in each destination.
 
 ### Incremental backup
 

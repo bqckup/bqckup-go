@@ -2,6 +2,19 @@
 
 All notable changes to Bqckup are documented in this file.
 
+## v0.0.6
+
+- Add `bqckup update` to download and SHA-256 verify the selected Linux
+  release before atomically replacing the installed binary.
+- Support multiple full-backup source paths with descriptive archive roots,
+  including paths such as `etc/crowdsec`, `var/lib/crowdsec`, and
+  `usr/lib/crowdsec`.
+- Store full backup packages in sortable date folders using
+  `<HH-mm-ss>-<run_id>-<package>.gz` names, with multiple database dumps in
+  the same run grouped by their shared time and run ID.
+- Update S3/local listing and retention to discover and remove flat package
+  runs as one unit.
+
 ## v0.0.5
 
 - Show immediate per-site start/completion progress, an interactive loading

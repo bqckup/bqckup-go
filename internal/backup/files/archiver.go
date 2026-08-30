@@ -46,15 +46,14 @@ func (a *Archiver) Create(ctx context.Context, source backup.FileSource, destina
 	tw := tar.NewWriter(gz)
 	state := archiveState{ctx: ctx, writer: tw, source: source}
 	rootNames := map[string]struct{}{}
+	preserveSourcePaths := len(source.Include) > 1
 	for _, include := range source.Include {
 		clean := filepath.Clean(include)
 		rootName := filepath.Base(clean)
 		if rootName == "." || rootName == string(filepath.Separator) || rootName == "" {
 			return backup.Package{}, fmt.Errorf("cannot archive source root %q", include)
 		}
-		if _, exists := rootNames[rootName]; exists {
-			return backup.Package{}, fmt.Errorf("source archive name %q is duplicated", rootName)
-		}
+		rootName = archiveRootName(include, rootName, rootNames, preserveSourcePaths)
 		rootNames[rootName] = struct{}{}
 		if err := state.add(clean, rootName, map[string]bool{}); err != nil {
 			return backup.Package{}, err
@@ -82,6 +81,24 @@ func (a *Archiver) Create(ctx context.Context, source backup.FileSource, destina
 		Path: destination, Size: size, SHA256: checksum,
 		SourceKind: "files", SourceName: "files",
 	}, nil
+}
+
+// archiveRootName gives multi-root archives descriptive, non-overlapping
+// names. A single source keeps its basename for compatibility; multiple
+// sources preserve their path below the filesystem root, e.g. etc/crowdsec.
+func archiveRootName(include, base string, used map[string]struct{}, preservePath bool) string {
+	if !preservePath {
+		return base
+	}
+	candidate := strings.TrimPrefix(filepath.ToSlash(filepath.Clean(include)), "/")
+	if candidate != "" && candidate != "." {
+		if _, exists := used[candidate]; !exists {
+			return candidate
+		}
+	}
+	// The exact same path was included more than once. Keep the archive
+	// valid without silently overwriting an earlier member.
+	return base + "-duplicate"
 }
 
 type archiveState struct {

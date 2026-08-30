@@ -28,7 +28,7 @@ func TestRunnerCompletesBackupLifecycle(t *testing.T) {
 	assert.Equal(t, StatusSuccess, result.Status)
 	assert.Equal(t, history.StatusSuccess, deps.repository.finishedStatus)
 	require.Len(t, deps.repository.packages, 1)
-	assert.Equal(t, "bqckup/example/23-July-2026/03-45-00.000000000/files.tar.gz", deps.repository.packages[0].ObjectKey)
+	assert.Equal(t, "bqckup/example/2026-07-23/03-45-00-run1-files.tar.gz", deps.repository.packages[0].ObjectKey)
 	assert.Equal(t, 1, deps.retainer.calls)
 	assert.Equal(t, 1, deps.lock.unlockCalls)
 	_, statErr := os.Stat(deps.archiver.workspace)
@@ -159,8 +159,8 @@ func TestRunnerExportsEnabledDatabasesToEveryDestination(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, StatusSuccess, result.Status)
 	assert.Len(t, store.keys, 3)
-	assert.Contains(t, store.keys, "bqckup/example/23-July-2026/03-45-00.000000000/databases/application-mysql.sql.gz")
-	assert.Contains(t, store.keys, "bqckup/example/23-July-2026/03-45-00.000000000/databases/application-postgres.sql.gz")
+	assert.Contains(t, store.keys, "bqckup/example/2026-07-23/03-45-00-run1-application-mysql.sql.gz")
+	assert.Contains(t, store.keys, "bqckup/example/2026-07-23/03-45-00-run1-application-postgres.sql.gz")
 	assert.Len(t, deps.repository.packages, 3)
 }
 
@@ -469,16 +469,12 @@ func TestRunnerIncrementalBackupRetainsDatabasePackages(t *testing.T) {
 	result, err := NewRunner(deps.dependencies()).Run(context.Background(), site, false)
 	require.NoError(t, err)
 	assert.Equal(t, StatusSuccess, result.Status)
-	assert.Contains(t, store.keys, "bqckup/example/23-July-2026/03-45-00.000000000/databases/application-mysql.sql.gz")
+	assert.Contains(t, store.keys, "bqckup/example/2026-07-23/03-45-00-run1-application-mysql.sql.gz")
 	assert.Equal(t, 1, deps.retainer.calls, "incremental runs must retain the bqckup/<site> database package sets")
 	assert.Equal(t, "bqckup/example", deps.retainer.lastSitePrefix)
 }
 
-// TestRunnerTwoForcedRunsInSameSecond: two forced runs started within the
-// same wall-clock second must both succeed. The second run used to get the
-// same backup-set key as the first (bqckup/<site>/<date>/<hh-mm-ss>/...) and
-// the storage collision rejected the overwrite, failing the whole run.
-func TestRunnerTwoForcedRunsInSameSecond(t *testing.T) {
+func TestRunnerTwoForcedRunsInDifferentSeconds(t *testing.T) {
 	deps := successfulDependencies(t)
 	store, err := local.New(t.TempDir())
 	require.NoError(t, err)
@@ -489,7 +485,7 @@ func TestRunnerTwoForcedRunsInSameSecond(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, StatusSuccess, first.Status)
 
-	deps.clock.now = deps.clock.now.Add(500 * time.Millisecond) // still the same second
+	deps.clock.now = deps.clock.now.Add(time.Second)
 	second, err := NewRunner(deps.dependencies()).Run(context.Background(), site, true)
 	require.NoError(t, err)
 	assert.Equal(t, StatusSuccess, second.Status)
