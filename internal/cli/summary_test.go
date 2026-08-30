@@ -140,7 +140,7 @@ func TestWriteSummaryTextPanels(t *testing.T) {
 	assert.Contains(t, text, "Status              : idle\n")
 	assert.Contains(t, text, "Enabled             : yes\n")
 	assert.Contains(t, text, "Backup Mode         : full\n")
-	assert.Contains(t, text, "Last Backup         : 22 Aug 2026, 17:46 UTC\n")
+	assert.Contains(t, text, "Last Backup         : 22 Aug 2026 17:46\n")
 	assert.Contains(t, text, "Last Backup Status  : success\n")
 	assert.Contains(t, text, "Last Backup Duration: 2s\n")
 	assert.Contains(t, text, "Last Backup Size    : 1.0 KiB\n")
