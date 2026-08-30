@@ -93,10 +93,11 @@ To convert a legacy configuration tree, install PyYAML and run:
 
 ```bash
 python3 -m pip install -r scripts/requirements-converter.txt
+sudo mv /etc/bqckup /etc/bqckup_old
 python3 scripts/convert_legacy_config.py \
-  --input-dir /etc/bqckup \
-  --output-dir /etc/bqckup-v2
-sudo bqckup --config-dir /etc/bqckup-v2 config validate
+  --input-dir /etc/bqckup_old \
+  --output-dir /etc/bqckup
+sudo bqckup --config-dir /etc/bqckup config validate
 ```
 
 The converter does not modify the legacy tree or print credentials. Review

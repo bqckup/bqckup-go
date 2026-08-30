@@ -32,6 +32,8 @@ All notable changes to Bqckup are documented in this file.
   testing backup failure notifications and history.
 - Add a Python converter for legacy `storages.yml`, site files, and
   `bqckup.cnf` configuration trees.
+- Document the migration layout using `/etc/bqckup_old` as the preserved
+  legacy tree and `/etc/bqckup` as the generated active tree.
 - Show each batch failure beside its site and replace the duplicated trailing
   error detail with one concise batch-failure message.
 - Shorten run IDs in text output and wrap long failure reasons for narrow
