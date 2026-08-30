@@ -20,6 +20,8 @@ All notable changes to Bqckup are documented in this file.
   `Example` sections.
 - Derive command usage and examples from Cobra command metadata to keep CLI
   help and validation guidance synchronized.
+- Show incremental database exports separately from file snapshots in storage
+  listings, including structured JSON when both kinds are present.
 - Added global `server_id` namespacing under `bqckup/<server_id>/<site>/`.
 - Renamed internal incremental packages from `restic` to `incremental` while
   preserving official Restic repository compatibility.

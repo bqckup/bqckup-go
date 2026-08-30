@@ -119,6 +119,11 @@ subcommand with `--help` to see all available options. In text mode,
 an interactive terminal (or a five-second heartbeat when redirected), and
 prints its result as soon as it finishes; JSON mode suppresses progress text.
 
+`storage list` displays full-mode archives as stored objects. For incremental
+sites it displays file snapshots separately; when the site has enabled
+databases, a `DATABASE PACKAGES` section also lists the timestamped database
+exports.
+
 ## Notifications
 
 Add a `notifications:` section to `bqckup.yaml` to get an email, generic

@@ -310,6 +310,12 @@ when redirected), then prints that site's result when it finishes. `--output
 json` suppresses these progress lines so stdout remains valid machine-readable
 JSON.
 
+Storage listing follows the backup mode: full sites show archive objects,
+while incremental sites show file snapshots. If an incremental site has an
+enabled database source, its database exports appear in a separate
+`DATABASE PACKAGES` table. JSON output uses `snapshots` and
+`database_packages` fields for that mixed result.
+
 List recent history:
 
 ```bash

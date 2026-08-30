@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/bqckup/bqckup-go/internal/apperror"
@@ -44,11 +45,12 @@ type SnapshotRow struct {
 
 // Listing is the result of listing one remote destination.
 type Listing struct {
-	Mode        string
-	Site        string
-	Destination string
-	Packages    []PackageRow
-	Snapshots   []SnapshotRow
+	Mode             string
+	Site             string
+	Destination      string
+	Packages         []PackageRow
+	Snapshots        []SnapshotRow
+	DatabasePackages []PackageRow
 }
 
 // Lister lists the live remote contents of one destination. It never
@@ -82,7 +84,7 @@ func (l *Lister) List(ctx context.Context, destination string, site config.Site,
 	case "full":
 		return l.listPackages(ctx, destination, site, remote)
 	case "incremental":
-		return l.listSnapshots(ctx, destination, site, storageConfig)
+		return l.listSnapshots(ctx, destination, site, storageConfig, remote)
 	default:
 		return Listing{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q has an unsupported backup mode %q", site.Name, site.BackupMode), nil)
 	}
@@ -102,7 +104,7 @@ func (l *Lister) ListSiteSnapshots(ctx context.Context, destination string, site
 			"site %q uses full backup mode; use 'bqckup history list --site %s --details' to inspect stored archives",
 			site.Name, site.Name), nil)
 	}
-	return l.listSnapshots(ctx, destination, site, storageConfig)
+	return l.listSnapshots(ctx, destination, site, storageConfig, nil)
 }
 
 func (l *Lister) listPackages(ctx context.Context, destination string, site config.Site, remote RemoteLister) (Listing, error) {
@@ -129,7 +131,7 @@ func (l *Lister) listPackages(ctx context.Context, destination string, site conf
 	return listing, nil
 }
 
-func (l *Lister) listSnapshots(ctx context.Context, destination string, site config.Site, storageConfig config.Storage) (Listing, error) {
+func (l *Lister) listSnapshots(ctx context.Context, destination string, site config.Site, storageConfig config.Storage, remote RemoteLister) (Listing, error) {
 	if l.Snapshots == nil {
 		return Listing{}, apperror.Wrap(apperror.CategoryInternal, "incremental backup engine is unavailable", nil)
 	}
@@ -155,5 +157,34 @@ func (l *Lister) listSnapshots(ctx context.Context, destination string, site con
 			CreatedAt: snapshot.CreatedAt,
 		})
 	}
+	if remote != nil && hasEnabledDatabaseSources(site) {
+		packages, err := l.listDatabasePackages(ctx, destination, site, remote)
+		if err != nil {
+			return Listing{}, err
+		}
+		listing.DatabasePackages = packages
+	}
 	return listing, nil
+}
+
+func (l *Lister) listDatabasePackages(ctx context.Context, destination string, site config.Site, remote RemoteLister) ([]PackageRow, error) {
+	sets, err := remote.ListBackupSets(ctx, backupSitePrefix(site.Name, l.ServerID))
+	if err != nil {
+		return nil, apperror.Wrap(apperror.CategoryStorage, "could not list remote database backup sets", err)
+	}
+	sort.Slice(sets, func(i, j int) bool { return sets[i].CreatedAt.After(sets[j].CreatedAt) })
+	packages := make([]PackageRow, 0)
+	for _, set := range sets {
+		rows, err := remote.ListPackages(ctx, set.Key)
+		if err != nil {
+			return nil, apperror.Wrap(apperror.CategoryStorage, "could not list remote database packages", err)
+		}
+		for _, pkg := range rows {
+			if !strings.Contains(pkg.Key, "/databases/") {
+				continue
+			}
+			packages = append(packages, PackageRow{Destination: destination, Key: pkg.Key, Size: pkg.Size, CreatedAt: pkg.CreatedAt})
+		}
+	}
+	return packages, nil
 }

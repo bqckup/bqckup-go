@@ -134,17 +134,24 @@ func TestListRemoteContentsIncrementalModeWiresRepositoryConfig(t *testing.T) {
 	site := remoteSite()
 	site.BackupMode = "incremental"
 	site.Incremental = config.Incremental{Password: "secret"}
+	site.Sources.Databases = []config.DatabaseSource{{Name: "app", Enabled: true, Engine: "mysql"}}
 	snapshots := &appSnapshotLister{snapshots: []incremental.Snapshot{
 		{ID: "0123456789abcdef", Paths: []string{"/var/www"}, Size: 7, CreatedAt: time.Now()},
 	}}
+	remote := &appRemoteLister{
+		sets:     []storage.BackupSet{{Key: "bqckup/site-a/2026-11-10T03-00-00.000000000Z"}},
+		packages: []storage.RemotePackage{{Key: "bqckup/site-a/2026-11-10T03-00-00.000000000Z/databases/app.sql.gz", Size: 42}},
+	}
 	application := listingApp(t, site, map[string]config.Storage{
 		"s3-primary": {Type: "s3", Bucket: "backups", Prefix: "company"},
-	}, map[string]storage.Store{"s3-primary": &appRemoteLister{}})
+	}, map[string]storage.Store{"s3-primary": remote})
 	application.snapshots = snapshots
 
 	listing, err := application.ListRemoteContents(context.Background(), "site-a", "s3-primary")
 	require.NoError(t, err)
 	require.Len(t, listing.Snapshots, 1)
+	require.Len(t, listing.DatabasePackages, 1)
+	assert.Equal(t, "bqckup/site-a/2026-11-10T03-00-00.000000000Z/databases/app.sql.gz", listing.DatabasePackages[0].Key)
 	assert.Equal(t, "01234567", listing.Snapshots[0].ID)
 	assert.Equal(t, "secret", snapshots.gotRepo.Password)
 	assert.Equal(t, "backups", snapshots.gotRepo.Bucket)

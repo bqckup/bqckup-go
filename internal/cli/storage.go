@@ -31,6 +31,11 @@ type snapshotJSON struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+type incrementalListingJSON struct {
+	Snapshots        []snapshotJSON `json:"snapshots"`
+	DatabasePackages []packageJSON  `json:"database_packages"`
+}
+
 func newStorageCommand(opts *options) *cobra.Command {
 	command := &cobra.Command{Use: "storage", Short: "Inspect live remote storage contents"}
 	var site string
@@ -164,35 +169,87 @@ func writePackageText(output io.Writer, listing backup.Listing) error {
 		_, err := fmt.Fprintf(output, "No packages found for site %q on %q.\n", listing.Site, listing.Destination)
 		return err
 	}
+	databasePackages := make([]backup.PackageRow, 0)
+	filePackages := make([]backup.PackageRow, 0)
+	for _, pkg := range listing.Packages {
+		if isDatabasePackage(pkg.Key) {
+			databasePackages = append(databasePackages, pkg)
+		} else {
+			filePackages = append(filePackages, pkg)
+		}
+	}
+	if len(databasePackages) == 0 {
+		return writePackageRows(output, filePackages)
+	}
+	if len(filePackages) > 0 {
+		if _, err := fmt.Fprintln(output, "FILE PACKAGES"); err != nil {
+			return err
+		}
+		if err := writePackageRows(output, filePackages); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintln(output); err != nil {
+			return err
+		}
+	}
+	if _, err := fmt.Fprintln(output, "DATABASE PACKAGES"); err != nil {
+		return err
+	}
+	return writePackageRows(output, databasePackages)
+}
+
+func isDatabasePackage(key string) bool {
+	return strings.Contains(key, "/databases/")
+}
+
+func writeSnapshotText(output io.Writer, listing backup.Listing) error {
+	if len(listing.Snapshots) == 0 && len(listing.DatabasePackages) == 0 {
+		_, err := fmt.Fprintf(output, "No snapshots found for site %q on %q.\n", listing.Site, listing.Destination)
+		return err
+	}
+	if len(listing.Snapshots) > 0 {
+		table := tabwriter.NewWriter(output, 0, 4, 2, ' ', 0)
+		if _, err := fmt.Fprintln(table, "ID\tPATHS\tSIZE\tCREATED AT"); err != nil {
+			return err
+		}
+		for _, snapshot := range listing.Snapshots {
+			size := "-"
+			if snapshot.Size > 0 {
+				size = humanBytes(snapshot.Size)
+			}
+			if _, err := fmt.Fprintf(table, "%s\t%s\t%s\t%s\n",
+				snapshot.ID, strings.Join(snapshot.Paths, ", "), size, snapshot.CreatedAt.UTC().Format(storageTimeLayout)); err != nil {
+				return err
+			}
+		}
+		if err := table.Flush(); err != nil {
+			return err
+		}
+	}
+	if len(listing.DatabasePackages) > 0 {
+		if len(listing.Snapshots) > 0 {
+			if _, err := fmt.Fprintln(output); err != nil {
+				return err
+			}
+		}
+		if _, err := fmt.Fprintln(output, "DATABASE PACKAGES"); err != nil {
+			return err
+		}
+		if err := writePackageRows(output, listing.DatabasePackages); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func writePackageRows(output io.Writer, packages []backup.PackageRow) error {
 	table := tabwriter.NewWriter(output, 0, 4, 2, ' ', 0)
 	if _, err := fmt.Fprintln(table, "DESTINATION\tKEY\tSIZE\tCREATED AT"); err != nil {
 		return err
 	}
-	for _, pkg := range listing.Packages {
+	for _, pkg := range packages {
 		if _, err := fmt.Fprintf(table, "%s\t%s\t%s\t%s\n",
 			pkg.Destination, pkg.Key, humanBytes(pkg.Size), pkg.CreatedAt.UTC().Format(storageTimeLayout)); err != nil {
-			return err
-		}
-	}
-	return table.Flush()
-}
-
-func writeSnapshotText(output io.Writer, listing backup.Listing) error {
-	if len(listing.Snapshots) == 0 {
-		_, err := fmt.Fprintf(output, "No snapshots found for site %q on %q.\n", listing.Site, listing.Destination)
-		return err
-	}
-	table := tabwriter.NewWriter(output, 0, 4, 2, ' ', 0)
-	if _, err := fmt.Fprintln(table, "ID\tPATHS\tSIZE\tCREATED AT"); err != nil {
-		return err
-	}
-	for _, snapshot := range listing.Snapshots {
-		size := "-"
-		if snapshot.Size > 0 {
-			size = humanBytes(snapshot.Size)
-		}
-		if _, err := fmt.Fprintf(table, "%s\t%s\t%s\t%s\n",
-			snapshot.ID, strings.Join(snapshot.Paths, ", "), size, snapshot.CreatedAt.UTC().Format(storageTimeLayout)); err != nil {
 			return err
 		}
 	}
@@ -208,11 +265,18 @@ func encodeStorageJSON(encoder *json.Encoder, listing backup.Listing) error {
 	if listing.Mode == "incremental" {
 		rows := make([]snapshotJSON, 0, len(listing.Snapshots))
 		for _, snapshot := range listing.Snapshots {
-			rows = append(rows, snapshotJSON{
-				ID: snapshot.ID, Paths: snapshot.Paths, Size: snapshot.Size, CreatedAt: snapshot.CreatedAt.UTC(),
+			rows = append(rows, snapshotJSON{ID: snapshot.ID, Paths: snapshot.Paths, Size: snapshot.Size, CreatedAt: snapshot.CreatedAt.UTC()})
+		}
+		if len(listing.DatabasePackages) == 0 {
+			return encoder.Encode(rows)
+		}
+		packages := make([]packageJSON, 0, len(listing.DatabasePackages))
+		for _, pkg := range listing.DatabasePackages {
+			packages = append(packages, packageJSON{
+				Destination: pkg.Destination, Key: pkg.Key, Size: pkg.Size, CreatedAt: pkg.CreatedAt.UTC(),
 			})
 		}
-		return encoder.Encode(rows)
+		return encoder.Encode(incrementalListingJSON{Snapshots: rows, DatabasePackages: packages})
 	}
 	rows := make([]packageJSON, 0, len(listing.Packages))
 	for _, pkg := range listing.Packages {
