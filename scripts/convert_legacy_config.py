@@ -92,6 +92,8 @@ def legacy_site(document: dict[str, Any], warnings: list[str]) -> dict[str, Any]
     database = old.get("database")
     if isinstance(database, dict):
         engine = str(database.get("type") or "").lower()
+        if engine == "postgresql":
+            engine = "postgres"
         db = {
             "name": str(database.get("name") or name),
             "enabled": as_bool(database.get("enabled"), True),

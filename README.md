@@ -118,6 +118,9 @@ converter again.
 Existing schema-v2 site files such as the default `example.yaml` are skipped
 automatically when found in the legacy tree.
 
+Legacy database type `postgresql` is normalized to the v2 engine name
+`postgres`.
+
 ## Backup modes
 
 ### Full backup
