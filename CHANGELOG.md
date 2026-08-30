@@ -6,8 +6,8 @@ All notable changes to Bqckup are documented in this file.
 
 - Simplify the operator documentation and list supported configuration values
   beside examples, including notification route events and channel types.
-- Align command references and the internal backlog with the delivered
-  snapshot listing, restore, summary, and notification features.
+- Align command references with the delivered snapshot listing, restore,
+  summary, and notification features.
 
 ## v0.0.7
 
