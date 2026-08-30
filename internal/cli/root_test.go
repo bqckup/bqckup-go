@@ -67,7 +67,3 @@ func TestFormatErrorMessageDescendsIntoJoinNestedInCause(t *testing.T) {
 func TestFormatErrorMessagePassesThroughNonAppErrors(t *testing.T) {
 	assert.Equal(t, "plain failure", formatErrorMessage(errors.New("plain failure")))
 }
-
-func TestExitCodeNoChange(t *testing.T) {
-	assert.Equal(t, 5, ExitCode(errNoChange))
-}

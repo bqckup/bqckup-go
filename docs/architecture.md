@@ -86,7 +86,7 @@ overwrites.
   blobs in `locks/`, 30-minute staleness, exclusive for backup/retention,
   refresh every 5 minutes during long operations). `bqckup backup unlock
   <site>` removes stale locks.
-- `internal/cli`: command parsing, presentation, and the single exit-code mapper (0: success, 1: internal error, 2: configuration error, 3: preflight error, 4: execution/storage/cancellation error, 5: backup unchanged).
+- `internal/cli`: command parsing, presentation, and the single exit-code mapper (0: success, 1: internal error, 2: configuration error, 3: preflight error, 4: execution/storage/cancellation error). A `no_change` backup is informational and exits 0.
 - `internal/app`: the only normal place that constructs concrete dependencies.
 
 Interfaces belong to their consumer. Do not create interfaces merely to mirror every concrete type, and do not add a public `pkg/` tree without a real external consumer.

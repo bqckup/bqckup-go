@@ -253,14 +253,14 @@ site:
 `, siteName, enabled, source)), 0o600))
 }
 
-func TestBackupRunSingleSiteNoChangeExitCode5(t *testing.T) {
+func TestBackupRunSingleSiteNoChangeIsSuccessful(t *testing.T) {
 	configDir, _ := writeCLIConfig(t)
 	// First run: success
 	root, stdout, _ := commandForTest(t, "--config-dir", configDir, "backup", "run", "example", "--force")
 	require.NoError(t, root.Execute())
 	assert.Contains(t, stdout.String(), "example: success")
 
-	// Second run (source unchanged): no_change, exits with code 5
+	// Second run (source unchanged): no_change is informational and exits 0.
 	stdout = new(bytes.Buffer)
 	stderr := new(bytes.Buffer)
 	code := Execute(t.Context(), stdout, stderr)
@@ -269,8 +269,7 @@ func TestBackupRunSingleSiteNoChangeExitCode5(t *testing.T) {
 	// Run with args via root command execution
 	rootCmd, stdout, stderr := commandForTest(t, "--config-dir", configDir, "--output", "json", "backup", "run", "example", "--force")
 	err := rootCmd.Execute()
-	require.Error(t, err)
-	assert.Equal(t, 5, ExitCode(err))
+	require.NoError(t, err)
 	var result map[string]any
 	require.NoError(t, json.Unmarshal(stdout.Bytes(), &result))
 	assert.Equal(t, "no_change", result["status"])
@@ -278,12 +277,11 @@ func TestBackupRunSingleSiteNoChangeExitCode5(t *testing.T) {
 	// Text output format
 	rootCmd, stdout, _ = commandForTest(t, "--config-dir", configDir, "backup", "run", "example", "--force")
 	err = rootCmd.Execute()
-	require.Error(t, err)
-	assert.Equal(t, 5, ExitCode(err))
+	require.NoError(t, err)
 	assert.Contains(t, stdout.String(), "example: no_change")
 }
 
-func TestBackupRunMultiSiteNoChangeExitCode5(t *testing.T) {
+func TestBackupRunMultiSiteNoChangeIsSuccessful(t *testing.T) {
 	configDir, _ := writeCLIConfig(t)
 	writeCLISite(t, configDir, "site-b", true)
 
@@ -293,11 +291,10 @@ func TestBackupRunMultiSiteNoChangeExitCode5(t *testing.T) {
 	assert.Contains(t, stdout.String(), "example: success")
 	assert.Contains(t, stdout.String(), "site-b: success")
 
-	// Second run (all unchanged): exits 5
+	// Second run (all unchanged): exits 0.
 	root, stdout, _ = commandForTest(t, "--config-dir", configDir, "--output", "json", "backup", "run", "--force")
 	err := root.Execute()
-	require.Error(t, err)
-	assert.Equal(t, 5, ExitCode(err))
+	require.NoError(t, err)
 
 	var results []backup.RunResult
 	require.NoError(t, json.Unmarshal(stdout.Bytes(), &results))

@@ -2,7 +2,6 @@ package cli
 
 import (
 	"bufio"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -17,8 +16,6 @@ import (
 	"github.com/bqckup/bqckup-go/internal/config"
 	"github.com/spf13/cobra"
 )
-
-var errNoChange = errors.New("backup unchanged")
 
 type siteView struct {
 	Name             string     `json:"name"`
@@ -135,9 +132,6 @@ func newBackupCommand(opts *options) *cobra.Command {
 							return err
 						}
 					}
-					if result.Status == backup.StatusNoChange {
-						return errNoChange
-					}
 					return nil
 				}
 
@@ -173,11 +167,6 @@ func newBackupCommand(opts *options) *cobra.Command {
 				if opts.output == "json" {
 					if err := writeJSON(cmd, results); err != nil {
 						return err
-					}
-				}
-				for _, result := range results {
-					if result.Status == backup.StatusNoChange {
-						return errNoChange
 					}
 				}
 				return nil
