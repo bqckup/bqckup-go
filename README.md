@@ -152,6 +152,7 @@ bqckup backup restore <site> --destination <name> --target <directory>
 bqckup storage list <destination> --site <site>
 bqckup storage link <destination> --key <key>
 bqckup history list [--site <name>] [--limit <n>] [--details]
+bqckup update [--version <version>]
 bqckup version
 ```
 
@@ -160,11 +161,16 @@ subcommand with `--help` to see all available options. In text mode,
 `backup run` reports each site as soon as it starts, shows a loading spinner in
 an interactive terminal (or a five-second heartbeat when redirected), and
 prints its result as soon as it finishes; JSON mode suppresses progress text.
+`update` likewise shows an interactive spinner (or a five-second heartbeat
+when redirected) while it downloads, verifies, and installs the release.
 
 `storage list` displays full-mode archives as stored objects. For incremental
 sites it displays file snapshots separately; when the site has enabled
 databases, a `DATABASE PACKAGES` section also lists the timestamped database
 exports.
+
+`backup run --force` ignores only the configured minimum backup interval. It
+does not bypass the per-site lock while another backup of that site is active.
 
 ## Notifications
 

@@ -87,7 +87,7 @@ func TestDiscordEmbedFailed(t *testing.T) {
 	assert.False(t, embed.Fields[6].Inline)
 
 	assert.Equal(t, "Try this", embed.Fields[7].Name)
-	assert.Equal(t, "1. Check the site's data and logs. If the backup started but never finished, it likely timed out or crashed.\n2. Run `bqckup backup run example.org --force` and watch the output.", embed.Fields[7].Value)
+	assert.Equal(t, "1. Check the site's data and logs. If the backup started but never finished, confirm that no backup process for the site is still running.\n2. Once no backup is active, run `bqckup backup run example.org --force` and watch the output.", embed.Fields[7].Value)
 	assert.False(t, embed.Fields[7].Inline)
 }
 

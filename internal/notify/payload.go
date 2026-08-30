@@ -331,7 +331,7 @@ func tryThis(payload Payload) string {
 	case payload.ErrorCategory == string(apperror.CategoryPreflight):
 		template = "1. Check the database host and credentials. If a check before the backup failed, the backup did not start.\n2. Run `bqckup backup run {site} --force` to try again."
 	case payload.ErrorCategory == string(apperror.CategoryExecution):
-		template = "1. Check the site's data and logs. If the backup started but never finished, it likely timed out or crashed.\n2. Run `bqckup backup run {site} --force` and watch the output."
+		template = "1. Check the site's data and logs. If the backup started but never finished, confirm that no backup process for the site is still running.\n2. Once no backup is active, run `bqckup backup run {site} --force` and watch the output."
 	case payload.ErrorCategory == string(apperror.CategoryStorage):
 		template = "1. Check the storage credentials and endpoint. If the backup ran but could not be saved, the storage is the likely cause.\n2. Run `bqckup doctor` to check the storage."
 	case payload.ErrorCategory == string(apperror.CategoryPersistence):

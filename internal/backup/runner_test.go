@@ -69,6 +69,18 @@ func TestRunnerSkipsWhenSiteLockIsHeld(t *testing.T) {
 	assert.Empty(t, deps.repository.createdRuns)
 }
 
+func TestRunnerForceDoesNotBypassHeldSiteLock(t *testing.T) {
+	deps := successfulDependencies(t)
+	deps.lock.acquired = false
+
+	result, err := NewRunner(deps.dependencies()).Run(context.Background(), validSite(), true)
+	require.NoError(t, err)
+	assert.Equal(t, StatusSkipped, result.Status)
+	assert.Equal(t, SkipAlreadyRunning, result.SkipReason)
+	assert.Empty(t, deps.repository.createdRuns)
+	assert.Equal(t, 0, deps.archiver.calls)
+}
+
 func TestRunnerDoesNotApplyRetentionAfterArchiveFailure(t *testing.T) {
 	deps := successfulDependencies(t)
 	deps.archiver.err = errors.New("source vanished")

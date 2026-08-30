@@ -361,6 +361,21 @@ enabled database source, its database exports appear in a separate
 `DATABASE PACKAGES` table. JSON output uses `snapshots` and
 `database_packages` fields for that mixed result.
 
+`--force` does not bypass an active site lock. If the command reports
+`already_running`, confirm whether another process is backing up the same site
+and wait for it to finish or stop a genuinely stuck process before retrying.
+Do not delete the lock file while a process may still hold it.
+
+Update the installed Linux binary to the latest release:
+
+```bash
+sudo bqckup update
+```
+
+The update command shows a spinner in an interactive terminal or a heartbeat
+every five seconds when redirected while it downloads, verifies, and installs
+the release. Use `--version <version>` to install a specific release.
+
 List recent history:
 
 ```bash
@@ -471,6 +486,7 @@ restore directly over production data.
 | `could not export database` | The exporter failed. | Check connectivity, credentials, grants, and whether the database service is running. |
 | `could not store backup artifact` | A destination rejected or could not receive data. | Check directory permissions, network access, bucket, endpoint, region, and credentials. |
 | `minimum_interval` skip | The previous successful run is too recent. | Wait or run once with `--force`. |
+| `already_running` skip | Another process holds this site's backup lock. | Let it finish, or stop a confirmed stuck process, then retry. `--force` does not bypass this lock. |
 | Repository lock error | An incremental repository has an active or stale lock. | Confirm no backup is active, then use `bqckup backup unlock <site>` for a stale lock. |
 
 Exit codes:
