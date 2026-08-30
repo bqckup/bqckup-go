@@ -119,8 +119,7 @@ def legacy_site(document: dict[str, Any], warnings: list[str]) -> dict[str, Any]
 
 
 def convert(args: argparse.Namespace) -> int:
-    source = Path(args.input_dir).resolve()
-    target = Path(args.output_dir).resolve()
+    source, target = resolve_paths(args)
     if not source.is_dir():
         print(f"error: input directory does not exist: {source}", file=sys.stderr)
         return 2
@@ -202,6 +201,64 @@ def convert(args: argparse.Namespace) -> int:
     return 0
 
 
+def resolve_paths(args: argparse.Namespace) -> tuple[Path, Path]:
+    if args.input_dir:
+        source = Path(args.input_dir).resolve()
+    else:
+        legacy_default = Path("/etc/bqckup_old")
+        active_default = Path("/etc/bqckup")
+        if is_legacy_tree(legacy_default):
+            source = legacy_default.resolve()
+            default_target = active_default.resolve()
+        elif is_legacy_tree(active_default):
+            source = active_default.resolve()
+            default_target = Path("/etc/bqckup-v2").resolve()
+            print(
+                "warning: legacy config is still in /etc/bqckup; "
+                "writing converted config to /etc/bqckup-v2",
+                file=sys.stderr,
+            )
+        else:
+            print("error: no legacy config detected in /etc/bqckup_old or /etc/bqckup; pass --input-dir", file=sys.stderr)
+            raise SystemExit(2)
+        if args.output_dir:
+            target = Path(args.output_dir).resolve()
+        else:
+            target = default_target
+            if target.exists():
+                print(
+                    f"error: active config already exists at {target}; "
+                    "pass --force to replace it or use --output-dir",
+                    file=sys.stderr,
+                )
+                raise SystemExit(2)
+        return source, target
+    target = Path(args.output_dir or "/etc/bqckup").resolve()
+    if source == target:
+        print("error: input and output directories must be different", file=sys.stderr)
+        raise SystemExit(2)
+    return source, target
+
+
+def is_legacy_tree(directory: Path) -> bool:
+    if not directory.is_dir():
+        return False
+    storage = directory / "config" / "storages.yml"
+    if not storage.exists():
+        storage = directory / "config" / "storages.yaml"
+    if not storage.exists():
+        return False
+    for path in (directory / "sites").glob("*.y*ml"):
+        try:
+            with path.open(encoding="utf-8") as handle:
+                document = yaml.safe_load(handle) or {}
+        except (OSError, yaml.YAMLError):
+            return False
+        if isinstance(document, dict) and isinstance(document.get("bqckup"), dict):
+            return True
+    return False
+
+
 def write_yaml(path: Path, value: dict[str, Any], mode: int) -> None:
     with path.open("w", encoding="utf-8") as handle:
         yaml.safe_dump(value, handle, sort_keys=False, allow_unicode=False, default_flow_style=False)
@@ -210,8 +267,8 @@ def write_yaml(path: Path, value: dict[str, Any], mode: int) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Convert legacy Bqckup config files to schema-v2 YAML")
-    parser.add_argument("--input-dir", required=True, help="legacy config root, e.g. /etc/bqckup")
-    parser.add_argument("--output-dir", required=True, help="new config root to create")
+    parser.add_argument("--input-dir", help="legacy config root (auto-detects /etc/bqckup_old)")
+    parser.add_argument("--output-dir", help="new config root (defaults to /etc/bqckup)")
     parser.add_argument("--force", action="store_true", help="replace an existing output directory")
     return convert(parser.parse_args())
 

@@ -97,11 +97,14 @@ To convert a legacy configuration tree, install PyYAML and run:
 ```bash
 python3 -m pip install -r scripts/requirements-converter.txt
 sudo mv /etc/bqckup /etc/bqckup_old
-python3 scripts/convert_legacy_config.py \
-  --input-dir /etc/bqckup_old \
-  --output-dir /etc/bqckup
+python3 scripts/convert_legacy_config.py
 sudo bqckup --config-dir /etc/bqckup config validate
 ```
+
+Without arguments, the converter prefers legacy files in `/etc/bqckup_old` and
+writes `/etc/bqckup`. If legacy files are still in `/etc/bqckup`, it detects
+that layout and writes safely to `/etc/bqckup-v2`. A current schema-v2 tree is
+not treated as legacy. Use `--input-dir` and `--output-dir` for another layout.
 
 The converter does not modify the legacy tree or print credentials. Review
 warnings—especially undefined legacy destinations such as `dummy`—before

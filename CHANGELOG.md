@@ -33,6 +33,10 @@ All notable changes to Bqckup are documented in this file.
 - Add a Python converter for legacy `storages.yml`, site files, and
   `bqckup.cnf` configuration trees.
 - Configure the converter and installer to use `/var/log/bqckup/bqckup.log`.
+- Let the converter auto-detect `/etc/bqckup_old` as input and `/etc/bqckup`
+  as output when no paths are supplied.
+- Detect legacy files still located in `/etc/bqckup` and use
+  `/etc/bqckup-v2` as a safe automatic output directory.
 - Document the migration layout using `/etc/bqckup_old` as the preserved
   legacy tree and `/etc/bqckup` as the generated active tree.
 - Show each batch failure beside its site and replace the duplicated trailing
