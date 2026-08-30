@@ -4,6 +4,8 @@ All notable changes to Bqckup are documented in this file.
 
 ## v0.0.5
 
+- Show immediate per-site start and completion progress for `backup run` text
+  output while keeping JSON output clean for automation.
 - Added global `server_id` namespacing under `bqckup/<server_id>/<site>/`.
 - Renamed internal incremental packages from `restic` to `incremental` while
   preserving official Restic repository compatibility.

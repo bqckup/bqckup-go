@@ -13,6 +13,7 @@ import (
 	"github.com/bqckup/bqckup-go/internal/app"
 	"github.com/bqckup/bqckup-go/internal/apperror"
 	"github.com/bqckup/bqckup-go/internal/backup"
+	"github.com/bqckup/bqckup-go/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -111,6 +112,14 @@ func newBackupCommand(opts *options) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return withApplication(cmd, opts.configDir, func(application *app.App) error {
 				if len(args) == 1 {
+					if opts.output != "json" {
+						site, ok := application.Configuration().Site(args[0])
+						if ok {
+							if err := writeBackupStartText(cmd.ErrOrStderr(), backupProgressForSite(site)); err != nil {
+								return err
+							}
+						}
+					}
 					result, err := application.RunBackup(cmd.Context(), args[0], force)
 					if err != nil {
 						return err
@@ -130,19 +139,30 @@ func newBackupCommand(opts *options) *cobra.Command {
 					return nil
 				}
 
-				results, err := application.RunEnabledBackups(cmd.Context(), force)
+				var progressErr error
+				var observer app.BackupRunObserver
+				if opts.output != "json" {
+					observer = func(progress app.BackupRunProgress) {
+						if progressErr != nil {
+							return
+						}
+						if progress.Result == nil {
+							progressErr = writeBackupStartText(cmd.ErrOrStderr(), progress)
+							return
+						}
+						progressErr = writeRunResultText(cmd.OutOrStdout(), *progress.Result)
+					}
+				}
+				results, err := application.RunEnabledBackups(cmd.Context(), force, observer)
 				if err != nil {
 					return err
+				}
+				if progressErr != nil {
+					return progressErr
 				}
 				if opts.output == "json" {
 					if err := writeJSON(cmd, results); err != nil {
 						return err
-					}
-				} else {
-					for _, result := range results {
-						if err := writeRunResultText(cmd.OutOrStdout(), result); err != nil {
-							return err
-						}
 					}
 				}
 				for _, result := range results {
@@ -263,6 +283,28 @@ func writeRunResultText(out io.Writer, result backup.RunResult) error {
 	if result.ReclaimedBytes > 0 {
 		_, err = fmt.Fprintf(out, "%s: reclaimed %s\n", result.SiteName, humanBytes(result.ReclaimedBytes))
 	}
+	return err
+}
+
+func backupProgressForSite(site config.Site) app.BackupRunProgress {
+	destinations := make([]string, 0, len(site.Destinations))
+	for _, destination := range site.Destinations {
+		destinations = append(destinations, destination.Storage)
+	}
+	return app.BackupRunProgress{
+		SiteName:     site.Name,
+		BackupMode:   site.BackupMode,
+		Destinations: destinations,
+	}
+}
+
+func writeBackupStartText(out io.Writer, progress app.BackupRunProgress) error {
+	mode := progress.BackupMode
+	if mode == "" {
+		mode = "full"
+	}
+	destinations := strings.Join(progress.Destinations, ", ")
+	_, err := fmt.Fprintf(out, "[→] backup:%s: starting %s backup to %s\n", progress.SiteName, mode, destinations)
 	return err
 }
 

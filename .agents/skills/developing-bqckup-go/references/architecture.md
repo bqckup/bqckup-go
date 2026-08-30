@@ -6,6 +6,10 @@ Read current package contracts and their tests before changing responsibilities.
 
 - `internal/cli` parses commands and renders text or JSON. It does not execute
   backup logic.
+- Text-mode backup progress is rendered by `internal/cli`; start events go to
+  stderr and terminal results go to stdout. JSON mode must not emit progress
+  text. Progress events crossing from `internal/app` contain only sanitized
+  site names, modes, destination names, and run results.
 - `internal/app` loads configuration, creates concrete adapters, and owns their
   lifecycle.
 - `internal/backup` orchestrates runs and owns the narrow interfaces it uses.

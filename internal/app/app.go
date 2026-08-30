@@ -213,16 +213,45 @@ func (a *App) RunBackup(ctx context.Context, siteName string, force bool) (backu
 	return a.runner.Run(ctx, site, force)
 }
 
+// BackupRunProgress contains only the non-sensitive configuration needed to
+// report progress while a batch of enabled sites is running. Result is nil
+// when the site starts and populated when it finishes.
+type BackupRunProgress struct {
+	SiteName     string
+	BackupMode   string
+	Destinations []string
+	Result       *backup.RunResult
+}
+
+type BackupRunObserver func(BackupRunProgress)
+
 // RunEnabledBackups runs every enabled site in deterministic configuration
 // order. It stops at the first failure so the existing error category and
-// process exit-code contract remain intact.
-func (a *App) RunEnabledBackups(ctx context.Context, force bool) ([]backup.RunResult, error) {
+// process exit-code contract remain intact. The optional observer is called
+// synchronously, allowing text clients to render each site's progress without
+// exposing credentials from the site configuration.
+func (a *App) RunEnabledBackups(ctx context.Context, force bool, observer BackupRunObserver) ([]backup.RunResult, error) {
 	results := make([]backup.RunResult, 0, len(a.configuration.Sites))
 	for _, site := range a.configuration.Sites {
 		if !site.Enabled {
 			continue
 		}
+		progress := BackupRunProgress{
+			SiteName:     site.Name,
+			BackupMode:   site.BackupMode,
+			Destinations: make([]string, 0, len(site.Destinations)),
+		}
+		for _, destination := range site.Destinations {
+			progress.Destinations = append(progress.Destinations, destination.Storage)
+		}
+		if observer != nil {
+			observer(progress)
+		}
 		result, err := a.RunBackup(ctx, site.Name, force)
+		if observer != nil {
+			progress.Result = &result
+			observer(progress)
+		}
 		if err != nil {
 			return results, err
 		}

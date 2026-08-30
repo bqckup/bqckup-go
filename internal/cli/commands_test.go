@@ -106,11 +106,12 @@ func TestBackupRunSucceedsWhenUnusedNotificationEndpointIsUnreachable(t *testing
 
 func TestBackupRunAndHistoryListEndToEnd(t *testing.T) {
 	configDir, backupRoot := writeCLIConfig(t)
-	root, stdout, _ := commandForTest(t, "--config-dir", configDir, "--output", "json", "backup", "run", "example", "--force")
+	root, stdout, stderr := commandForTest(t, "--config-dir", configDir, "--output", "json", "backup", "run", "example", "--force")
 	require.NoError(t, root.Execute())
 	var result map[string]any
 	require.NoError(t, json.Unmarshal(stdout.Bytes(), &result))
 	assert.Equal(t, "success", result["status"])
+	assert.Empty(t, stderr.String(), "JSON backup output must not include progress text")
 
 	matches, err := filepath.Glob(filepath.Join(backupRoot, "bqckup", "example", "*", "*", "files.tar.gz"))
 	require.NoError(t, err)
@@ -135,12 +136,21 @@ func TestBackupRunAndHistoryListEndToEnd(t *testing.T) {
 	assert.Contains(t, stdout.String(), runs[0].Packages[0].ObjectKey)
 }
 
+func TestBackupRunReportsTextProgress(t *testing.T) {
+	configDir, _ := writeCLIConfig(t)
+	root, stdout, stderr := commandForTest(t, "--config-dir", configDir, "backup", "run", "example", "--force")
+	require.NoError(t, root.Execute())
+
+	assert.Equal(t, "[→] backup:example: starting full backup to local-primary\n", stderr.String())
+	assert.Contains(t, stdout.String(), "example: success (run ")
+}
+
 func TestBackupRunWithoutSiteRunsEveryEnabledSite(t *testing.T) {
 	configDir, backupRoot := writeCLIConfig(t)
 	writeCLISite(t, configDir, "site-b", true)
 	writeCLISite(t, configDir, "site-disabled", false)
 
-	root, stdout, _ := commandForTest(t, "--config-dir", configDir, "--output", "json", "backup", "run", "--force")
+	root, stdout, stderr := commandForTest(t, "--config-dir", configDir, "--output", "json", "backup", "run", "--force")
 	require.NoError(t, root.Execute())
 
 	var results []backup.RunResult
@@ -149,6 +159,7 @@ func TestBackupRunWithoutSiteRunsEveryEnabledSite(t *testing.T) {
 	assert.Equal(t, []string{"example", "site-b"}, []string{results[0].SiteName, results[1].SiteName})
 	assert.Equal(t, backup.StatusSuccess, results[0].Status)
 	assert.Equal(t, backup.StatusSuccess, results[1].Status)
+	assert.Empty(t, stderr.String(), "JSON batch output must not include progress text")
 
 	for _, siteName := range []string{"example", "site-b"} {
 		matches, err := filepath.Glob(filepath.Join(backupRoot, "bqckup", siteName, "*", "*", "files.tar.gz"))
