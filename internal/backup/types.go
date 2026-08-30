@@ -3,7 +3,7 @@ package backup
 import (
 	"context"
 
-	"github.com/bqckup/bqckup-go/internal/backup/restic"
+	"github.com/bqckup/bqckup-go/internal/backup/incremental"
 	"github.com/bqckup/bqckup-go/internal/config"
 )
 
@@ -26,11 +26,11 @@ type Exporter interface {
 }
 
 type IncrementalEngine interface {
-	EnsureRepository(ctx context.Context, repo restic.RepoConfig) error
-	BackupFiles(ctx context.Context, repo restic.RepoConfig, spec restic.BackupSpec) (restic.SnapshotSummary, error)
+	EnsureRepository(ctx context.Context, repo incremental.RepoConfig) error
+	BackupFiles(ctx context.Context, repo incremental.RepoConfig, spec incremental.BackupSpec) (incremental.SnapshotSummary, error)
 	// ApplyRetention forgets snapshots beyond keepLast for the site and
 	// prunes unreachable data; it returns the reclaimed bytes.
-	ApplyRetention(ctx context.Context, repo restic.RepoConfig, keepLast int, siteName string) (int64, error)
+	ApplyRetention(ctx context.Context, repo incremental.RepoConfig, keepLast int, siteName string) (int64, error)
 	// Unlock removes stale repository locks (never a live one).
-	Unlock(ctx context.Context, repo restic.RepoConfig) error
+	Unlock(ctx context.Context, repo incremental.RepoConfig) error
 }

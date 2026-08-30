@@ -16,6 +16,7 @@ import (
 
 type rootDocument struct {
 	Version       *int          `mapstructure:"version"`
+	ServerID      string        `mapstructure:"server_id"`
 	App           App           `mapstructure:"app"`
 	Notifications Notifications `mapstructure:"notifications"`
 }
@@ -108,6 +109,7 @@ func Load(ctx context.Context, dir string) (Config, error) {
 
 	cfg := Config{
 		Version:       versionOrDefault(root.Version),
+		ServerID:      root.ServerID,
 		App:           root.App,
 		Storages:      stores.Storages,
 		Sites:         sites,

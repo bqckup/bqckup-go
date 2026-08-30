@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/bqckup/bqckup-go/internal/apperror"
-	"github.com/bqckup/bqckup-go/internal/backup/restic"
+	"github.com/bqckup/bqckup-go/internal/backup/incremental"
 	"github.com/bqckup/bqckup-go/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -19,18 +19,18 @@ type fakeSnapshotRestorer struct {
 	snapshotID string
 	paths      []string
 	target     string
-	confirm    restic.RestoreOverwrite
-	summary    restic.RestoreSummary
+	confirm    incremental.RestoreOverwrite
+	summary    incremental.RestoreSummary
 	err        error
 }
 
-func (f *fakeSnapshotRestorer) RestoreSnapshot(_ context.Context, _ restic.RepoConfig, snapshotID string, paths []string, target string, confirm restic.RestoreOverwrite) (restic.RestoreSummary, error) {
+func (f *fakeSnapshotRestorer) RestoreSnapshot(_ context.Context, _ incremental.RepoConfig, snapshotID string, paths []string, target string, confirm incremental.RestoreOverwrite) (incremental.RestoreSummary, error) {
 	f.snapshotID, f.paths, f.target, f.confirm = snapshotID, paths, target, confirm
 	return f.summary, f.err
 }
 
-func taggedSnapshot(id, tag string, createdAt time.Time) restic.Snapshot {
-	return restic.Snapshot{ID: id, Paths: []string{"/data"}, Size: 10, CreatedAt: createdAt, Tags: []string{tag}}
+func taggedSnapshot(id, tag string, createdAt time.Time) incremental.Snapshot {
+	return incremental.Snapshot{ID: id, Paths: []string{"/data"}, Size: 10, CreatedAt: createdAt, Tags: []string{tag}}
 }
 
 func restoreSite() config.Site {
@@ -53,12 +53,12 @@ func restoreEnvLookup() func(string) (string, bool) {
 func TestRestoreResolvesLatestBySiteTag(t *testing.T) {
 	older := time.Date(2026, 12, 10, 6, 0, 0, 0, time.UTC)
 	newer := time.Date(2026, 12, 11, 6, 0, 0, 0, time.UTC)
-	snapshots := &fakeSnapshotLister{snapshots: []restic.Snapshot{
+	snapshots := &fakeSnapshotLister{snapshots: []incremental.Snapshot{
 		taggedSnapshot(strings.Repeat("a", 64), "site:site-b", older),
 		taggedSnapshot(strings.Repeat("b", 64), "site:site-b", newer),
 		taggedSnapshot(strings.Repeat("c", 64), "site:site-c", newer.Add(time.Hour)),
 	}}
-	engine := &fakeSnapshotRestorer{summary: restic.RestoreSummary{SnapshotID: strings.Repeat("b", 64)}}
+	engine := &fakeSnapshotRestorer{summary: incremental.RestoreSummary{SnapshotID: strings.Repeat("b", 64)}}
 	restorer := &Restorer{Snapshots: snapshots, Engine: engine, EnvLookup: restoreEnvLookup()}
 
 	result, err := restorer.RestoreSiteSnapshot(context.Background(), "local-primary", "latest", "/tmp/restore", restoreSite(), config.Storage{Type: "local", Directory: "/srv/repos"}, nil)
@@ -69,11 +69,11 @@ func TestRestoreResolvesLatestBySiteTag(t *testing.T) {
 
 func TestRestoreResolvesIDPrefix(t *testing.T) {
 	full := "abcd1234" + strings.Repeat("f", 56)
-	snapshots := &fakeSnapshotLister{snapshots: []restic.Snapshot{
+	snapshots := &fakeSnapshotLister{snapshots: []incremental.Snapshot{
 		taggedSnapshot(full, "site:site-b", time.Date(2026, 12, 10, 6, 0, 0, 0, time.UTC)),
 		taggedSnapshot(strings.Repeat("e", 64), "site:site-b", time.Date(2026, 12, 11, 6, 0, 0, 0, time.UTC)),
 	}}
-	engine := &fakeSnapshotRestorer{summary: restic.RestoreSummary{SnapshotID: full}}
+	engine := &fakeSnapshotRestorer{summary: incremental.RestoreSummary{SnapshotID: full}}
 	restorer := &Restorer{Snapshots: snapshots, Engine: engine, EnvLookup: restoreEnvLookup()}
 
 	_, err := restorer.RestoreSiteSnapshot(context.Background(), "local-primary", "abcd1234", "/tmp/restore", restoreSite(), config.Storage{Type: "local", Directory: "/srv/repos"}, nil)
@@ -82,7 +82,7 @@ func TestRestoreResolvesIDPrefix(t *testing.T) {
 }
 
 func TestRestoreUnknownSnapshotFails(t *testing.T) {
-	snapshots := &fakeSnapshotLister{snapshots: []restic.Snapshot{
+	snapshots := &fakeSnapshotLister{snapshots: []incremental.Snapshot{
 		taggedSnapshot(strings.Repeat("a", 64), "site:site-b", time.Date(2026, 12, 10, 6, 0, 0, 0, time.UTC)),
 	}}
 	restorer := &Restorer{Snapshots: snapshots, Engine: &fakeSnapshotRestorer{}, EnvLookup: restoreEnvLookup()}
@@ -93,7 +93,7 @@ func TestRestoreUnknownSnapshotFails(t *testing.T) {
 }
 
 func TestRestoreAmbiguousPrefixFails(t *testing.T) {
-	snapshots := &fakeSnapshotLister{snapshots: []restic.Snapshot{
+	snapshots := &fakeSnapshotLister{snapshots: []incremental.Snapshot{
 		taggedSnapshot(strings.Repeat("a", 64), "site:site-b", time.Date(2026, 12, 10, 6, 0, 0, 0, time.UTC)),
 		taggedSnapshot("aaaa"+strings.Repeat("b", 60), "site:site-b", time.Date(2026, 12, 11, 6, 0, 0, 0, time.UTC)),
 	}}
@@ -134,10 +134,10 @@ func TestRestoreRejectsFileTarget(t *testing.T) {
 }
 
 func TestRestorePassesConfiguredPaths(t *testing.T) {
-	snapshots := &fakeSnapshotLister{snapshots: []restic.Snapshot{
+	snapshots := &fakeSnapshotLister{snapshots: []incremental.Snapshot{
 		taggedSnapshot(strings.Repeat("a", 64), "site:site-b", time.Date(2026, 12, 10, 6, 0, 0, 0, time.UTC)),
 	}}
-	engine := &fakeSnapshotRestorer{summary: restic.RestoreSummary{SnapshotID: strings.Repeat("a", 64)}}
+	engine := &fakeSnapshotRestorer{summary: incremental.RestoreSummary{SnapshotID: strings.Repeat("a", 64)}}
 	confirm := func([]string) error { return nil }
 	restorer := &Restorer{Snapshots: snapshots, Engine: engine, EnvLookup: restoreEnvLookup()}
 
@@ -149,7 +149,7 @@ func TestRestorePassesConfiguredPaths(t *testing.T) {
 }
 
 func TestRestorePassesConfirmErrorThrough(t *testing.T) {
-	snapshots := &fakeSnapshotLister{snapshots: []restic.Snapshot{
+	snapshots := &fakeSnapshotLister{snapshots: []incremental.Snapshot{
 		taggedSnapshot(strings.Repeat("a", 64), "site:site-b", time.Date(2026, 12, 10, 6, 0, 0, 0, time.UTC)),
 	}}
 	engine := &fakeSnapshotRestorer{err: apperror.Wrap(apperror.CategoryCancellation, "restore cancelled by user", nil)}
@@ -163,7 +163,7 @@ func TestRestorePassesConfirmErrorThrough(t *testing.T) {
 
 func TestRestoreKeepsEngineFailureRedacted(t *testing.T) {
 	cause := errors.New("endpoint secret leaked here")
-	snapshots := &fakeSnapshotLister{snapshots: []restic.Snapshot{
+	snapshots := &fakeSnapshotLister{snapshots: []incremental.Snapshot{
 		taggedSnapshot(strings.Repeat("a", 64), "site:site-b", time.Date(2026, 12, 10, 6, 0, 0, 0, time.UTC)),
 	}}
 	engine := &fakeSnapshotRestorer{err: apperror.Hide("engine failure", cause)}

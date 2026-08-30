@@ -2,7 +2,7 @@
 
 Incremental mode is production behavior, not a future design cycle. The only
 runtime engine is the in-tree Restic-compatible implementation under
-`internal/engine/restic`.
+`internal/engine/incremental`.
 
 Before changing it, inspect the facade, repository, backend, lock, prune,
 compatibility, and runner tests relevant to the request.

@@ -16,7 +16,7 @@ Read current package contracts and their tests before changing responsibilities.
   into orchestration.
 - `internal/backup/database` runs exporters through an injected process
   boundary.
-- `internal/engine/restic` owns the built-in Restic-compatible repository
+- `internal/engine/incremental` owns the built-in incremental repository
   implementation. Its concrete facade is wired in `internal/app`.
 
 Add an abstraction only for a real consumer. Prefer extending an existing

@@ -10,6 +10,7 @@ const SchemaVersion = 2
 // Config is the immutable, fully loaded application configuration.
 type Config struct {
 	Version       int
+	ServerID      string
 	App           App
 	Storages      map[string]Storage
 	Sites         []Site

@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bqckup/bqckup-go/internal/backup/restic"
+	"github.com/bqckup/bqckup-go/internal/backup/incremental"
 	"github.com/bqckup/bqckup-go/internal/config"
 	"github.com/bqckup/bqckup-go/internal/history"
 	"github.com/bqckup/bqckup-go/internal/storage"
@@ -202,7 +202,7 @@ func successfulDependencies(t *testing.T) *dependencyFakes {
 	return &dependencyFakes{
 		repository:  &fakeRepository{},
 		archiver:    &fakeArchiver{},
-		incremental: &fakeIncrementalEngine{summary: restic.SnapshotSummary{SnapshotID: "snap-001", DataAdded: 2048, TotalBytesProcessed: 5_000_000}},
+		incremental: &fakeIncrementalEngine{summary: incremental.SnapshotSummary{SnapshotID: "snap-001", DataAdded: 2048, TotalBytesProcessed: 5_000_000}},
 		stores:      map[string]storage.Store{"local-primary": &fakeStore{}},
 		storages:    map[string]config.Storage{"local-primary": {Type: "local", Directory: "/var/backups/bqckup"}},
 		retainer:    &fakeRetainer{},
@@ -424,34 +424,34 @@ type fakeIncrementalEngine struct {
 	backupErr      error
 	retentionCalls int
 	retentionErr   error
-	summary        restic.SnapshotSummary
-	lastSpec       restic.BackupSpec
-	lastRepo       restic.RepoConfig
+	summary        incremental.SnapshotSummary
+	lastSpec       incremental.BackupSpec
+	lastRepo       incremental.RepoConfig
 }
 
-func (f *fakeIncrementalEngine) EnsureRepository(_ context.Context, repo restic.RepoConfig) error {
+func (f *fakeIncrementalEngine) EnsureRepository(_ context.Context, repo incremental.RepoConfig) error {
 	f.ensureCalls++
 	f.lastRepo = repo
 	return f.ensureErr
 }
 
-func (f *fakeIncrementalEngine) BackupFiles(_ context.Context, repo restic.RepoConfig, spec restic.BackupSpec) (restic.SnapshotSummary, error) {
+func (f *fakeIncrementalEngine) BackupFiles(_ context.Context, repo incremental.RepoConfig, spec incremental.BackupSpec) (incremental.SnapshotSummary, error) {
 	f.backupCalls++
 	f.lastRepo = repo
 	f.lastSpec = spec
 	if f.backupErr != nil {
-		return restic.SnapshotSummary{}, f.backupErr
+		return incremental.SnapshotSummary{}, f.backupErr
 	}
 	return f.summary, nil
 }
 
-func (f *fakeIncrementalEngine) ApplyRetention(_ context.Context, repo restic.RepoConfig, _ int, _ string) (int64, error) {
+func (f *fakeIncrementalEngine) ApplyRetention(_ context.Context, repo incremental.RepoConfig, _ int, _ string) (int64, error) {
 	f.retentionCalls++
 	f.lastRepo = repo
 	return 0, f.retentionErr
 }
 
-func (f *fakeIncrementalEngine) Unlock(_ context.Context, _ restic.RepoConfig) error {
+func (f *fakeIncrementalEngine) Unlock(_ context.Context, _ incremental.RepoConfig) error {
 	return nil
 }
 
@@ -510,7 +510,7 @@ func TestRunnerTwoForcedRunsInSameSecond(t *testing.T) {
 // fully deduplicated run), and must not claim a SHA-256 it does not have.
 func TestRunnerIncrementalPackageRecordsSnapshotSize(t *testing.T) {
 	deps := successfulDependencies(t)
-	deps.incremental.summary = restic.SnapshotSummary{SnapshotID: "snap-001", TotalBytesProcessed: 5_000_000, DataAdded: 2048}
+	deps.incremental.summary = incremental.SnapshotSummary{SnapshotID: "snap-001", TotalBytesProcessed: 5_000_000, DataAdded: 2048}
 	runner := NewRunner(deps.dependencies())
 
 	site := validSite()

@@ -79,6 +79,8 @@ Initialization never overwrites an existing configuration file.
 `bqckup.yaml`:
 
 ```yaml
+server_id: 207.180.252.231
+
 app:
   state_database: /var/lib/bqckup/bqckup.db
   temporary_directory: /var/lib/bqckup/tmp
@@ -90,7 +92,15 @@ Relative paths are resolved from the configuration directory. The environment
 variables `BQCKUP_STATE_DATABASE`, `BQCKUP_TEMPORARY_DIRECTORY`,
 `BQCKUP_LOCK_DIRECTORY`, and `BQCKUP_LOG_LEVEL` can override these settings.
 
-## 4. Configure storage
+## 4. Configure server and storage
+
+Set the global server identity in `bqckup.yaml`:
+
+```yaml
+server_id: 207.180.252.231
+```
+
+Each Bqckup installation should use its own stable server ID.
 
 Edit `config/storages.yaml`. Storage names use lowercase letters, numbers,
 dots, underscores, and hyphens.
@@ -255,9 +265,9 @@ export BQCKUP_REPOSITORY_PASSWORD='replace-with-a-strong-secret'
 The value is not stored in YAML. Do not add the removed
 `incremental.engine` field; the built-in engine is always used.
 
-Incremental repositories are stored below `restic/<site>/` inside each
-destination. Full backup sets are stored below
-`bqckup/<site>/<UTC timestamp>/`.
+Incremental repositories are stored below
+`bqckup/<server_id>/<site>/incremental-backup/` inside each destination. Full
+backup sets are stored below `bqckup/<server_id>/<site>/<UTC timestamp>/`.
 
 ## 6. Validate before running
 

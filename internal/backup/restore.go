@@ -9,13 +9,13 @@ import (
 	"strings"
 
 	"github.com/bqckup/bqckup-go/internal/apperror"
-	"github.com/bqckup/bqckup-go/internal/backup/restic"
+	"github.com/bqckup/bqckup-go/internal/backup/incremental"
 	"github.com/bqckup/bqckup-go/internal/config"
 )
 
 // SnapshotRestorer restores one snapshot through the incremental engine.
 type SnapshotRestorer interface {
-	RestoreSnapshot(ctx context.Context, repo restic.RepoConfig, snapshotID string, paths []string, target string, confirm restic.RestoreOverwrite) (restic.RestoreSummary, error)
+	RestoreSnapshot(ctx context.Context, repo incremental.RepoConfig, snapshotID string, paths []string, target string, confirm incremental.RestoreOverwrite) (incremental.RestoreSummary, error)
 }
 
 // RestoreResult is the use-case view of one restore.
@@ -31,6 +31,7 @@ type RestoreResult struct {
 // Restorer restores one site's files from one snapshot. It never writes
 // history and resolves snapshot references against the site's tag only.
 type Restorer struct {
+	ServerID  string
 	Snapshots SnapshotLister
 	Engine    SnapshotRestorer
 	EnvLookup func(string) (string, bool)
@@ -47,7 +48,7 @@ func (r *Restorer) lookupEnv(key string) (string, bool) {
 // into the target directory. The confirm callback is passed through to the
 // engine unchanged; its error keeps its apperror category so the CLI can
 // map declined prompts and non-terminal stdin to their exit codes.
-func (r *Restorer) RestoreSiteSnapshot(ctx context.Context, destination string, snapshotRef, target string, site config.Site, storageConfig config.Storage, confirm restic.RestoreOverwrite) (RestoreResult, error) {
+func (r *Restorer) RestoreSiteSnapshot(ctx context.Context, destination string, snapshotRef, target string, site config.Site, storageConfig config.Storage, confirm incremental.RestoreOverwrite) (RestoreResult, error) {
 	if err := ctx.Err(); err != nil {
 		return RestoreResult{}, err
 	}
@@ -59,7 +60,7 @@ func (r *Restorer) RestoreSiteSnapshot(ctx context.Context, destination string, 
 	if r.Snapshots == nil || r.Engine == nil {
 		return RestoreResult{}, apperror.Wrap(apperror.CategoryInternal, "incremental backup engine is unavailable", nil)
 	}
-	repo, err := buildRepoConfig(site, storageConfig, r.lookupEnv, true)
+	repo, err := buildRepoConfig(site, storageConfig, r.lookupEnv, true, r.ServerID)
 	if err != nil {
 		return RestoreResult{}, apperror.Wrap(apperror.CategoryPreflight, "could not build repository configuration", err)
 	}
@@ -73,7 +74,7 @@ func (r *Restorer) RestoreSiteSnapshot(ctx context.Context, destination string, 
 		return RestoreResult{}, apperror.Wrap(apperror.CategoryStorage, "could not list the incremental snapshots", err)
 	}
 	tag := "site:" + site.Name
-	var tagged []restic.Snapshot
+	var tagged []incremental.Snapshot
 	for _, snapshot := range snapshots {
 		if slices.Contains(snapshot.Tags, tag) {
 			tagged = append(tagged, snapshot)
@@ -109,9 +110,9 @@ func (r *Restorer) RestoreSiteSnapshot(ctx context.Context, destination string, 
 // resolveSnapshotRef resolves "latest" (newest creation time) or an ID
 // prefix against the site-tagged snapshots. Zero or ambiguous matches are
 // reported through ok=false.
-func resolveSnapshotRef(ref string, tagged []restic.Snapshot) (*restic.Snapshot, bool) {
+func resolveSnapshotRef(ref string, tagged []incremental.Snapshot) (*incremental.Snapshot, bool) {
 	if ref == "latest" {
-		var newest *restic.Snapshot
+		var newest *incremental.Snapshot
 		for i := range tagged {
 			if newest == nil || tagged[i].CreatedAt.After(newest.CreatedAt) {
 				newest = &tagged[i]
@@ -119,7 +120,7 @@ func resolveSnapshotRef(ref string, tagged []restic.Snapshot) (*restic.Snapshot,
 		}
 		return newest, newest != nil
 	}
-	var match *restic.Snapshot
+	var match *incremental.Snapshot
 	for i := range tagged {
 		if !strings.HasPrefix(tagged[i].ID, ref) {
 			continue

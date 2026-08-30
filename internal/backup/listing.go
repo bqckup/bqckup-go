@@ -4,12 +4,11 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path"
 	"sort"
 	"time"
 
 	"github.com/bqckup/bqckup-go/internal/apperror"
-	"github.com/bqckup/bqckup-go/internal/backup/restic"
+	"github.com/bqckup/bqckup-go/internal/backup/incremental"
 	"github.com/bqckup/bqckup-go/internal/config"
 	"github.com/bqckup/bqckup-go/internal/storage"
 )
@@ -24,7 +23,7 @@ type RemoteLister interface {
 
 // SnapshotLister lists snapshots through the incremental engine.
 type SnapshotLister interface {
-	ListSnapshots(ctx context.Context, repo restic.RepoConfig) ([]restic.Snapshot, error)
+	ListSnapshots(ctx context.Context, repo incremental.RepoConfig) ([]incremental.Snapshot, error)
 }
 
 // PackageRow is one stored object in a full-mode listing.
@@ -57,6 +56,7 @@ type Listing struct {
 // writes, deletes, or locks anything beyond the engine's short-lived
 // non-exclusive snapshot lock.
 type Lister struct {
+	ServerID  string
 	Snapshots SnapshotLister
 	EnvLookup func(string) (string, bool)
 }
@@ -115,7 +115,7 @@ func (l *Lister) ListSiteSnapshots(ctx context.Context, destination string, site
 }
 
 func (l *Lister) listPackages(ctx context.Context, destination string, site config.Site, remote RemoteLister) (Listing, error) {
-	sets, err := remote.ListBackupSets(ctx, path.Join("bqckup", site.Name))
+	sets, err := remote.ListBackupSets(ctx, backupSitePrefix(site.Name, l.ServerID))
 	if err != nil {
 		return Listing{}, apperror.Wrap(apperror.CategoryStorage, "could not list remote backup sets", err)
 	}
@@ -142,7 +142,7 @@ func (l *Lister) listSnapshots(ctx context.Context, destination string, site con
 	if l.Snapshots == nil {
 		return Listing{}, apperror.Wrap(apperror.CategoryInternal, "incremental backup engine is unavailable", nil)
 	}
-	repo, err := buildRepoConfig(site, storageConfig, l.lookupEnv, true)
+	repo, err := buildRepoConfig(site, storageConfig, l.lookupEnv, true, l.ServerID)
 	if err != nil {
 		return Listing{}, apperror.Wrap(apperror.CategoryPreflight, "could not build repository configuration", err)
 	}

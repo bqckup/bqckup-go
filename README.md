@@ -91,12 +91,12 @@ must have mode `0600`. Never commit real passwords or storage keys.
 
 Full mode is the default. It creates portable `.tar.gz` file archives and
 compressed `.sql.gz` database dumps below
-`bqckup/<site>/<UTC timestamp>/` in each destination.
+`bqckup/<server_id>/<site>/<UTC timestamp>/` in each destination.
 
 ### Incremental backup
 
 Incremental mode stores encrypted, deduplicated file snapshots below
-`restic/<site>/` in each destination. Set `backup_mode: incremental` and set
+`bqckup/<server_id>/<site>/incremental-backup/` in each destination. Set `backup_mode: incremental` and set
 `incremental.password_env` to the name of an environment variable containing
 the repository password. The built-in engine is always used.
 

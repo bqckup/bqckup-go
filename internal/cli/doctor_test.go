@@ -168,7 +168,7 @@ site:
 	root.SetErr(&bytes.Buffer{})
 	root.SetArgs([]string{"doctor", "--config-dir", filepath.Join(tempDir, "config")})
 	require.NoError(t, root.Execute())
-	// Incremental backups use the built-in engine and never probe for restic.
+	// Incremental backups use the built-in engine and never probe for incremental.
 	assert.NotContains(t, stdout.String(), `"name":"binary:restic"`)
 	assert.Contains(t, stdout.String(), "built-in incremental engine")
 }

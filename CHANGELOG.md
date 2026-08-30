@@ -2,6 +2,13 @@
 
 All notable changes to Bqckup are documented in this file.
 
+## v0.0.5
+
+- Added global `server_id` namespacing under `bqckup/<server_id>/<site>/`.
+- Renamed internal incremental packages from `restic` to `incremental` while
+  preserving official Restic repository compatibility.
+- Rebuild releases on every push to `main` by recreating the `v0.0.5` tag.
+
 ## v0.0.4
 
 - Added global completion notifications through SMTP email, generic webhooks,
