@@ -2,11 +2,8 @@
 // writes snapshots into a repository. Dedup is blob-level: unchanged
 // content produces identical blob IDs and is never re-stored.
 //
-// L1 scope notes:
-//   - No parent-snapshot comparison: every file is counted files_new and
-//     trees are rebuilt each run (identical trees dedup by blob ID anyway).
-//   - Excludes support basename globs, include-root-relative patterns, absolute
-//     paths/patterns, and a trailing /** for recursive directories.
+// Excludes support basename globs, include-root-relative patterns, absolute
+// paths/patterns, and a trailing /** for recursive directories.
 package archiver
 
 import (
@@ -81,17 +78,22 @@ func (a *Archiver) Backup(ctx context.Context, spec BackupSpec) (incremental.ID,
 		}
 	}
 	started := time.Now()
+	parent, err := a.parentSnapshot(ctx, spec)
+	if err != nil {
+		return incremental.ID{}, Summary{}, err
+	}
 	state := &backupState{
 		archiver: a,
 		spec:     spec,
 		started:  started,
+		parent:   parent,
 	}
 
-	for _, path := range spec.Paths {
+	for i, path := range spec.Paths {
 		if err := ctx.Err(); err != nil {
 			return incremental.ID{}, Summary{}, err
 		}
-		if err := state.backupPath(ctx, path); err != nil {
+		if err := state.backupPathAt(ctx, path, fmt.Sprintf("%d", i)); err != nil {
 			return incremental.ID{}, Summary{}, err
 		}
 	}
@@ -110,6 +112,7 @@ func (a *Archiver) Backup(ctx context.Context, spec BackupSpec) (incremental.ID,
 	// it too), so listing snapshots can report sizes without a live run.
 	snap := snapshot.Snapshot{
 		Time:           started.UTC(),
+		Parent:         parentID(parent),
 		Tree:           rootTree,
 		Paths:          spec.Paths,
 		Hostname:       spec.Hostname,
@@ -159,15 +162,135 @@ type backupState struct {
 	bytesProcessed  int64
 	dataAdded       int64
 	missed          []MissedBlob
+	parent          *parentState
+}
+
+// parentState contains the previous matching snapshot's root nodes. Directory
+// trees are loaded lazily while the current filesystem walk reaches them, so a
+// large parent snapshot does not require a second in-memory copy of every node.
+type parentState struct {
+	id    incremental.ID
+	repo  *repository.Repository
+	roots map[string]*tree.Node
+}
+
+func parentID(parent *parentState) *incremental.ID {
+	if parent == nil {
+		return nil
+	}
+	id := parent.id
+	return &id
+}
+
+func (a *Archiver) parentSnapshot(ctx context.Context, spec BackupSpec) (*parentState, error) {
+	snapshots, err := a.repo.ListSnapshots(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("archiver: list parent snapshots: %w", err)
+	}
+	var selected *repository.SnapshotWithID
+	for i := range snapshots {
+		candidate := &snapshots[i]
+		if !sameStrings(candidate.Snapshot.Paths, spec.Paths) || !sameStrings(candidate.Snapshot.Excludes, spec.Excludes) {
+			continue
+		}
+		if selected == nil || candidate.Snapshot.Time.After(selected.Snapshot.Time) {
+			selected = candidate
+		}
+	}
+	if selected == nil || selected.Snapshot.Tree == nil {
+		return nil, nil
+	}
+
+	parent := &parentState{
+		id:    selected.ID,
+		repo:  a.repo,
+		roots: make(map[string]*tree.Node),
+	}
+	root, err := a.repo.LoadTree(ctx, *selected.Snapshot.Tree)
+	if err != nil {
+		return nil, fmt.Errorf("archiver: load parent tree: %w", err)
+	}
+	if len(spec.Paths) == 1 {
+		if len(root.Nodes) != 1 {
+			// Official Restic snapshots may represent a single include root
+			// without Bqckup's wrapper node. They remain valid parents, but
+			// cannot be indexed by this fast path, so fall back to a normal walk.
+			return nil, nil
+		}
+		parent.roots["0"] = root.Nodes[0]
+		return parent, nil
+	}
+
+	rootNames := uniqueRootNames(spec.Paths)
+	byName := make(map[string]*tree.Node, len(root.Nodes))
+	for _, node := range root.Nodes {
+		byName[node.Name] = node
+	}
+	for i, name := range rootNames {
+		wrapper, ok := byName[name]
+		if !ok {
+			return nil, nil
+		}
+		if wrapper.Subtree == nil {
+			return nil, nil
+		}
+		rootTree, err := parent.loadTree(ctx, wrapper.Subtree)
+		if err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return nil, ctxErr
+			}
+			return nil, nil
+		}
+		if len(rootTree.Nodes) != 1 {
+			return nil, nil
+		}
+		parent.roots[fmt.Sprintf("%d", i)] = rootTree.Nodes[0]
+	}
+	return parent, nil
+}
+
+func (p *parentState) loadTree(ctx context.Context, id *incremental.ID) (*tree.Tree, error) {
+	return p.repo.LoadTree(ctx, *id)
+}
+
+func sameStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func uniqueRootNames(paths []string) []string {
+	names := make([]string, 0, len(paths))
+	used := make(map[string]bool, len(paths))
+	for _, path := range paths {
+		base := filepath.Base(path)
+		name := base
+		for suffix := 1; used[name]; suffix++ {
+			name = fmt.Sprintf("%s-%d", base, suffix)
+		}
+		used[name] = true
+		names = append(names, name)
+	}
+	return names
 }
 
 // backupPath backs up one root path into a tree blob.
 func (s *backupState) backupPath(ctx context.Context, path string) error {
+	return s.backupPathAt(ctx, path, "0")
+}
+
+func (s *backupState) backupPathAt(ctx context.Context, path, key string) error {
 	info, err := os.Lstat(path)
 	if err != nil {
 		return fmt.Errorf("archiver: stat %s: %w", path, err)
 	}
-	rootNode, err := s.nodeFor(ctx, path, info)
+	rootNode, _, err := s.nodeForAt(ctx, path, info, key, s.parentRoot(key))
 	if err != nil {
 		return err
 	}
@@ -189,6 +312,11 @@ func (s *backupState) backupPath(ctx context.Context, path string) error {
 
 // nodeFor builds the tree node for one filesystem object.
 func (s *backupState) nodeFor(ctx context.Context, path string, info os.FileInfo) (*tree.Node, error) {
+	node, _, err := s.nodeForAt(ctx, path, info, "", nil)
+	return node, err
+}
+
+func (s *backupState) nodeForAt(ctx context.Context, path string, info os.FileInfo, key string, old *tree.Node) (*tree.Node, bool, error) {
 	// atime is deliberately not recorded (restic default): reading a file
 	// during backup updates it on relatime filesystems, which would change
 	// every tree on the next run and break dedup.
@@ -212,30 +340,44 @@ func (s *backupState) nodeFor(ctx context.Context, path string, info os.FileInfo
 	case info.Mode()&os.ModeSymlink != 0:
 		target, err := os.Readlink(path)
 		if err != nil {
-			return nil, fmt.Errorf("archiver: readlink %s: %w", path, err)
+			return nil, false, fmt.Errorf("archiver: readlink %s: %w", path, err)
 		}
 		node.Type = tree.TypeSymlink
 		node.LinkTarget = target
-		return node, nil
+		return node, sameMetadata(node, old), nil
 
 	case info.IsDir():
-		subtree, err := s.dirTree(ctx, path)
+		subtree, unchanged, err := s.dirTreeAt(ctx, path, key, old)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		node.Type = tree.TypeDir
 		node.Subtree = subtree
-		return node, nil
+		unchanged = unchanged && sameMetadata(node, old)
+		if unchanged {
+			node = cloneNode(old)
+		}
+		return node, unchanged, nil
 
 	case info.Mode().IsRegular():
+		node.Type = tree.TypeFile
+		if old != nil && old.Type == tree.TypeFile && old.Content != nil && sameMetadata(node, old) {
+			node.Content = append([]incremental.ID(nil), old.Content...)
+			s.filesUnmodified++
+			s.bytesProcessed += int64(node.Size)
+			return node, true, nil
+		}
 		content, err := s.saveFile(ctx, path)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
-		node.Type = tree.TypeFile
 		node.Content = content
-		s.filesNew++ // no parent comparison in L1: every file is new
-		return node, nil
+		if old != nil {
+			s.filesChanged++
+		} else {
+			s.filesNew++
+		}
+		return node, false, nil
 
 	default:
 		// sockets, fifos, devices: record with metadata only, like restic
@@ -255,48 +397,112 @@ func (s *backupState) nodeFor(ctx context.Context, path string, info os.FileInfo
 		if stat, ok := info.Sys().(*syscall.Stat_t); ok {
 			node.Device = uint64(stat.Rdev)
 		}
-		return node, nil
+		return node, sameMetadata(node, old), nil
 	}
 }
 
 // dirTree walks one directory and returns the subtree blob ID.
 func (s *backupState) dirTree(ctx context.Context, dir string) (*incremental.ID, error) {
+	id, _, err := s.dirTreeAt(ctx, dir, "", nil)
+	return id, err
+}
+
+func (s *backupState) dirTreeAt(ctx context.Context, dir, key string, old *tree.Node) (*incremental.ID, bool, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return nil, fmt.Errorf("archiver: read dir %s: %w", dir, err)
+		return nil, false, fmt.Errorf("archiver: read dir %s: %w", dir, err)
 	}
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
 
 	tr := &tree.Tree{}
+	allUnmodified := true
+	seen := make(map[string]struct{}, len(entries))
+	var oldTree *tree.Tree
+	if old != nil && old.Subtree != nil {
+		oldTree, err = s.parent.loadTree(ctx, old.Subtree)
+		if err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return nil, false, ctxErr
+			}
+			oldTree = nil
+		}
+	}
+	oldChildren := make(map[string]*tree.Node)
+	if oldTree != nil {
+		for _, oldNode := range oldTree.Nodes {
+			oldChildren[oldNode.Name] = oldNode
+		}
+	}
 	for _, entry := range entries {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		path := filepath.Join(dir, entry.Name())
 		if s.excluded(path) {
 			continue
 		}
+		seen[entry.Name()] = struct{}{}
 		info, err := os.Lstat(path)
 		if err != nil {
-			return nil, fmt.Errorf("archiver: stat %s: %w", path, err)
+			return nil, false, fmt.Errorf("archiver: stat %s: %w", path, err)
 		}
-		node, err := s.nodeFor(ctx, path, info)
+		node, unchanged, err := s.nodeForAt(ctx, path, info, key+"/"+entry.Name(), oldChildren[entry.Name()])
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
+		allUnmodified = allUnmodified && unchanged
 		if err := tr.Add(node); err != nil {
-			return nil, err
+			return nil, false, err
+		}
+	}
+	if oldTree == nil || len(oldTree.Nodes) != len(seen) {
+		allUnmodified = false
+	} else {
+		for _, oldNode := range oldTree.Nodes {
+			if _, ok := seen[oldNode.Name]; !ok {
+				allUnmodified = false
+				break
+			}
+		}
+	}
+	if allUnmodified {
+		if old != nil && old.Subtree != nil {
+			id := *old.Subtree
+			return &id, true, nil
 		}
 	}
 	doc, err := tr.Marshal()
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	id, err := s.saveBlob(ctx, incremental.TreeBlob, doc)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return &id, nil
+	return &id, false, nil
+}
+
+func (s *backupState) parentRoot(key string) *tree.Node {
+	if s.parent == nil {
+		return nil
+	}
+	return s.parent.roots[key]
+}
+
+func cloneNode(node *tree.Node) *tree.Node {
+	copy := *node
+	copy.Content = append([]incremental.ID(nil), node.Content...)
+	return &copy
+}
+
+func sameMetadata(a, b *tree.Node) bool {
+	if a == nil || b == nil {
+		return false
+	}
+	return a.Name == b.Name && a.Type == b.Type && a.Mode == b.Mode && a.ModTime.Equal(b.ModTime) &&
+		a.ChangeTime.Equal(b.ChangeTime) && a.UID == b.UID && a.GID == b.GID && a.Inode == b.Inode &&
+		a.DeviceID == b.DeviceID && a.Size == b.Size && a.Links == b.Links && a.LinkTarget == b.LinkTarget &&
+		a.LinkTargetRaw == b.LinkTargetRaw && a.Device == b.Device
 }
 
 // saveFile chunks a regular file and returns its content blob IDs.
@@ -342,18 +548,8 @@ func (s *backupState) combineRoots(ctx context.Context) (*incremental.ID, error)
 		return &id, nil
 	}
 	tr := &tree.Tree{}
-	used := make(map[string]bool)
-	for i, path := range s.spec.Paths {
+	for i, name := range uniqueRootNames(s.spec.Paths) {
 		subtree := s.rootTrees[i]
-		name := filepath.Base(path)
-		base := name
-		// Two include paths can share a basename (/a/data and /b/data); the
-		// synthetic root tree needs unique names, so disambiguate like
-		// restic's tree builder: name, name-1, name-2, ...
-		for suffix := 1; used[name]; suffix++ {
-			name = fmt.Sprintf("%s-%d", base, suffix)
-		}
-		used[name] = true
 		if err := tr.Add(&tree.Node{Name: name, Type: tree.TypeDir, Subtree: &subtree}); err != nil {
 			return nil, fmt.Errorf("archiver: combine roots: %w", err)
 		}
