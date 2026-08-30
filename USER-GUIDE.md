@@ -105,8 +105,9 @@ server_id: 207.180.252.231
 
 Each Bqckup installation should use its own stable server ID.
 
-Edit `config/storages.yaml`. Storage names use lowercase letters, numbers,
-dots, underscores, and hyphens.
+Edit `config/storages.yaml`. Storage, site, and database names may use letters,
+numbers, dots, underscores, and hyphens, but must start with a letter or
+number.
 
 ### Local storage
 

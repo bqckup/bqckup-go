@@ -42,6 +42,8 @@ All notable changes to Bqckup are documented in this file.
   traceback.
 - Skip existing schema-v2 site templates found alongside legacy site files.
 - Normalize legacy database type `postgresql` to the v2 `postgres` engine.
+- Accept uppercase letters in site, storage, database, and notification names
+  for compatibility with legacy configurations.
 - Allow `--force` to regenerate an existing `/etc/bqckup` output from the
   preserved `/etc/bqckup_old` source.
 - Remove duplicate output-path validation so `--force` is handled consistently.

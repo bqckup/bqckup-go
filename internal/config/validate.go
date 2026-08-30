@@ -21,8 +21,9 @@ const (
 
 var (
 	// SafeName matches names safe to use as site names, storage names,
-	// and file-system path segments.
-	SafeName = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
+	// and file-system path segments. Uppercase letters are supported for
+	// compatibility with existing site names.
+	SafeName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 )
 
 func (c Config) Validate() error {
