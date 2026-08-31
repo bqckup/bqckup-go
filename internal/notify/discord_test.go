@@ -273,3 +273,43 @@ func TestDiscordReturnsErrorsLikeWebhook(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unsupported protocol scheme")
 }
+
+func TestDiscordReportEmbedUsesOperationalSummary(t *testing.T) {
+	received := make(chan discordPayload, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body discordPayload
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		received <- body
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(server.Close)
+
+	discord := NewDiscord("discord", server.URL)
+	payload := Payload{
+		Event:    Event(config.EventDailyReport),
+		Hostname: "backup-host",
+		ServerIP: "192.168.1.129",
+		ReportData: &ReportData{
+			ReportType: "daily",
+			Period:     "2026-08-31",
+			Overall: ReportPeriodSummary{
+				TotalRuns:    2,
+				Successful:   1,
+				Failed:       1,
+				TotalBytes:   1536,
+				Destinations: []ReportDestinationSummary{{Name: "local-primary"}},
+			},
+			Sites: []SiteReportSummary{{SiteName: "example", TotalRuns: 2, Successful: 1, Failed: 1, LastStatus: "success"}},
+		},
+	}
+	require.NoError(t, discord.Send(context.Background(), payload))
+
+	embed := (<-received).Embeds[0]
+	assert.Equal(t, "Daily Backup Report · 2026-08-31", embed.Title)
+	assert.Contains(t, embed.Description, "1 run(s) failed")
+	assert.Equal(t, "Server IP", embed.Fields[0].Name)
+	assert.Equal(t, "local-primary", embed.Fields[1].Value)
+	assert.Equal(t, "2 (OK: 1 | Failed: 1)", embed.Fields[2].Value)
+	assert.Equal(t, "1.5 KiB", embed.Fields[3].Value)
+	assert.Equal(t, "example", embed.Fields[4].Name)
+}

@@ -13,7 +13,9 @@ scheduling, restore, and common failures. It is written for operators of the
 | `backup_mode` | `full` (default), `incremental` |
 | database `engine` | `mysql`, `postgres` |
 | notification channel `type` | `smtp`, `webhook`, `discord` |
-| notification route `events` | `all`, `backup_failed`, `backup_cancelled`, `backup_no_change` |
+| notification route `events` | `all`, `backup_failed`, `backup_cancelled`, `backup_no_change`, `daily_report`, `monthly_report` |
+| `reports.daily.enabled` | `true`, `false` |
+| `reports.monthly.enabled` | `true`, `false` |
 
 Values written as `<placeholder>` in this guide must be replaced before use.
 They are documentation placeholders, not valid event, channel, or credential
@@ -324,10 +326,122 @@ notifications:
 ```
 
 Channel `type` options are `smtp`, `webhook`, and `discord`. Route `events`
-options are `all`, `backup_failed`, `backup_cancelled`, and `backup_no_change`.
-Successful runs, skipped runs, and preflight failures send no notification.
-Delivery is best effort and never changes backup history or the run result.
-Keep the root file at mode `0600` when it contains credentials or URLs.
+options are `all`, `backup_failed`, `backup_cancelled`, `backup_no_change`,
+`daily_report`, and `monthly_report`. Successful runs, skipped runs, and
+preflight failures send no notification. Delivery is best effort and never
+changes backup history or the run result. Keep the root file at mode `0600`
+when it contains credentials or URLs.
+
+## Scheduled reports
+
+Bqckup can send a daily backup summary and a monthly consolidated report
+through any configured notification channel. Reports are triggered by an
+external scheduler calling `bqckup report send daily` or
+`bqckup report send monthly`; Bqckup has no internal scheduler.
+
+Each report type is configured in the optional `reports:` section of
+`bqckup.yaml`. A named route (`name:` field on the route) connects the report
+to its delivery channels.
+
+### Configuration
+
+```yaml
+notifications:
+  channels:
+    email:
+      type: smtp
+      host: <smtp-host>
+      port: 587
+      username: <smtp-user>
+      password: <smtp-password>
+      from: <sender-address>
+      to: [<recipient-address>]
+  routes:
+    - name: daily-report-route
+      events: [daily_report]
+      channels: [email]
+    - name: monthly-report-route
+      events: [monthly_report]
+      channels: [email]
+
+reports:
+  daily:
+    enabled: true
+    timezone: UTC
+    schedule:
+      time: "08:00"
+    notification_route: daily-report-route
+    include_empty_days: false
+  monthly:
+    enabled: true
+    timezone: UTC
+    schedule:
+      day_of_month: 1
+      time: "08:00"
+    notification_route: monthly-report-route
+    include_empty_days: false
+```
+
+Report configuration fields:
+
+| Field | Description |
+| --- | --- |
+| `enabled` | Set to `true` to activate this report type. |
+| `timezone` | IANA timezone name, e.g. `UTC`, `America/New_York`, `Asia/Jakarta`. |
+| `schedule.time` | Time of day in `HH:MM` format (used by the external scheduler as a reference). |
+| `schedule.day_of_month` | Day of month to send the monthly report (1–28, monthly only). |
+| `notification_route` | Name of the route in `notifications.routes` that delivers this report. |
+| `include_empty_days` | When `true`, include days or sites with no runs in the report. |
+
+The `notification_route` value must match the `name:` field of a route in
+`notifications.routes`. Route names are optional for backup-event routes but
+required for report routes.
+
+### Sending reports
+
+Send the daily report for today:
+
+```bash
+bqckup report send daily
+```
+
+Send the daily report for a specific date:
+
+```bash
+bqckup report send daily --date 2025-01-15
+```
+
+Send the monthly report for the current month:
+
+```bash
+bqckup report send monthly
+```
+
+Send the monthly report for a specific month:
+
+```bash
+bqckup report send monthly --month 2025-01
+```
+
+Each report is delivered at most once per period. If the report for a given
+date or month has already been sent, the command exits successfully without
+sending again.
+
+### Scheduling reports with cron
+
+Add cron entries to trigger reports after your daily backup window:
+
+```cron
+# Send daily report at 08:00
+0 8 * * * root /usr/local/bin/bqckup report send daily
+
+# Send monthly report on the 1st of each month at 08:00
+0 8 1 * * root /usr/local/bin/bqckup report send monthly
+```
+
+The `schedule.time` and `schedule.day_of_month` fields in `bqckup.yaml` are
+reference values for documentation and validation only. The actual delivery
+time is controlled entirely by the external scheduler.
 
 ## 7. Daily operations
 
@@ -407,6 +521,14 @@ Example cron entry for a daily run at 02:30:
 
 ```cron
 30 2 * * * /usr/local/bin/bqckup backup run website
+```
+
+To also send a daily report at 08:00 and a monthly report on the 1st:
+
+```cron
+30 2 * * * root /usr/local/bin/bqckup backup run website
+0  8 * * * root /usr/local/bin/bqckup report send daily
+0  8 1 * * root /usr/local/bin/bqckup report send monthly
 ```
 
 Use the same operating-system user for scheduled and manual runs. Mixing root

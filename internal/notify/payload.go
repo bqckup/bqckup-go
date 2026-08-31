@@ -38,6 +38,64 @@ type DestinationInfo struct {
 	Path   string `json:"path,omitempty"`
 }
 
+// SiteReportSummary holds per-site statistics for a scheduled report payload.
+type SiteReportSummary struct {
+	SiteName               string                     `json:"site_name"`
+	TotalRuns              int                        `json:"total_runs"`
+	Successful             int                        `json:"successful"`
+	Failed                 int                        `json:"failed"`
+	Cancelled              int                        `json:"cancelled"`
+	Skipped                int                        `json:"skipped"`
+	NoChange               int                        `json:"no_change"`
+	DurationSeconds        int64                      `json:"duration_seconds"`
+	AverageDurationSeconds int64                      `json:"average_duration_seconds"`
+	TotalBytes             int64                      `json:"total_bytes"`
+	Destinations           []ReportDestinationSummary `json:"destinations,omitempty"`
+	LastStatus             string                     `json:"last_status,omitempty"`
+	LastRunAt              string                     `json:"last_run_at,omitempty"`
+}
+
+// ReportDestinationSummary holds package state for one destination in a report.
+type ReportDestinationSummary struct {
+	Name          string `json:"name"`
+	TotalPackages int    `json:"total_packages"`
+	Stored        int    `json:"stored"`
+	Failed        int    `json:"failed"`
+	TotalBytes    int64  `json:"total_bytes"`
+}
+
+// ReportPeriodSummary holds overall statistics for a day or month.
+type ReportPeriodSummary struct {
+	TotalRuns              int                        `json:"total_runs"`
+	Successful             int                        `json:"successful"`
+	Failed                 int                        `json:"failed"`
+	Cancelled              int                        `json:"cancelled"`
+	Skipped                int                        `json:"skipped"`
+	NoChange               int                        `json:"no_change"`
+	DurationSeconds        int64                      `json:"duration_seconds"`
+	AverageDurationSeconds int64                      `json:"average_duration_seconds"`
+	TotalBytes             int64                      `json:"total_bytes"`
+	Destinations           []ReportDestinationSummary `json:"destinations,omitempty"`
+}
+
+// ReportDaySummary holds one calendar day in a monthly report.
+type ReportDaySummary struct {
+	Date    string              `json:"date"`
+	HasRuns bool                `json:"has_runs"`
+	Overall ReportPeriodSummary `json:"overall"`
+	Sites   []SiteReportSummary `json:"sites,omitempty"`
+}
+
+// ReportData carries the structured summary for daily and monthly report
+// payloads. It is nil for regular per-run notifications.
+type ReportData struct {
+	ReportType string              `json:"report_type"`
+	Period     string              `json:"period"`
+	Overall    ReportPeriodSummary `json:"overall"`
+	Days       []ReportDaySummary  `json:"days,omitempty"`
+	Sites      []SiteReportSummary `json:"sites"`
+}
+
 // Payload is the shared notification payload for every channel. The JSON
 // shape is the spec contract; error fields appear only for failed and
 // cancelled runs. Hostname and ServerIP identify the machine that ran the
@@ -61,6 +119,7 @@ type Payload struct {
 	HasDatabaseSources bool              `json:"-"`
 	ErrorCategory      string            `json:"error_category,omitempty"`
 	ErrorMessage       string            `json:"error_message,omitempty"`
+	ReportData         *ReportData       `json:"report,omitempty"`
 }
 
 // NewPayload builds the shared payload from a run's facts. ErrorCategory and
@@ -126,10 +185,14 @@ func summarize(packages []history.Package) (count int, size int64, keys []string
 	return count, size, keys
 }
 
-// serverIdentity reports the machine identity attached to notifications: the
+// ServerIdentity reports the machine identity attached to notifications: the
 // hostname and the address the machine uses for its default route. Both are
 // resolved locally without sending packets; inside a container they describe
 // the container, not the host. An empty IP means no route exists.
+func ServerIdentity() (hostname, serverIP string) {
+	return serverIdentity()
+}
+
 func serverIdentity() (hostname, serverIP string) {
 	hostname = "unknown"
 	if name, err := os.Hostname(); err == nil && name != "" {
@@ -186,11 +249,29 @@ func humanStatus(status string) string {
 
 // headline renders the lead sentence shared by every human channel.
 func headline(payload Payload) string {
+	if payload.ReportData != nil {
+		return reportHeadline(payload.ReportData)
+	}
 	if payload.Status == string(backup.StatusNoChange) {
 		return "No changes detected for " + payload.Site
 	}
 	return humanStatus(payload.Status) + " for " + payload.Site
 }
+
+// reportHeadline returns the subject/title for a scheduled report.
+func reportHeadline(r *ReportData) string {
+	switch r.ReportType {
+	case "daily":
+		return "Daily Backup Report · " + r.Period
+	case "monthly":
+		return "Monthly Backup Report · " + r.Period
+	default:
+		return "Backup Report · " + r.Period
+	}
+}
+
+// reportColor returns a neutral blue accent for report payloads.
+func reportColor() int { return 0x2563EB }
 
 // lastSuccessfulLine formats a time as "02 Jan 2006, 15:04" local.
 func lastSuccessfulLine(at time.Time) string {

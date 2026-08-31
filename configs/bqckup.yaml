@@ -31,3 +31,23 @@ app:
 #     # events options: all | backup_failed | backup_cancelled | backup_no_change
 #     - events: [backup_failed]
 #       channels: [email, discord, webhook]
+
+# Optional: send scheduled daily and monthly backup summary reports.
+# Each report type requires a named notification route (name: field on the
+# route) whose channels receive the report. Keep this file at mode 0600.
+# reports:
+#   daily:
+#     enabled: true
+#     timezone: UTC
+#     schedule:
+#       time: "08:00"
+#     notification_route: daily-report-route
+#     include_empty_days: false
+#   monthly:
+#     enabled: true
+#     timezone: UTC
+#     schedule:
+#       day_of_month: 1
+#       time: "08:00"
+#     notification_route: monthly-report-route
+#     include_empty_days: false

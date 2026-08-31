@@ -38,6 +38,25 @@ func TestRepositoryRecordsRunLifecycleAndPackages(t *testing.T) {
 	assert.Equal(t, "abc", runs[0].Packages[0].SHA256)
 }
 
+func TestReportDeliveryDeduplicatesByTypeAndPeriod(t *testing.T) {
+	repo := testRepository(t)
+	ctx := context.Background()
+	when := time.Date(2026, 8, 1, 8, 0, 0, 0, time.UTC)
+
+	require.NoError(t, repo.RecordDelivery(ctx, "daily", "2026-08-01", when))
+	require.NoError(t, repo.RecordDelivery(ctx, "daily", "2026-08-01", when.Add(5*time.Minute)))
+
+	delivered, err := repo.ReportDelivered(ctx, "daily", "2026-08-01")
+	require.NoError(t, err)
+	assert.True(t, delivered)
+
+	var count int64
+	require.NoError(t, repo.db.WithContext(ctx).Model(&ReportDelivery{}).
+		Where("report_type = ? AND period = ?", "daily", "2026-08-01").
+		Count(&count).Error)
+	assert.EqualValues(t, 1, count)
+}
+
 func TestLastSuccessfulReturnsNilWhenMissing(t *testing.T) {
 	repo := testRepository(t)
 	run, err := repo.LastSuccessful(context.Background(), "missing", time.Time{})
