@@ -7,9 +7,8 @@ app:
   log_level: info
   # log_file: /var/log/bqckup/bqckup.log
 
-# Optional: notify operators when a run reaches a terminal state.
-# Notification credentials and URLs are written directly here. Keep this file
-# owned by the service account with mode 0600. See docs/configuration-v2.md.
+# Keep per-event notifications commented out unless you want immediate backup
+# alerts. The default operational mode is scheduled daily/monthly summaries.
 # notifications:
 #   channels:
 #     email:
@@ -28,13 +27,9 @@ app:
 #       type: discord
 #       webhook_url: <discord-webhook-url>
 #   routes:
-#     # events options: all | backup_failed | backup_cancelled | backup_no_change
 #     - events: [backup_failed]
 #       channels: [email, discord, webhook]
 
-# Optional: send scheduled daily and monthly backup summary reports.
-# Each report type requires a named notification route (name: field on the
-# route) whose channels receive the report. Keep this file at mode 0600.
 # reports:
 #   daily:
 #     enabled: true

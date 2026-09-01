@@ -241,6 +241,10 @@ notifications:
   matched through several routes is sent once per event. Duplicate channel
   names in the YAML map are not detected: the last definition wins (yaml map
   semantics).
+- **Per-event notifications are opt-in**. For a quiet installation, leave the
+  `notifications` block unset and rely on the scheduled daily/monthly report
+  routes instead. This keeps operational monitoring in aggregate reports rather
+  than sending a message for every backup event.
 - **Delivery**: after a run is recorded terminal in history, every channel of
   every matching route is attempted, sequentially, with the same sanitized
   payload (machine hostname and IP, run id, site, status, timestamps,
