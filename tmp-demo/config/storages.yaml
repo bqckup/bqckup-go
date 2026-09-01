@@ -1,5 +1,0 @@
-storages:
-  local-main:
-    type: local
-    directory: /mnt/workspace/Intern/fix_issue/bqckup-go/tmp-demo/backups
-    primary: true
