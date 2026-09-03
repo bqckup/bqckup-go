@@ -6,13 +6,13 @@ import (
 	"os"
 
 	"github.com/bqckup/bqckup-go/internal/apperror"
-	"github.com/bqckup/bqckup-go/internal/backup/restic"
+	"github.com/bqckup/bqckup-go/internal/backup/incremental"
 	"github.com/bqckup/bqckup-go/internal/config"
 )
 
 // IndexRepairer rebuilds one incremental repository's index files through the engine.
 type IndexRepairer interface {
-	RepairIndex(ctx context.Context, repo restic.RepoConfig) (restic.RepairResult, error)
+	RepairIndex(ctx context.Context, repo incremental.RepoConfig) (incremental.RepairResult, error)
 }
 
 // RepairOutcome is the use-case view of one index repair operation.
@@ -20,7 +20,7 @@ type RepairOutcome struct {
 	Site        string
 	Destination string
 	Mode        string
-	Result      restic.RepairResult
+	Result      incremental.RepairResult
 }
 
 // Repairer runs the index repair for one site's destination.
