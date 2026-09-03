@@ -108,10 +108,7 @@ func Open(ctx context.Context, configDir string) (*App, error) {
 		snapshots:     engine,
 		restorer:      engine,
 		checker:       engine,
-<<<<<<< HEAD
 		repairer:      engine,
-=======
->>>>>>> c23c1e1 (feat: check command for backup to investigate whole repository integrity)
 		closeDatabase: closeDatabase,
 		logger:        logger,
 		closeLogger:   closeLogger,
@@ -433,7 +430,7 @@ func (a *App) RepairIndex(ctx context.Context, siteName, destinationName string)
 }
 
 =======
->>>>>>> c23c1e1 (feat: check command for backup to investigate whole repository integrity)
+>>>>>>> 7dd64f4 (feat: add repair-index command for incremental repository)
 // RestoreSnapshot restores one snapshot of one incremental site into the
 // target directory. Validation mirrors ListSiteSnapshots; the confirm
 // callback is passed through to the engine unchanged.
