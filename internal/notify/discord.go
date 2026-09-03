@@ -40,6 +40,7 @@ type discordFooter struct {
 type Discord struct {
 	name       string
 	webhookURL string
+<<<<<<< HEAD
 	client     *http.Client
 }
 
@@ -47,6 +48,17 @@ func NewDiscord(name, webhookURL string) *Discord {
 	return &Discord{
 		name:       name,
 		webhookURL: webhookURL,
+=======
+	lookupEnv  func(string) (string, bool)
+	client     *http.Client
+}
+
+func NewDiscord(name, webhookURL string, lookupEnv func(string) (string, bool)) *Discord {
+	return &Discord{
+		name:       name,
+		webhookURL: webhookURL,
+		lookupEnv:  lookupEnv,
+>>>>>>> 3e1e8c2 (refactor: simplify secret reference config keys)
 		client:     &http.Client{Timeout: 10 * time.Second},
 	}
 }
@@ -54,6 +66,14 @@ func NewDiscord(name, webhookURL string) *Discord {
 func (d *Discord) Name() string { return d.name }
 
 func (d *Discord) Send(ctx context.Context, payload Payload) error {
+<<<<<<< HEAD
+=======
+	url, ok := d.lookupEnv(d.webhookURL)
+	if !ok || url == "" {
+		return fmt.Errorf("environment variable %q is not set", d.webhookURL)
+	}
+
+>>>>>>> 3e1e8c2 (refactor: simplify secret reference config keys)
 	lastSuccess := "No successful backup yet"
 	if payload.LastSuccessfulAt != "" {
 		if t, err := time.Parse(time.RFC3339, payload.LastSuccessfulAt); err == nil {

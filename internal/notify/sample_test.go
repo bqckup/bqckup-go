@@ -183,9 +183,15 @@ func sendLiveNotification(t *testing.T, input backup.NotifyInput) {
 			case "smtp":
 				channels[name] = NewSMTP(name, ch, nil)
 			case "webhook":
+<<<<<<< HEAD
 				channels[name] = NewWebhook(name, ch.URL)
 			case "discord":
 				channels[name] = NewDiscord(name, ch.WebhookURL)
+=======
+				channels[name] = NewWebhook(name, ch.URL, os.LookupEnv)
+			case "discord":
+				channels[name] = NewDiscord(name, ch.WebhookURL, os.LookupEnv)
+>>>>>>> 3e1e8c2 (refactor: simplify secret reference config keys)
 			}
 		}
 

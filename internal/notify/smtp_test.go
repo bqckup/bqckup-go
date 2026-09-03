@@ -311,7 +311,11 @@ func TestSMTPUsesSTARTTLSAndAuthWhenConfigured(t *testing.T) {
 	server := newFakeSMTPServer(t, true, false)
 	channel := smtpChannel(t, config.Channel{
 		Type: "smtp", Host: "127.0.0.1", Port: portOf(t, server.addr),
+<<<<<<< HEAD
 		Username: "backup-sender", Password: "hunter2-secret",
+=======
+		Username: "BQCKUP_SMTP_USERNAME", Password: "BQCKUP_SMTP_PASSWORD",
+>>>>>>> 3e1e8c2 (refactor: simplify secret reference config keys)
 		From: "bqckup@example.com", To: []string{"ops@example.com"},
 	}, server.roots)
 
@@ -329,7 +333,11 @@ func TestSMTPRefusesAuthWithoutSTARTTLS(t *testing.T) {
 	server := newFakeSMTPServer(t, false, false)
 	channel := smtpChannel(t, config.Channel{
 		Type: "smtp", Host: "127.0.0.1", Port: portOf(t, server.addr),
+<<<<<<< HEAD
 		Username: "backup-sender", Password: "secret",
+=======
+		Username: "BQCKUP_SMTP_USERNAME", Password: "BQCKUP_SMTP_PASSWORD",
+>>>>>>> 3e1e8c2 (refactor: simplify secret reference config keys)
 		From: "bqckup@example.com", To: []string{"ops@example.com"},
 	}, nil)
 
@@ -344,7 +352,11 @@ func TestSMTPImplicitTLSOnPort465(t *testing.T) {
 	server := newFakeSMTPServer(t, false, true)
 	channel := smtpChannel(t, config.Channel{
 		Type: "smtp", Host: "127.0.0.1", Port: portOf(t, server.addr),
+<<<<<<< HEAD
 		Username: "backup-sender", Password: "secret",
+=======
+		Username: "BQCKUP_SMTP_USERNAME", Password: "BQCKUP_SMTP_PASSWORD",
+>>>>>>> 3e1e8c2 (refactor: simplify secret reference config keys)
 		From: "bqckup@example.com", To: []string{"ops@example.com"},
 	}, server.roots)
 	// Simulate a 465 listener: implicit TLS on the ephemeral port.
@@ -365,6 +377,22 @@ func TestSMTPImplicitTLSFlagSetForPort465(t *testing.T) {
 	assert.True(t, channel.implicitTLS)
 }
 
+<<<<<<< HEAD
+=======
+func TestSMTPMissingEnvIsAnError(t *testing.T) {
+	server := newFakeSMTPServer(t, true, false)
+	channel := smtpChannel(t, config.Channel{
+		Type: "smtp", Host: "127.0.0.1", Port: portOf(t, server.addr),
+		Username: "BQCKUP_SMTP_USERNAME", Password: "BQCKUP_SMTP_PASSWORD",
+		From: "bqckup@example.com", To: []string{"ops@example.com"},
+	}, func(string) (string, bool) { return "", false }, server.roots)
+
+	err := channel.Send(context.Background(), smtpPayload())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "BQCKUP_SMTP_USERNAME")
+}
+
+>>>>>>> 3e1e8c2 (refactor: simplify secret reference config keys)
 func TestSMTPRendersCancelledSubset(t *testing.T) {
 	server := newFakeSMTPServer(t, false, false)
 	channel := smtpChannel(t, config.Channel{
