@@ -164,6 +164,9 @@ func newBackupCommand(opts *options) *cobra.Command {
 				if progressErr != nil {
 					return progressErr
 				}
+				if progressErr != nil {
+					return progressErr
+				}
 				if opts.output == "json" {
 					if err := writeJSON(cmd, results); err != nil {
 						return err
