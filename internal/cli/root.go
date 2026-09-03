@@ -148,6 +148,12 @@ func ExitCode(err error) int {
 	if err == nil {
 		return 0
 	}
+	if errors.Is(err, errNoChange) {
+		return 5
+	}
+	if errors.Is(err, errCheckProblems) {
+		return 1
+	}
 	var configError *config.Error
 	if errors.Is(err, ErrInvalidInput) || errors.As(err, &configError) || strings.Contains(err.Error(), "unknown command") {
 		return 2
