@@ -347,6 +347,43 @@ func (e *Engine) Unlock(ctx context.Context, repo backupincremental.RepoConfig) 
 	return nil
 }
 
+// RepairIndex scans the repository's packs and reconstructs clean index
+// files under an exclusive lock.
+func (e *Engine) RepairIndex(ctx context.Context, repo backuprestic.RepoConfig) (backuprestic.RepairResult, error) {
+	started := time.Now()
+	if err := ctx.Err(); err != nil {
+		return backuprestic.RepairResult{}, err
+	}
+	if err := e.rejectUnsupportedURL(repo.URL); err != nil {
+		return backuprestic.RepairResult{}, err
+	}
+	b, err := e.openBackend(ctx, repo)
+	if err != nil {
+		return backuprestic.RepairResult{}, err
+	}
+	r, err := repository.OpenForRepair(ctx, b, repo.Password)
+	if err != nil {
+		return backuprestic.RepairResult{}, &restic.RedactedError{Category: "repository", Message: "could not open the repository for repair", Err: err}
+	}
+	_, release, err := acquireExclusiveLock(ctx, b, r.MasterKey())
+	if err != nil {
+		return backuprestic.RepairResult{}, err
+	}
+	defer release()
+
+	result, err := r.RepairIndex(ctx)
+	if err != nil {
+		return backuprestic.RepairResult{}, &restic.RedactedError{Category: "repository", Message: "could not repair repository index", Err: err}
+	}
+	return backuprestic.RepairResult{
+		DurationSeconds:   time.Since(started).Seconds(),
+		PacksProcessed:    result.PacksProcessed,
+		BlobsIndexed:      result.BlobsIndexed,
+		OldIndexesRemoved: result.OldIndexesRemoved,
+		NewIndexesWritten: result.NewIndexesWritten,
+	}, nil
+}
+
 // acquireExclusiveLock takes a restic-compatible exclusive lock and keeps
 // it fresh while the operation runs (restic renews its locks every ~5
 // minutes too), so a long backup never turns into a stale exclusive lock

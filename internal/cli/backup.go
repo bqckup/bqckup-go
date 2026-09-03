@@ -273,6 +273,7 @@ func newBackupCommand(opts *options) *cobra.Command {
 	restore.Flags().BoolVar(&quiet, "quiet", false, "print nothing on success")
 	command.AddCommand(restore)
 	command.AddCommand(newCheckCommand(opts))
+	command.AddCommand(newRepairIndexCommand(opts))
 	return command
 }
 

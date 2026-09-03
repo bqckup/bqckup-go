@@ -558,3 +558,90 @@ func TestCheckRepositoryRejectsUnsupportedURL(t *testing.T) {
 		t.Fatalf("want unsupported URL error, got %v", err)
 	}
 }
+
+func TestFacadeRepairIndexRebuildsValidIndex(t *testing.T) {
+	ctx := context.Background()
+	engine := NewEngine()
+	repo := testRepo(t)
+	if err := engine.EnsureRepository(ctx, repo); err != nil {
+		t.Fatal(err)
+	}
+	source := t.TempDir()
+	if err := os.WriteFile(filepath.Join(source, "repair_me.txt"), []byte("repair index facade data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := engine.BackupFiles(ctx, repo, backuprestic.BackupSpec{
+		Include: []string{source}, Tags: []string{"bqckup", "site:testsite"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Delete all index files directly from backend
+	b := backend.NewLocal(repo.URL)
+	var indexes []restic.Handle
+	if err := b.List(ctx, restic.IndexFile, func(h restic.Handle, _ int64) error {
+		indexes = append(indexes, h)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, h := range indexes {
+		if err := b.Remove(ctx, h); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	result, err := engine.RepairIndex(ctx, repo)
+	if err != nil {
+		t.Fatalf("RepairIndex failed: %v", err)
+	}
+	if result.PacksProcessed == 0 || result.BlobsIndexed == 0 || result.NewIndexesWritten != 1 {
+		t.Fatalf("unexpected repair result: %+v", result)
+	}
+
+	// Verify check passes after repair
+	checkResult, err := engine.CheckRepository(ctx, repo, true)
+	if err != nil {
+		t.Fatalf("CheckRepository failed: %v", err)
+	}
+	if checkResult.Status != "healthy" || len(checkResult.Findings) != 0 {
+		t.Fatalf("check result after repair not healthy: %+v", checkResult)
+	}
+
+	// Verify snapshots can be listed
+	snaps, err := engine.ListSnapshots(ctx, repo)
+	if err != nil {
+		t.Fatalf("ListSnapshots failed: %v", err)
+	}
+	if len(snaps) != 1 {
+		t.Fatalf("snapshots count = %d, want 1", len(snaps))
+	}
+}
+
+func TestFacadeRepairIndexLockConflict(t *testing.T) {
+	ctx := context.Background()
+	engine := NewEngine()
+	repo := testRepo(t)
+	if err := engine.EnsureRepository(ctx, repo); err != nil {
+		t.Fatal(err)
+	}
+
+	b := backend.NewLocal(repo.URL)
+	r, err := repository.Open(ctx, b, repo.Password)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Hold an exclusive lock
+	activeLock, err := lock.New(ctx, b, r.MasterKey(), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = activeLock.Unlock(context.WithoutCancel(ctx), b) }()
+
+	// RepairIndex should fail due to lock conflict
+	_, err = engine.RepairIndex(ctx, repo)
+	if err == nil {
+		t.Fatal("expected error on RepairIndex while repository is locked, got nil")
+	}
+}

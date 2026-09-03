@@ -89,3 +89,12 @@ type CheckResult struct {
 	Blobs           int       `json:"blobs"`
 	Findings        []Finding `json:"findings"`
 }
+
+// RepairResult is the outcome of rebuilding a repository's index files.
+type RepairResult struct {
+	DurationSeconds   float64 `json:"duration_seconds"`
+	PacksProcessed    int     `json:"packs_processed"`
+	BlobsIndexed      int     `json:"blobs_indexed"`
+	OldIndexesRemoved int     `json:"old_indexes_removed"`
+	NewIndexesWritten int     `json:"new_indexes_written"`
+}
