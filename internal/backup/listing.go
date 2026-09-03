@@ -3,10 +3,6 @@ package backup
 import (
 	"context"
 	"fmt"
-<<<<<<< HEAD
-=======
-	"os"
->>>>>>> 79c249c (feat: namespace backups and refresh v0.0.5 releases)
 	"sort"
 	"strings"
 	"time"
@@ -139,11 +135,7 @@ func (l *Lister) listSnapshots(ctx context.Context, destination string, site con
 	if l.Snapshots == nil {
 		return Listing{}, apperror.Wrap(apperror.CategoryInternal, "incremental backup engine is unavailable", nil)
 	}
-<<<<<<< HEAD
 	repo, err := buildRepoConfig(site, storageConfig, true, l.ServerID)
-=======
-	repo, err := buildRepoConfig(site, storageConfig, l.lookupEnv, true, l.ServerID)
->>>>>>> 79c249c (feat: namespace backups and refresh v0.0.5 releases)
 	if err != nil {
 		return Listing{}, apperror.Wrap(apperror.CategoryPreflight, "could not build repository configuration", err)
 	}
