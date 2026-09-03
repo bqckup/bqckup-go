@@ -245,7 +245,6 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 		return result, operationErr
 	}
 
-	backupSet := storage.FormatBackupSet(now)
 	sitePrefix := backupSitePrefix(site.Name, r.dependencies.ServerID)
 
 	if site.BackupMode == "incremental" {
