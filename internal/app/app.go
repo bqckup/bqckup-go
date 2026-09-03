@@ -395,7 +395,7 @@ func (a *App) CheckRepository(ctx context.Context, siteName, destinationName str
 	if !siteUsesDestination(site, destinationName) {
 		return backup.CheckOutcome{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q does not send backups to destination %q", siteName, destinationName), nil)
 	}
-	return (&backup.Checker{Engine: a.checker}).CheckSite(ctx, destinationName, readData, site, storageConfig)
+	return (&backup.Checker{ServerID: a.configuration.ServerID, Engine: a.checker}).CheckSite(ctx, destinationName, readData, site, storageConfig)
 }
 
 // RepairIndex rebuilds the index files of one incremental site's repository
@@ -422,7 +422,7 @@ func (a *App) RepairIndex(ctx context.Context, siteName, destinationName string)
 	if !siteUsesDestination(site, destinationName) {
 		return backup.RepairOutcome{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q does not send backups to destination %q", siteName, destinationName), nil)
 	}
-	return (&backup.Repairer{Engine: a.repairer}).RepairSite(ctx, destinationName, site, storageConfig)
+	return (&backup.Repairer{ServerID: a.configuration.ServerID, Engine: a.repairer}).RepairSite(ctx, destinationName, site, storageConfig)
 }
 
 // RestoreSnapshot restores one snapshot of one incremental site into the

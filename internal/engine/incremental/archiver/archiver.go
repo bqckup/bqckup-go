@@ -362,7 +362,7 @@ func (s *backupState) nodeForAt(ctx context.Context, path string, info os.FileIn
 	case info.Mode().IsRegular():
 		node.Type = tree.TypeFile
 		if old != nil && old.Type == tree.TypeFile && old.Content != nil && sameMetadata(node, old) {
-			node.Content = append([]incremental.ID(nil), old.Content...)
+			node.Content = append([]incremental.ID{}, old.Content...)
 			s.filesUnmodified++
 			s.bytesProcessed += int64(node.Size)
 			return node, true, nil
@@ -491,7 +491,9 @@ func (s *backupState) parentRoot(key string) *tree.Node {
 
 func cloneNode(node *tree.Node) *tree.Node {
 	copy := *node
-	copy.Content = append([]incremental.ID(nil), node.Content...)
+	if node.Content != nil {
+		copy.Content = append([]incremental.ID{}, node.Content...)
+	}
 	return &copy
 }
 

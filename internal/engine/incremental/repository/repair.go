@@ -129,9 +129,9 @@ func (r *Repository) RepairIndex(ctx context.Context) (RepairResult, error) {
 			var blobType incremental.BlobType
 			switch entry.Type {
 			case incremental.DataBlob, incremental.CompressedDataBlob:
-			blobType = incremental.DataBlob
+				blobType = incremental.DataBlob
 			case incremental.TreeBlob, incremental.CompressedTreeBlob:
-			blobType = incremental.TreeBlob
+				blobType = incremental.TreeBlob
 			default:
 				return RepairResult{}, fmt.Errorf("repository: unknown blob type %d in pack %s", entry.Type, packID)
 			}
