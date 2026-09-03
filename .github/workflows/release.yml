@@ -77,26 +77,6 @@ jobs:
   build-release:
     needs: [prepare-release, recreate-tag]
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Recreate active version tag
-        env:
-          VERSION: ${{ needs.prepare-release.outputs.version }}
-          COMMIT: ${{ needs.prepare-release.outputs.commit }}
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git push origin ":refs/tags/$VERSION" || true
-          git tag -fa "$VERSION" "$COMMIT" -m "Release $VERSION"
-          git push origin "refs/tags/$VERSION" --force
-
-  build-release:
-    needs: [prepare-release, recreate-tag]
-    runs-on: ubuntu-latest
     container:
       image: ubuntu:20.04
     strategy:

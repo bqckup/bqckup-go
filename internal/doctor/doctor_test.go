@@ -68,11 +68,7 @@ func TestRunPassesOnValidConfiguration(t *testing.T) {
 	assert.Equal(t, []string{"config", "temp_dir", "lock_dir", "state_db_dir", "engine:test-site", "secret:test-site:incremental", "storage:local-primary"}, names)
 }
 
-<<<<<<< HEAD
 func TestRunTreatsIncrementalPasswordAsLiteralConfig(t *testing.T) {
-=======
-func TestRunTreatsIncrementalPasswordAsLiteralConfig(t *testing.T) {
->>>>>>> 1ee1f63 (refactor: load all config values directly from yaml)
 	_ = os.Unsetenv("UNSET_DOCTOR_PASS_VAR")
 	cfg := testConfig(t)
 	cfg.Sites[0].Incremental.Password = "UNSET_DOCTOR_PASS_VAR"
