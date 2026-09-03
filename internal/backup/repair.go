@@ -3,7 +3,6 @@ package backup
 import (
 	"context"
 	"fmt"
-	"os"
 
 	"github.com/bqckup/bqckup-go/internal/apperror"
 	"github.com/bqckup/bqckup-go/internal/backup/incremental"
@@ -26,15 +25,8 @@ type RepairOutcome struct {
 // Repairer runs the index repair for one site's destination.
 // It never writes history.
 type Repairer struct {
-	Engine    IndexRepairer
-	EnvLookup func(string) (string, bool)
-}
-
-func (r *Repairer) lookupEnv(key string) (string, bool) {
-	if r.EnvLookup != nil {
-		return r.EnvLookup(key)
-	}
-	return os.LookupEnv(key)
+	ServerID string
+	Engine   IndexRepairer
 }
 
 // RepairSite rebuilds the index of an incremental site on one of its destinations.
@@ -51,7 +43,7 @@ func (r *Repairer) RepairSite(ctx context.Context, destination string, site conf
 	if r.Engine == nil {
 		return RepairOutcome{}, apperror.Wrap(apperror.CategoryInternal, "incremental backup engine is unavailable", nil)
 	}
-	repo, err := buildRepoConfig(site, storageConfig, r.lookupEnv, true)
+	repo, err := buildRepoConfig(site, storageConfig, true, r.ServerID)
 	if err != nil {
 		return RepairOutcome{}, apperror.Wrap(apperror.CategoryPreflight, "could not build repository configuration", err)
 	}

@@ -6,30 +6,23 @@ import (
 	"testing"
 
 	"github.com/bqckup/bqckup-go/internal/apperror"
-	"github.com/bqckup/bqckup-go/internal/backup/restic"
+	"github.com/bqckup/bqckup-go/internal/backup/incremental"
 	"github.com/bqckup/bqckup-go/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 type fakeRepositoryChecker struct {
-	gotRepo restic.RepoConfig
+	gotRepo incremental.RepoConfig
 	gotRead bool
-	result  restic.CheckResult
+	result  incremental.CheckResult
 	err     error
 }
 
-func (f *fakeRepositoryChecker) CheckRepository(_ context.Context, repo restic.RepoConfig, readData bool) (restic.CheckResult, error) {
+func (f *fakeRepositoryChecker) CheckRepository(_ context.Context, repo incremental.RepoConfig, readData bool) (incremental.CheckResult, error) {
 	f.gotRepo = repo
 	f.gotRead = readData
 	return f.result, f.err
-}
-
-func checkerEnvLookup(key string) (string, bool) {
-	if key == "RESTIC_PASSWORD" {
-		return "secret", true
-	}
-	return "", false
 }
 
 func checkerSite() config.Site {
@@ -39,11 +32,11 @@ func checkerSite() config.Site {
 }
 
 func TestCheckerWiresEngineResultThrough(t *testing.T) {
-	engine := &fakeRepositoryChecker{result: restic.CheckResult{
+	engine := &fakeRepositoryChecker{result: incremental.CheckResult{
 		ReadData: true, Status: "problems", Indexes: 2, Snapshots: 1,
-		Findings: []restic.Finding{{Type: "broken_index", ID: "ab"}},
+		Findings: []incremental.Finding{{Type: "broken_index", ID: "ab"}},
 	}}
-	checker := &Checker{Engine: engine, EnvLookup: checkerEnvLookup}
+	checker := &Checker{Engine: engine}
 	outcome, err := checker.CheckSite(context.Background(), "s3-primary", true, checkerSite(), config.Storage{
 		Type: "s3", Bucket: "backups", Prefix: "company",
 	})
@@ -76,7 +69,7 @@ func TestCheckerNilEngineIsInternalError(t *testing.T) {
 
 func TestCheckerEngineErrorIsStorageCategory(t *testing.T) {
 	engine := &fakeRepositoryChecker{err: errors.New("backend exploded")}
-	checker := &Checker{Engine: engine, EnvLookup: checkerEnvLookup}
+	checker := &Checker{Engine: engine}
 	_, err := checker.CheckSite(context.Background(), "s3-primary", false, checkerSite(), config.Storage{Type: "s3", Bucket: "backups", Prefix: "company"})
 	require.Error(t, err)
 	assert.Equal(t, apperror.CategoryStorage, apperror.CategoryOf(err))

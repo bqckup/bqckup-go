@@ -11,18 +11,18 @@ import (
 
 	"github.com/bqckup/bqckup-go/internal/apperror"
 	"github.com/bqckup/bqckup-go/internal/backup"
-	backuprestic "github.com/bqckup/bqckup-go/internal/backup/restic"
+	backupincremental "github.com/bqckup/bqckup-go/internal/backup/incremental"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func healthyOutcome() backup.CheckOutcome {
-	return backup.CheckOutcome{Site: "site-a", Destination: "s3-primary", Mode: "incremental", Result: backuprestic.CheckResult{
+	return backup.CheckOutcome{Site: "site-a", Destination: "s3-primary", Mode: "incremental", Result: backupincremental.CheckResult{
 		Status: "healthy", DurationSeconds: 1.23, Indexes: 12, Snapshots: 45, Packs: 300, Blobs: 12000,
 	}}
 }
 
-func findingsOutcome(findings ...backuprestic.Finding) backup.CheckOutcome {
+func findingsOutcome(findings ...backupincremental.Finding) backup.CheckOutcome {
 	outcome := healthyOutcome()
 	outcome.Result.Status = "problems"
 	outcome.Result.Findings = findings
@@ -37,7 +37,7 @@ func TestCheckTextHealthy(t *testing.T) {
 
 func TestCheckTextProblemsMatchesPlanSample(t *testing.T) {
 	hex := func(c byte, n int) string { return strings.Repeat(string(c), n) }
-	findings := []backuprestic.Finding{
+	findings := []backupincremental.Finding{
 		{Type: "broken_index", ID: hex('a', 64)},
 		{Type: "broken_index", ID: hex('b', 64)},
 		{Type: "missing_pack", ID: hex('c', 64), BlobCount: 3},
@@ -57,24 +57,24 @@ func TestCheckTextProblemsMatchesPlanSample(t *testing.T) {
 
 func TestCheckFindingLines(t *testing.T) {
 	hex := func(c byte, n int) string { return strings.Repeat(string(c), n) }
-	assert.Equal(t, "broken_config config", checkFindingLine(backuprestic.Finding{Type: "broken_config"}))
-	assert.Equal(t, "broken_key "+hex('1', 64), checkFindingLine(backuprestic.Finding{Type: "broken_key", ID: hex('1', 64)}))
-	assert.Equal(t, "broken_snapshot "+hex('2', 64), checkFindingLine(backuprestic.Finding{Type: "broken_snapshot", ID: hex('2', 64)}))
-	assert.Equal(t, "broken_pack "+hex('3', 64), checkFindingLine(backuprestic.Finding{Type: "broken_pack", ID: hex('3', 64)}))
+	assert.Equal(t, "broken_config config", checkFindingLine(backupincremental.Finding{Type: "broken_config"}))
+	assert.Equal(t, "broken_key "+hex('1', 64), checkFindingLine(backupincremental.Finding{Type: "broken_key", ID: hex('1', 64)}))
+	assert.Equal(t, "broken_snapshot "+hex('2', 64), checkFindingLine(backupincremental.Finding{Type: "broken_snapshot", ID: hex('2', 64)}))
+	assert.Equal(t, "broken_pack "+hex('3', 64), checkFindingLine(backupincremental.Finding{Type: "broken_pack", ID: hex('3', 64)}))
 	assert.Equal(t, "missing_blob "+hex('4', 64)+" (snapshot "+hex('5', 64)+")",
-		checkFindingLine(backuprestic.Finding{Type: "missing_blob", ID: hex('4', 64), SnapshotID: hex('5', 64)}))
+		checkFindingLine(backupincremental.Finding{Type: "missing_blob", ID: hex('4', 64), SnapshotID: hex('5', 64)}))
 	assert.Equal(t, "corrupt_blob "+hex('6', 64)+" (snapshot "+hex('7', 64)+")",
-		checkFindingLine(backuprestic.Finding{Type: "corrupt_blob", ID: hex('6', 64), SnapshotID: hex('7', 64)}))
+		checkFindingLine(backupincremental.Finding{Type: "corrupt_blob", ID: hex('6', 64), SnapshotID: hex('7', 64)}))
 	assert.Equal(t, "corrupt_blob "+hex('6', 64)+" (pack "+hex('8', 64)+")",
-		checkFindingLine(backuprestic.Finding{Type: "corrupt_blob", ID: hex('6', 64), PackID: hex('8', 64)}))
+		checkFindingLine(backupincremental.Finding{Type: "corrupt_blob", ID: hex('6', 64), PackID: hex('8', 64)}))
 	assert.Equal(t, "missing_pack "+hex('9', 64)+" (7 blobs)",
-		checkFindingLine(backuprestic.Finding{Type: "missing_pack", ID: hex('9', 64), BlobCount: 7}))
+		checkFindingLine(backupincremental.Finding{Type: "missing_pack", ID: hex('9', 64), BlobCount: 7}))
 }
 
 func TestCheckTextCapsAtHundredFindings(t *testing.T) {
-	findings := make([]backuprestic.Finding, 0, 105)
+	findings := make([]backupincremental.Finding, 0, 105)
 	for i := 0; i < 105; i++ {
-		findings = append(findings, backuprestic.Finding{Type: "orphaned_pack", ID: fmt.Sprintf("%064x", i)})
+		findings = append(findings, backupincremental.Finding{Type: "orphaned_pack", ID: fmt.Sprintf("%064x", i)})
 	}
 	var out bytes.Buffer
 	require.NoError(t, writeCheckText(&out, findingsOutcome(findings...)))
@@ -84,7 +84,7 @@ func TestCheckTextCapsAtHundredFindings(t *testing.T) {
 }
 
 func TestCheckJSONSchema(t *testing.T) {
-	findings := []backuprestic.Finding{
+	findings := []backupincremental.Finding{
 		{Type: "missing_pack", ID: strings.Repeat("a", 64), BlobCount: 3},
 	}
 	outcome := findingsOutcome(findings...)
@@ -112,7 +112,7 @@ func TestCheckJSONSchema(t *testing.T) {
 }
 
 func TestCheckFindingsFileTextAndJSON(t *testing.T) {
-	findings := []backuprestic.Finding{
+	findings := []backupincremental.Finding{
 		{Type: "broken_index", ID: strings.Repeat("b", 64)},
 		{Type: "orphaned_pack", ID: strings.Repeat("c", 64)},
 	}
@@ -186,13 +186,13 @@ func TestBackupCheckFullModeSiteFails(t *testing.T) {
 	assert.Contains(t, message, "--details")
 }
 
-func TestBackupCheckMissingPasswordEnvFails(t *testing.T) {
+func TestBackupCheckMissingPasswordFails(t *testing.T) {
 	configDir, _ := writeCLIConfig(t)
-	writeIncrementalSiteConfig(t, configDir, "MISSING_PASSWORD_ENV")
+	writeIncrementalSiteConfig(t, configDir, "")
 	root, _, _ := commandForTest(t, "--config-dir", configDir, "backup", "check", "site-b", "--destination", "local-primary")
 	err := root.Execute()
 	require.Error(t, err)
-	assert.Equal(t, 3, ExitCode(err))
+	assert.Equal(t, 2, ExitCode(err))
 }
 
 // checkSeedConfigDir builds an incremental site backed by a real source
@@ -209,7 +209,7 @@ site:
   enabled: true
   backup_mode: incremental
   incremental:
-    password_env: RESTIC_PASSWORD
+    password: "supersecret"
   sources:
     files:
       include: [%s]
@@ -233,7 +233,6 @@ func runCheckCommand(t *testing.T, configDir string, args ...string) (int, strin
 }
 
 func TestBackupCheckHealthyRepositoryExitsZero(t *testing.T) {
-	t.Setenv("RESTIC_PASSWORD", "supersecret")
 	configDir, _ := checkSeedConfigDir(t)
 	if code, _ := runCheckCommand(t, configDir, "backup", "run", "site-b", "--force"); code != 0 {
 		t.Fatalf("seed backup failed with exit %d", code)
@@ -244,7 +243,6 @@ func TestBackupCheckHealthyRepositoryExitsZero(t *testing.T) {
 }
 
 func TestBackupCheckCorruptRepositoryExitsOneWithFindings(t *testing.T) {
-	t.Setenv("RESTIC_PASSWORD", "supersecret")
 	configDir, backupRoot := checkSeedConfigDir(t)
 	if code, _ := runCheckCommand(t, configDir, "backup", "run", "site-b", "--force"); code != 0 {
 		t.Fatalf("seed backup failed with exit %d", code)
@@ -269,7 +267,6 @@ func TestBackupCheckCorruptRepositoryExitsOneWithFindings(t *testing.T) {
 }
 
 func TestBackupCheckJSONOutputAndFindingsFile(t *testing.T) {
-	t.Setenv("RESTIC_PASSWORD", "supersecret")
 	configDir, _ := checkSeedConfigDir(t)
 	if code, _ := runCheckCommand(t, configDir, "backup", "run", "site-b", "--force"); code != 0 {
 		t.Fatalf("seed backup failed with exit %d", code)
@@ -290,7 +287,6 @@ func TestBackupCheckJSONOutputAndFindingsFile(t *testing.T) {
 }
 
 func TestBackupCheckReadDataFlagReachesReport(t *testing.T) {
-	t.Setenv("RESTIC_PASSWORD", "supersecret")
 	configDir, _ := checkSeedConfigDir(t)
 	if code, _ := runCheckCommand(t, configDir, "backup", "run", "site-b", "--force"); code != 0 {
 		t.Fatalf("seed backup failed with exit %d", code)
@@ -304,7 +300,6 @@ func TestBackupCheckReadDataFlagReachesReport(t *testing.T) {
 }
 
 func TestBackupCheckNoRepositoryIsCommandFailure(t *testing.T) {
-	t.Setenv("RESTIC_PASSWORD", "supersecret")
 	configDir, _ := checkSeedConfigDir(t)
 	code, stdout := runCheckCommand(t, configDir, "backup", "check", "site-b", "--destination", "local-primary")
 	assert.Equal(t, 4, code)

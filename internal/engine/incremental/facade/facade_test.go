@@ -457,7 +457,7 @@ func TestCheckRepositoryHealthyAndLockReleased(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(source, "data.txt"), []byte("check me"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := engine.BackupFiles(ctx, repo, backuprestic.BackupSpec{
+	if _, err := engine.BackupFiles(ctx, repo, backupincremental.BackupSpec{
 		Include: []string{source}, Tags: []string{"bqckup", "site:testsite"},
 	}); err != nil {
 		t.Fatal(err)
@@ -482,7 +482,7 @@ func TestCheckRepositoryHealthyAndLockReleased(t *testing.T) {
 		t.Fatalf("healthy read-data check: %+v", result)
 	}
 	// the non-exclusive lock is released on every path: a new backup works
-	if _, err := engine.BackupFiles(ctx, repo, backuprestic.BackupSpec{
+	if _, err := engine.BackupFiles(ctx, repo, backupincremental.BackupSpec{
 		Include: []string{source}, Tags: []string{"bqckup", "site:testsite"},
 	}); err != nil {
 		t.Fatalf("backup after check: %v", err)
@@ -500,7 +500,7 @@ func TestCheckRepositoryReportsCorruptionWithoutLockingOut(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(source, "data.txt"), []byte("check me too"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := engine.BackupFiles(ctx, repo, backuprestic.BackupSpec{
+	if _, err := engine.BackupFiles(ctx, repo, backupincremental.BackupSpec{
 		Include: []string{source}, Tags: []string{"bqckup", "site:testsite"},
 	}); err != nil {
 		t.Fatal(err)
@@ -509,7 +509,7 @@ func TestCheckRepositoryReportsCorruptionWithoutLockingOut(t *testing.T) {
 	// corrupt the config file in place
 	b := backend.NewLocal(repo.URL)
 	var raw []byte
-	if err := b.Load(ctx, restic.Handle{Type: restic.ConfigFile}, 0, 0, func(rd io.Reader) error {
+	if err := b.Load(ctx, incremental.Handle{Type: incremental.ConfigFile}, 0, 0, func(rd io.Reader) error {
 		var err error
 		raw, err = io.ReadAll(rd)
 		return err
@@ -517,7 +517,7 @@ func TestCheckRepositoryReportsCorruptionWithoutLockingOut(t *testing.T) {
 		t.Fatal(err)
 	}
 	raw[5] ^= 0xff
-	if err := b.Save(ctx, restic.Handle{Type: restic.ConfigFile}, bytes.NewReader(raw)); err != nil {
+	if err := b.Save(ctx, incremental.Handle{Type: incremental.ConfigFile}, bytes.NewReader(raw)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -538,8 +538,8 @@ func TestCheckRepositoryReportsCorruptionWithoutLockingOut(t *testing.T) {
 		t.Fatalf("want broken_config finding, got %+v", result.Findings)
 	}
 	// no lock is left behind that would block the next backup
-	var locks []restic.Handle
-	if err := b.List(ctx, restic.LockFile, func(handle restic.Handle, _ int64) error {
+	var locks []incremental.Handle
+	if err := b.List(ctx, incremental.LockFile, func(handle incremental.Handle, _ int64) error {
 		locks = append(locks, handle)
 		return nil
 	}); err != nil {
@@ -552,7 +552,7 @@ func TestCheckRepositoryReportsCorruptionWithoutLockingOut(t *testing.T) {
 
 func TestCheckRepositoryRejectsUnsupportedURL(t *testing.T) {
 	engine := NewEngine()
-	repo := backuprestic.RepoConfig{URL: "b2:repo", Password: "x"}
+	repo := backupincremental.RepoConfig{URL: "b2:repo", Password: "x"}
 	_, err := engine.CheckRepository(context.Background(), repo, false)
 	if err == nil || !strings.Contains(err.Error(), "does not support b2:") {
 		t.Fatalf("want unsupported URL error, got %v", err)
@@ -570,7 +570,7 @@ func TestFacadeRepairIndexRebuildsValidIndex(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(source, "repair_me.txt"), []byte("repair index facade data"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := engine.BackupFiles(ctx, repo, backuprestic.BackupSpec{
+	if _, err := engine.BackupFiles(ctx, repo, backupincremental.BackupSpec{
 		Include: []string{source}, Tags: []string{"bqckup", "site:testsite"},
 	}); err != nil {
 		t.Fatal(err)
@@ -578,8 +578,8 @@ func TestFacadeRepairIndexRebuildsValidIndex(t *testing.T) {
 
 	// Delete all index files directly from backend
 	b := backend.NewLocal(repo.URL)
-	var indexes []restic.Handle
-	if err := b.List(ctx, restic.IndexFile, func(h restic.Handle, _ int64) error {
+	var indexes []incremental.Handle
+	if err := b.List(ctx, incremental.IndexFile, func(h incremental.Handle, _ int64) error {
 		indexes = append(indexes, h)
 		return nil
 	}); err != nil {

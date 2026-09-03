@@ -6,28 +6,21 @@ import (
 	"testing"
 
 	"github.com/bqckup/bqckup-go/internal/apperror"
-	"github.com/bqckup/bqckup-go/internal/backup/restic"
+	"github.com/bqckup/bqckup-go/internal/backup/incremental"
 	"github.com/bqckup/bqckup-go/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 type fakeIndexRepairer struct {
-	gotRepo restic.RepoConfig
-	result  restic.RepairResult
+	gotRepo incremental.RepoConfig
+	result  incremental.RepairResult
 	err     error
 }
 
-func (f *fakeIndexRepairer) RepairIndex(_ context.Context, repo restic.RepoConfig) (restic.RepairResult, error) {
+func (f *fakeIndexRepairer) RepairIndex(_ context.Context, repo incremental.RepoConfig) (incremental.RepairResult, error) {
 	f.gotRepo = repo
 	return f.result, f.err
-}
-
-func repairEnvLookup(key string) (string, bool) {
-	if key == "RESTIC_PASSWORD" {
-		return "secret", true
-	}
-	return "", false
 }
 
 func repairSite() config.Site {
@@ -37,14 +30,14 @@ func repairSite() config.Site {
 }
 
 func TestRepairerWiresEngineResultThrough(t *testing.T) {
-	engine := &fakeIndexRepairer{result: restic.RepairResult{
+	engine := &fakeIndexRepairer{result: incremental.RepairResult{
 		DurationSeconds:   1.5,
 		PacksProcessed:    5,
 		BlobsIndexed:      42,
 		OldIndexesRemoved: 2,
 		NewIndexesWritten: 1,
 	}}
-	repairer := &Repairer{Engine: engine, EnvLookup: repairEnvLookup}
+	repairer := &Repairer{Engine: engine}
 	outcome, err := repairer.RepairSite(context.Background(), "s3-primary", repairSite(), config.Storage{
 		Type: "s3", Bucket: "backups", Prefix: "company",
 	})
@@ -79,7 +72,7 @@ func TestRepairerNilEngineIsInternalError(t *testing.T) {
 
 func TestRepairerEngineErrorIsStorageCategory(t *testing.T) {
 	engine := &fakeIndexRepairer{err: errors.New("backend exploded")}
-	repairer := &Repairer{Engine: engine, EnvLookup: repairEnvLookup}
+	repairer := &Repairer{Engine: engine}
 	_, err := repairer.RepairSite(context.Background(), "s3-primary", repairSite(), config.Storage{Type: "s3", Bucket: "backups", Prefix: "company"})
 	require.Error(t, err)
 	assert.Equal(t, apperror.CategoryStorage, apperror.CategoryOf(err))

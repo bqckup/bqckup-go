@@ -7,27 +7,27 @@ import (
 
 	"github.com/bqckup/bqckup-go/internal/apperror"
 	"github.com/bqckup/bqckup-go/internal/backup"
-	"github.com/bqckup/bqckup-go/internal/backup/restic"
+	"github.com/bqckup/bqckup-go/internal/backup/incremental"
 	"github.com/bqckup/bqckup-go/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 type appRepositoryChecker struct {
-	gotRepo    restic.RepoConfig
+	gotRepo    incremental.RepoConfig
 	gotRead    bool
 	checkError error
-	result     restic.CheckResult
+	result     incremental.CheckResult
 }
 
 func incrementalSite() config.Site {
 	site := remoteSite()
 	site.BackupMode = "incremental"
-	site.Incremental = config.Incremental{PasswordEnv: "TEST_REPO_PASSWORD"}
+	site.Incremental = config.Incremental{Password: "secret"}
 	return site
 }
 
-func (c *appRepositoryChecker) CheckRepository(_ context.Context, repo restic.RepoConfig, readData bool) (restic.CheckResult, error) {
+func (c *appRepositoryChecker) CheckRepository(_ context.Context, repo incremental.RepoConfig, readData bool) (incremental.CheckResult, error) {
 	c.gotRepo = repo
 	c.gotRead = readData
 	return c.result, c.checkError
@@ -95,9 +95,8 @@ func TestCheckRepositoryDestinationNotUsedBySiteFailsAsConfigError(t *testing.T)
 }
 
 func TestCheckRepositoryWiresRepositoryConfigAndReadData(t *testing.T) {
-	t.Setenv("TEST_REPO_PASSWORD", "secret")
 	site := incrementalSite()
-	checker := &appRepositoryChecker{result: restic.CheckResult{Status: "problems", Findings: []restic.Finding{
+	checker := &appRepositoryChecker{result: incremental.CheckResult{Status: "problems", Findings: []incremental.Finding{
 		{Type: "orphaned_pack", ID: "abcd"},
 	}}}
 	application := checkApp(t, site, checker)
@@ -116,7 +115,6 @@ func TestCheckRepositoryWiresRepositoryConfigAndReadData(t *testing.T) {
 }
 
 func TestCheckRepositoryEngineErrorSurfaces(t *testing.T) {
-	t.Setenv("TEST_REPO_PASSWORD", "secret")
 	checker := &appRepositoryChecker{checkError: errors.New("engine down")}
 	application := checkApp(t, incrementalSite(), checker)
 	_, err := application.CheckRepository(context.Background(), "site-a", "s3-primary", false)

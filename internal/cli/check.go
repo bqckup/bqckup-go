@@ -10,7 +10,7 @@ import (
 	"github.com/bqckup/bqckup-go/internal/app"
 	"github.com/bqckup/bqckup-go/internal/apperror"
 	"github.com/bqckup/bqckup-go/internal/backup"
-	backuprestic "github.com/bqckup/bqckup-go/internal/backup/restic"
+	backupincremental "github.com/bqckup/bqckup-go/internal/backup/incremental"
 	"github.com/spf13/cobra"
 )
 
@@ -74,17 +74,17 @@ func newCheckCommand(opts *options) *cobra.Command {
 
 // checkEnvelope is the flat JSON check report.
 type checkEnvelope struct {
-	Site            string                 `json:"site"`
-	Destination     string                 `json:"destination"`
-	Mode            string                 `json:"mode"`
-	ReadData        bool                   `json:"read_data"`
-	Status          string                 `json:"status"`
-	DurationSeconds float64                `json:"duration_seconds"`
-	Indexes         int                    `json:"indexes"`
-	Snapshots       int                    `json:"snapshots"`
-	Packs           int                    `json:"packs"`
-	Blobs           int                    `json:"blobs"`
-	Findings        []backuprestic.Finding `json:"findings"`
+	Site            string                      `json:"site"`
+	Destination     string                      `json:"destination"`
+	Mode            string                      `json:"mode"`
+	ReadData        bool                        `json:"read_data"`
+	Status          string                      `json:"status"`
+	DurationSeconds float64                     `json:"duration_seconds"`
+	Indexes         int                         `json:"indexes"`
+	Snapshots       int                         `json:"snapshots"`
+	Packs           int                         `json:"packs"`
+	Blobs           int                         `json:"blobs"`
+	Findings        []backupincremental.Finding `json:"findings"`
 }
 
 // writeCheckJSON renders the full check result, uncapped.
@@ -147,7 +147,7 @@ func writeCheckText(output io.Writer, outcome backup.CheckOutcome) error {
 
 // checkFindingLine renders one finding in the text format: "<type> <id>"
 // plus the fields the type carries.
-func checkFindingLine(finding backuprestic.Finding) string {
+func checkFindingLine(finding backupincremental.Finding) string {
 	switch finding.Type {
 	case "broken_config":
 		return "broken_config config"
@@ -168,7 +168,7 @@ func checkFindingLine(finding backuprestic.Finding) string {
 // writeFindingsFile writes the complete finding list to path: one finding
 // per line in text mode, the findings array in JSON mode. The file is
 // always written when requested, even with zero findings.
-func writeFindingsFile(path, output string, findings []backuprestic.Finding) error {
+func writeFindingsFile(path, output string, findings []backupincremental.Finding) error {
 	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		return err
@@ -176,7 +176,7 @@ func writeFindingsFile(path, output string, findings []backuprestic.Finding) err
 	defer file.Close()
 	if output == "json" {
 		if findings == nil {
-			findings = []backuprestic.Finding{}
+			findings = []backupincremental.Finding{}
 		}
 		encoder := json.NewEncoder(file)
 		encoder.SetEscapeHTML(false)

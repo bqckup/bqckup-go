@@ -148,9 +148,6 @@ func ExitCode(err error) int {
 	if err == nil {
 		return 0
 	}
-	if errors.Is(err, errNoChange) {
-		return 5
-	}
 	if errors.Is(err, errCheckProblems) {
 		return 1
 	}

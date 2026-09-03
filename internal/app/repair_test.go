@@ -7,19 +7,19 @@ import (
 
 	"github.com/bqckup/bqckup-go/internal/apperror"
 	"github.com/bqckup/bqckup-go/internal/backup"
-	"github.com/bqckup/bqckup-go/internal/backup/restic"
+	"github.com/bqckup/bqckup-go/internal/backup/incremental"
 	"github.com/bqckup/bqckup-go/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 type appIndexRepairer struct {
-	gotRepo     restic.RepoConfig
+	gotRepo     incremental.RepoConfig
 	repairError error
-	result      restic.RepairResult
+	result      incremental.RepairResult
 }
 
-func (r *appIndexRepairer) RepairIndex(_ context.Context, repo restic.RepoConfig) (restic.RepairResult, error) {
+func (r *appIndexRepairer) RepairIndex(_ context.Context, repo incremental.RepoConfig) (incremental.RepairResult, error) {
 	r.gotRepo = repo
 	return r.result, r.repairError
 }
@@ -86,9 +86,8 @@ func TestRepairIndexDestinationNotUsedBySiteFailsAsConfigError(t *testing.T) {
 }
 
 func TestRepairIndexWiresRepositoryConfig(t *testing.T) {
-	t.Setenv("TEST_REPO_PASSWORD", "secret")
 	site := incrementalSite()
-	repairer := &appIndexRepairer{result: restic.RepairResult{
+	repairer := &appIndexRepairer{result: incremental.RepairResult{
 		DurationSeconds:   2.5,
 		PacksProcessed:    10,
 		BlobsIndexed:      50,
@@ -112,7 +111,6 @@ func TestRepairIndexWiresRepositoryConfig(t *testing.T) {
 }
 
 func TestRepairIndexEngineErrorSurfaces(t *testing.T) {
-	t.Setenv("TEST_REPO_PASSWORD", "secret")
 	repairer := &appIndexRepairer{repairError: errors.New("engine down")}
 	application := repairApp(t, incrementalSite(), repairer)
 	_, err := application.RepairIndex(context.Background(), "site-a", "s3-primary")

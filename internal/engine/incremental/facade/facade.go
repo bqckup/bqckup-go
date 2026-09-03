@@ -269,38 +269,38 @@ func (e *Engine) RestoreSnapshot(ctx context.Context, repo backupincremental.Rep
 // is taken after the tolerant open (it needs the master key) and removed
 // on every return path; a repository whose key files are all broken is
 // reported as findings without a lock.
-func (e *Engine) CheckRepository(ctx context.Context, repo backuprestic.RepoConfig, readData bool) (backuprestic.CheckResult, error) {
+func (e *Engine) CheckRepository(ctx context.Context, repo backupincremental.RepoConfig, readData bool) (backupincremental.CheckResult, error) {
 	started := time.Now()
 	if err := ctx.Err(); err != nil {
-		return backuprestic.CheckResult{}, err
+		return backupincremental.CheckResult{}, err
 	}
 	if err := e.rejectUnsupportedURL(repo.URL); err != nil {
-		return backuprestic.CheckResult{}, err
+		return backupincremental.CheckResult{}, err
 	}
 	b, err := e.openBackend(ctx, repo)
 	if err != nil {
-		return backuprestic.CheckResult{}, err
+		return backupincremental.CheckResult{}, err
 	}
 	opened, findings, err := repository.CheckOpen(ctx, b, repo.Password)
 	if err != nil {
-		return backuprestic.CheckResult{}, &restic.RedactedError{Category: "repository", Message: "could not open the repository for check", Err: err}
+		return backupincremental.CheckResult{}, &incremental.RedactedError{Category: "repository", Message: "could not open the repository for check", Err: err}
 	}
 	if opened != nil {
 		listingLock, err := lock.New(ctx, b, opened.MasterKey(), false)
 		if err != nil {
-			return backuprestic.CheckResult{}, err
+			return backupincremental.CheckResult{}, err
 		}
 		defer func() { _ = listingLock.Unlock(context.WithoutCancel(ctx), b) }()
 	}
 	checked, err := repository.CheckRepository(ctx, opened, findings, readData)
 	if err != nil {
-		return backuprestic.CheckResult{}, &restic.RedactedError{Category: "repository", Message: "could not check the repository", Err: err}
+		return backupincremental.CheckResult{}, &incremental.RedactedError{Category: "repository", Message: "could not check the repository", Err: err}
 	}
 	status := "healthy"
 	if len(checked.Findings) > 0 {
 		status = "problems"
 	}
-	result := backuprestic.CheckResult{
+	result := backupincremental.CheckResult{
 		ReadData:        readData,
 		Status:          status,
 		DurationSeconds: time.Since(started).Seconds(),
@@ -308,10 +308,10 @@ func (e *Engine) CheckRepository(ctx context.Context, repo backuprestic.RepoConf
 		Snapshots:       checked.Snapshots,
 		Packs:           checked.Packs,
 		Blobs:           checked.Blobs,
-		Findings:        make([]backuprestic.Finding, 0, len(checked.Findings)),
+		Findings:        make([]backupincremental.Finding, 0, len(checked.Findings)),
 	}
 	for _, finding := range checked.Findings {
-		result.Findings = append(result.Findings, backuprestic.Finding{
+		result.Findings = append(result.Findings, backupincremental.Finding{
 			Type:       string(finding.Type),
 			ID:         finding.ID,
 			SnapshotID: finding.SnapshotID,
@@ -349,33 +349,33 @@ func (e *Engine) Unlock(ctx context.Context, repo backupincremental.RepoConfig) 
 
 // RepairIndex scans the repository's packs and reconstructs clean index
 // files under an exclusive lock.
-func (e *Engine) RepairIndex(ctx context.Context, repo backuprestic.RepoConfig) (backuprestic.RepairResult, error) {
+func (e *Engine) RepairIndex(ctx context.Context, repo backupincremental.RepoConfig) (backupincremental.RepairResult, error) {
 	started := time.Now()
 	if err := ctx.Err(); err != nil {
-		return backuprestic.RepairResult{}, err
+		return backupincremental.RepairResult{}, err
 	}
 	if err := e.rejectUnsupportedURL(repo.URL); err != nil {
-		return backuprestic.RepairResult{}, err
+		return backupincremental.RepairResult{}, err
 	}
 	b, err := e.openBackend(ctx, repo)
 	if err != nil {
-		return backuprestic.RepairResult{}, err
+		return backupincremental.RepairResult{}, err
 	}
 	r, err := repository.OpenForRepair(ctx, b, repo.Password)
 	if err != nil {
-		return backuprestic.RepairResult{}, &restic.RedactedError{Category: "repository", Message: "could not open the repository for repair", Err: err}
+		return backupincremental.RepairResult{}, &incremental.RedactedError{Category: "repository", Message: "could not open the repository for repair", Err: err}
 	}
 	_, release, err := acquireExclusiveLock(ctx, b, r.MasterKey())
 	if err != nil {
-		return backuprestic.RepairResult{}, err
+		return backupincremental.RepairResult{}, err
 	}
 	defer release()
 
 	result, err := r.RepairIndex(ctx)
 	if err != nil {
-		return backuprestic.RepairResult{}, &restic.RedactedError{Category: "repository", Message: "could not repair repository index", Err: err}
+		return backupincremental.RepairResult{}, &incremental.RedactedError{Category: "repository", Message: "could not repair repository index", Err: err}
 	}
-	return backuprestic.RepairResult{
+	return backupincremental.RepairResult{
 		DurationSeconds:   time.Since(started).Seconds(),
 		PacksProcessed:    result.PacksProcessed,
 		BlobsIndexed:      result.BlobsIndexed,

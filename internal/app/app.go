@@ -39,10 +39,7 @@ type App struct {
 	snapshots     backup.SnapshotLister
 	restorer      backup.SnapshotRestorer
 	checker       backup.RepositoryChecker
-<<<<<<< HEAD
 	repairer      backup.IndexRepairer
-=======
->>>>>>> c23c1e1 (feat: check command for backup to investigate whole repository integrity)
 	closeOnce     sync.Once
 	closeErr      error
 	closeDatabase func() error
@@ -401,7 +398,6 @@ func (a *App) CheckRepository(ctx context.Context, siteName, destinationName str
 	return (&backup.Checker{Engine: a.checker}).CheckSite(ctx, destinationName, readData, site, storageConfig)
 }
 
-<<<<<<< HEAD
 // RepairIndex rebuilds the index files of one incremental site's repository
 // on one of its destinations. Validation mirrors CheckRepository: the site
 // must exist, be enabled, use incremental mode, and actually send backups to
@@ -429,8 +425,6 @@ func (a *App) RepairIndex(ctx context.Context, siteName, destinationName string)
 	return (&backup.Repairer{Engine: a.repairer}).RepairSite(ctx, destinationName, site, storageConfig)
 }
 
-=======
->>>>>>> 7dd64f4 (feat: add repair-index command for incremental repository)
 // RestoreSnapshot restores one snapshot of one incremental site into the
 // target directory. Validation mirrors ListSiteSnapshots; the confirm
 // callback is passed through to the engine unchanged.

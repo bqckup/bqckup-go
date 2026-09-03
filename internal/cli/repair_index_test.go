@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/bqckup/bqckup-go/internal/backup"
-	backuprestic "github.com/bqckup/bqckup-go/internal/backup/restic"
+	backupincremental "github.com/bqckup/bqckup-go/internal/backup/incremental"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -18,7 +18,7 @@ func repairOutcome() backup.RepairOutcome {
 		Site:        "site-a",
 		Destination: "s3-primary",
 		Mode:        "incremental",
-		Result: backuprestic.RepairResult{
+		Result: backupincremental.RepairResult{
 			DurationSeconds:   1.23,
 			PacksProcessed:    5,
 			BlobsIndexed:      42,
@@ -69,7 +69,6 @@ func TestRepairIndexRequiresDestinationFlag(t *testing.T) {
 }
 
 func TestRepairIndexExecutionError(t *testing.T) {
-	t.Setenv("RESTIC_PASSWORD", "supersecret")
 	configDir, _ := checkSeedConfigDir(t)
 	// Without running backup first, no repository exists on destination -> storage error (exit code 4)
 	root, _, _ := commandForTest(t, "--config-dir", configDir, "backup", "repair-index", "site-b", "--destination", "local-primary")
@@ -87,7 +86,6 @@ func TestRepairIndexFullModeSiteFails(t *testing.T) {
 }
 
 func TestRepairIndexEndToEndCommand(t *testing.T) {
-	t.Setenv("RESTIC_PASSWORD", "supersecret")
 	configDir, backupRoot := checkSeedConfigDir(t)
 	if code, _ := runCheckCommand(t, configDir, "backup", "run", "site-b", "--force"); code != 0 {
 		t.Fatalf("seed backup failed with exit %d", code)

@@ -3,16 +3,15 @@ package backup
 import (
 	"context"
 	"fmt"
-	"os"
 
 	"github.com/bqckup/bqckup-go/internal/apperror"
-	"github.com/bqckup/bqckup-go/internal/backup/restic"
+	"github.com/bqckup/bqckup-go/internal/backup/incremental"
 	"github.com/bqckup/bqckup-go/internal/config"
 )
 
 // RepositoryChecker checks one incremental repository through the engine.
 type RepositoryChecker interface {
-	CheckRepository(ctx context.Context, repo restic.RepoConfig, readData bool) (restic.CheckResult, error)
+	CheckRepository(ctx context.Context, repo incremental.RepoConfig, readData bool) (incremental.CheckResult, error)
 }
 
 // CheckOutcome is the use-case view of one repository check.
@@ -20,22 +19,15 @@ type CheckOutcome struct {
 	Site        string
 	Destination string
 	Mode        string
-	Result      restic.CheckResult
+	Result      incremental.CheckResult
 }
 
 // Checker runs the read-only repository check for one site's destination.
 // It never writes history; findings travel inside the result, errors are
 // command failures only.
 type Checker struct {
-	Engine    RepositoryChecker
-	EnvLookup func(string) (string, bool)
-}
-
-func (c *Checker) lookupEnv(key string) (string, bool) {
-	if c.EnvLookup != nil {
-		return c.EnvLookup(key)
-	}
-	return os.LookupEnv(key)
+	ServerID string
+	Engine   RepositoryChecker
 }
 
 // CheckSite validates the repository of an incremental site on one of its
@@ -53,7 +45,7 @@ func (c *Checker) CheckSite(ctx context.Context, destination string, readData bo
 	if c.Engine == nil {
 		return CheckOutcome{}, apperror.Wrap(apperror.CategoryInternal, "incremental backup engine is unavailable", nil)
 	}
-	repo, err := buildRepoConfig(site, storageConfig, c.lookupEnv, true)
+	repo, err := buildRepoConfig(site, storageConfig, true, c.ServerID)
 	if err != nil {
 		return CheckOutcome{}, apperror.Wrap(apperror.CategoryPreflight, "could not build repository configuration", err)
 	}
