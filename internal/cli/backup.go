@@ -105,20 +105,21 @@ func newBackupCommand(opts *options) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return withApplication(cmd, opts.configDir, func(application *app.App) error {
 				if len(args) == 1 {
-					var heartbeat *backupProgressHeartbeat
+					var progress *CLIProgress
 					if opts.output != "json" {
 						site, ok := application.Configuration().Site(args[0])
 						if ok {
-							progress := backupProgressForSite(site)
-							if err := writeBackupStartText(cmd.ErrOrStderr(), progress); err != nil {
+							runProgress := backupProgressForSite(site)
+							if err := writeBackupStartText(cmd.ErrOrStderr(), runProgress); err != nil {
 								return err
 							}
-							heartbeat = startBackupProgressHeartbeat(cmd.ErrOrStderr(), progress.SiteName)
+							progress = NewCLIProgress(cmd.ErrOrStderr())
+							application.SetBackupProgress(progress)
 						}
 					}
 					result, err := application.RunBackup(cmd.Context(), args[0], force)
-					if heartbeat != nil {
-						heartbeat.Stop()
+					if progress != nil {
+						progress.Done()
 					}
 					if err != nil {
 						return err
@@ -137,30 +138,31 @@ func newBackupCommand(opts *options) *cobra.Command {
 
 				var progressErr error
 				var observer app.BackupRunObserver
-				var heartbeat *backupProgressHeartbeat
+				var progress *CLIProgress
 				if opts.output != "json" {
-					observer = func(progress app.BackupRunProgress) {
+					progress = NewCLIProgress(cmd.ErrOrStderr())
+					application.SetBackupProgress(progress)
+					observer = func(runProgress app.BackupRunProgress) {
 						if progressErr != nil {
 							return
 						}
-						if progress.Result == nil {
-							progressErr = writeBackupStartText(cmd.ErrOrStderr(), progress)
-							if progressErr == nil {
-								heartbeat = startBackupProgressHeartbeat(cmd.ErrOrStderr(), progress.SiteName)
-							}
+						if runProgress.Result == nil {
+							progressErr = writeBackupStartText(cmd.ErrOrStderr(), runProgress)
 							return
 						}
-						if heartbeat != nil {
-							heartbeat.Stop()
-							heartbeat = nil
+						if progress != nil {
+							progress.Done()
 						}
-						progressErr = writeRunResultText(cmd.OutOrStdout(), *progress.Result)
-						if progressErr == nil && progress.Error != nil {
-							progressErr = writeFailureReason(cmd.ErrOrStderr(), progress.Error)
+						progressErr = writeRunResultText(cmd.OutOrStdout(), *runProgress.Result)
+						if progressErr == nil && runProgress.Error != nil {
+							progressErr = writeFailureReason(cmd.ErrOrStderr(), runProgress.Error)
 						}
 					}
 				}
 				results, runErr := application.RunEnabledBackups(cmd.Context(), force, observer)
+				if progress != nil {
+					progress.Done()
+				}
 				if progressErr != nil {
 					return progressErr
 				}

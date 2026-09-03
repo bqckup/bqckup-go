@@ -42,6 +42,72 @@ func (e *ProcessExporter) Preflight() error {
 	return nil
 }
 
+func (e *ProcessExporter) EstimateSize(ctx context.Context, source config.DatabaseSource) (int64, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, false, err
+	}
+	if source.Engine != e.engine {
+		return 0, false, errors.New("database exporter does not match source engine")
+	}
+	if err := e.Preflight(); err != nil {
+		return 0, false, err
+	}
+
+	probeCommand := "mysql"
+	probeArgs := []string{
+		"--protocol=TCP",
+		"--host=" + source.Host,
+		"--port=" + strconv.Itoa(source.Port),
+		"--user=" + source.Username,
+		"--batch",
+		"--skip-column-names",
+		"-e",
+		"SELECT COALESCE(SUM(data_length + index_length), 0) FROM information_schema.tables WHERE table_schema = DATABASE();",
+	}
+	if e.engine == "postgres" {
+		probeCommand = "psql"
+		probeArgs = []string{
+			"--host=" + source.Host,
+			"--port=" + strconv.Itoa(source.Port),
+			"--username=" + source.Username,
+			"--tuples-only",
+			"--no-align",
+			"-c",
+			"SELECT pg_database_size(current_database());",
+			source.Database,
+		}
+	}
+
+	if _, err := e.process.LookPath(probeCommand); err != nil {
+		return 0, false, nil
+	}
+
+	var stdout, stderr bytes.Buffer
+	processErr := e.process.Run(ctx, process.ProcessSpec{
+		Command: probeCommand,
+		Args:    probeArgs,
+		Env:     []string{e.passwordEnv + "=" + source.Password},
+		Stdout:  &stdout,
+		Stderr:  &stderr,
+	})
+	if processErr != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return 0, false, ctxErr
+		}
+		return 0, false, nil
+	}
+
+	value := strings.TrimSpace(stdout.String())
+	if value == "" {
+		return 0, false, nil
+	}
+	size, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || size <= 0 {
+		return 0, false, nil
+	}
+	return size, true, nil
+}
+
 func (e *ProcessExporter) Export(ctx context.Context, source config.DatabaseSource, destination string) (backup.Package, error) {
 	if err := ctx.Err(); err != nil {
 		return backup.Package{}, err

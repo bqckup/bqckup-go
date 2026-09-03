@@ -238,3 +238,24 @@ func TestRestoreSnapshotDefaultsLatest(t *testing.T) {
 	require.NotNil(t, flag)
 	assert.Equal(t, "latest", flag.DefValue)
 }
+
+func TestBackupRunJSONModeSuppressesProgressBar(t *testing.T) {
+	configDir, _ := writeCLIConfig(t)
+	root, stdout, stderr := commandForTest(t, "--config-dir", configDir, "--output", "json", "backup", "run", "example", "--force")
+	require.NoError(t, root.Execute())
+	assert.Empty(t, stderr.String())
+
+	var result map[string]any
+	require.NoError(t, json.Unmarshal(stdout.Bytes(), &result))
+	assert.Equal(t, "example", result["site_name"])
+	assert.Equal(t, "success", result["status"])
+}
+
+func TestBackupRunTextModeEmitsProgressHeader(t *testing.T) {
+	configDir, _ := writeCLIConfig(t)
+	root, stdout, stderr := commandForTest(t, "--config-dir", configDir, "backup", "run", "example", "--force")
+	require.NoError(t, root.Execute())
+
+	assert.Contains(t, stderr.String(), "backup:example: starting full backup to local-primary")
+	assert.Contains(t, stdout.String(), "[OK] example: success")
+}

@@ -164,6 +164,78 @@ func TestRunnerExportsEnabledDatabasesToEveryDestination(t *testing.T) {
 	assert.Len(t, deps.repository.packages, 3)
 }
 
+type recordingProgress struct {
+	stages []struct {
+		label string
+		total int64
+	}
+}
+
+func (p *recordingProgress) StartStage(label string, total int64) {
+	p.stages = append(p.stages, struct {
+		label string
+		total int64
+	}{label: label, total: total})
+}
+
+func (*recordingProgress) Add(int64) {}
+func (*recordingProgress) FinishStage() {}
+func (*recordingProgress) FailStage() {}
+func (*recordingProgress) Done() {}
+
+func TestRunnerUsesKnownTotalsForLargeStages(t *testing.T) {
+	deps := successfulDependencies(t)
+	progress := &recordingProgress{}
+	deps.databaseExporters = map[string]Exporter{
+		"mysql": &fakeExporter{sourceKind: "database", estimatedSize: 2048, estimatedKnown: true},
+	}
+	underTest := validSite()
+	dataDir := filepath.Join(t.TempDir(), "data")
+	require.NoError(t, os.MkdirAll(dataDir, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(dataDir, "hello.txt"), []byte("hello world!"), 0o600))
+	underTest.Sources.Files.Include = []string{dataDir}
+	underTest.Sources.Databases = []config.DatabaseSource{{Name: "app", Enabled: true, Engine: "mysql"}}
+	deps.storages = map[string]config.Storage{"local-primary": {Type: "local", Directory: t.TempDir()}}
+
+	result, err := NewRunner(Dependencies{
+		Repository:         deps.repository,
+		Archiver:           deps.archiver,
+		IncrementalEngine:  deps.incremental,
+		Stores:             deps.stores,
+		Storages:           deps.storages,
+		Retainer:           deps.retainer,
+		Locker:             deps.lock,
+		Notifier:           nil,
+		Clock:              deps.clock,
+		TemporaryDirectory: deps.tempRoot,
+		DatabaseExporters:  deps.databaseExporters,
+		Progress:           progress,
+	}).Run(context.Background(), underTest, false)
+	require.NoError(t, err)
+	assert.Equal(t, StatusSuccess, result.Status)
+	assert.Contains(t, progress.labelNames(), "compress files")
+	assert.Contains(t, progress.labelNames(), "export app")
+	assert.Equal(t, int64(12), progress.totalFor("compress files"))
+	assert.Equal(t, int64(2048), progress.totalFor("export app"))
+}
+
+func (p *recordingProgress) labelNames() []string {
+	labels := make([]string, 0, len(p.stages))
+	for _, stage := range p.stages {
+		labels = append(labels, stage.label)
+	}
+	return labels
+}
+
+func (p *recordingProgress) totalFor(label string) int64 {
+	for _, stage := range p.stages {
+		if stage.label == label {
+			return stage.total
+		}
+	}
+	return -1
+}
+
 func TestRunnerDatabaseExporterFailurePreventsRetention(t *testing.T) {
 	deps := successfulDependencies(t)
 	deps.databaseExporters = map[string]Exporter{
@@ -364,8 +436,17 @@ func (f *fakeStore) Put(_ context.Context, pkg storage.Package, key string) (sto
 func (f *fakeStore) Probe(context.Context) error { return nil }
 
 type fakeExporter struct {
-	err        error
-	sourceKind string
+	err            error
+	sourceKind     string
+	estimatedSize  int64
+	estimatedKnown bool
+}
+
+func (f *fakeExporter) EstimateSize(context.Context, config.DatabaseSource) (int64, bool, error) {
+	if !f.estimatedKnown {
+		return 0, false, nil
+	}
+	return f.estimatedSize, true, nil
 }
 
 func (f *fakeExporter) Export(_ context.Context, source config.DatabaseSource, destination string) (Package, error) {

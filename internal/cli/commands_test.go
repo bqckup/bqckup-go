@@ -149,7 +149,7 @@ func TestBackupRunReportsTextProgress(t *testing.T) {
 	root, stdout, stderr := commandForTest(t, "--config-dir", configDir, "backup", "run", "example", "--force")
 	require.NoError(t, root.Execute())
 
-	assert.Equal(t, "[>] backup:example: starting full backup to local-primary\n", stderr.String())
+	assert.Contains(t, stderr.String(), "[>] backup:example: starting full backup to local-primary\n")
 	assert.Contains(t, stdout.String(), "example: success (run ")
 }
 
@@ -177,6 +177,23 @@ func TestBackupRunWithoutSiteRunsEveryEnabledSite(t *testing.T) {
 	disabledMatches, err := filepath.Glob(filepath.Join(backupRoot, "bqckup", "site-disabled", "*", "*-files.tar.gz"))
 	require.NoError(t, err)
 	assert.Empty(t, disabledMatches)
+}
+
+func TestBackupRunTextSeparatesSiteBlocks(t *testing.T) {
+	configDir, _ := writeCLIConfig(t)
+	writeCLISite(t, configDir, "site-b", true)
+
+	root, _, _ := commandForTest(t, "--config-dir", configDir, "backup", "run", "--force")
+	combined := new(bytes.Buffer)
+	root.SetOut(combined)
+	root.SetErr(combined)
+	require.NoError(t, root.Execute())
+
+	output := combined.String()
+	assert.Contains(t, output, "[>] backup:example: starting full backup to local-primary")
+	assert.Contains(t, output, "[OK] example: success")
+	assert.Contains(t, output, "[>] backup:site-b: starting full backup to local-primary")
+	assert.Contains(t, output, "[OK] site-b: success")
 }
 
 func TestExitCodeMapping(t *testing.T) {
