@@ -34,6 +34,7 @@ All notable changes to Bqckup are documented in this file.
   output for reliable display in minimal terminals.
 - Add configurable application logging with `app.log_file` and level filtering
   for `debug`, `info`, `warn`, and `error`.
+<<<<<<< HEAD
 - Treat `no_change` backup results as successful informational outcomes with
   exit code 0 instead of exit status 5.
 - Add usage and example hints to invalid command input errors.
@@ -76,6 +77,8 @@ All notable changes to Bqckup are documented in this file.
   error detail with one concise batch-failure message.
 - Shorten run IDs in text output and wrap long failure reasons for narrow
   terminals; JSON keeps the complete run IDs.
+=======
+>>>>>>> a37e06c (feat: configure application logging and cli colors)
 - Added global `server_id` namespacing under `bqckup/<server_id>/<site>/`.
 - Renamed internal incremental packages from `restic` to `incremental` while
   preserving official Restic repository compatibility.
