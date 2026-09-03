@@ -262,6 +262,67 @@ func (e *Engine) RestoreSnapshot(ctx context.Context, repo backupincremental.Rep
 	}, nil
 }
 
+// CheckRepository runs a read-only integrity check of one incremental
+// repository: tolerant open, then structural and (with readData) data
+// verification under a non-exclusive lock. Problems are reported as
+// findings in the result; only command failures return an error. The lock
+// is taken after the tolerant open (it needs the master key) and removed
+// on every return path; a repository whose key files are all broken is
+// reported as findings without a lock.
+func (e *Engine) CheckRepository(ctx context.Context, repo backuprestic.RepoConfig, readData bool) (backuprestic.CheckResult, error) {
+	started := time.Now()
+	if err := ctx.Err(); err != nil {
+		return backuprestic.CheckResult{}, err
+	}
+	if err := e.rejectUnsupportedURL(repo.URL); err != nil {
+		return backuprestic.CheckResult{}, err
+	}
+	b, err := e.openBackend(ctx, repo)
+	if err != nil {
+		return backuprestic.CheckResult{}, err
+	}
+	opened, findings, err := repository.CheckOpen(ctx, b, repo.Password)
+	if err != nil {
+		return backuprestic.CheckResult{}, &restic.RedactedError{Category: "repository", Message: "could not open the repository for check", Err: err}
+	}
+	if opened != nil {
+		listingLock, err := lock.New(ctx, b, opened.MasterKey(), false)
+		if err != nil {
+			return backuprestic.CheckResult{}, err
+		}
+		defer func() { _ = listingLock.Unlock(context.WithoutCancel(ctx), b) }()
+	}
+	checked, err := repository.CheckRepository(ctx, opened, findings, readData)
+	if err != nil {
+		return backuprestic.CheckResult{}, &restic.RedactedError{Category: "repository", Message: "could not check the repository", Err: err}
+	}
+	status := "healthy"
+	if len(checked.Findings) > 0 {
+		status = "problems"
+	}
+	result := backuprestic.CheckResult{
+		ReadData:        readData,
+		Status:          status,
+		DurationSeconds: time.Since(started).Seconds(),
+		Indexes:         checked.Indexes,
+		Snapshots:       checked.Snapshots,
+		Packs:           checked.Packs,
+		Blobs:           checked.Blobs,
+		Findings:        make([]backuprestic.Finding, 0, len(checked.Findings)),
+	}
+	for _, finding := range checked.Findings {
+		result.Findings = append(result.Findings, backuprestic.Finding{
+			Type:       string(finding.Type),
+			ID:         finding.ID,
+			SnapshotID: finding.SnapshotID,
+			PackID:     finding.PackID,
+			BlobCount:  finding.BlobCount,
+			Detail:     finding.Detail,
+		})
+	}
+	return result, nil
+}
+
 // Unlock removes stale repository locks (restic unlock semantics: stale
 // locks only, never a live one). Locks are encrypted with the repository
 // key, so the repository must be opened first.

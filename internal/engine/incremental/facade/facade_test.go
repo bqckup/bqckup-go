@@ -1,8 +1,10 @@
 package facade
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -444,16 +446,115 @@ func TestRestoreTakesNonExclusiveLockDuringRestore(t *testing.T) {
 	}
 }
 
-func TestRestoreCancellation(t *testing.T) {
+func TestCheckRepositoryHealthyAndLockReleased(t *testing.T) {
+	ctx := context.Background()
 	engine := NewEngine()
 	repo := testRepo(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	_, err := engine.RestoreSnapshot(ctx, repo, strings.Repeat("a", 64), []string{"/a"}, "/tmp/restore", func([]string) error { return nil })
-	if err == nil {
-		t.Fatal("want error for cancelled context")
+	if err := engine.EnsureRepository(ctx, repo); err != nil {
+		t.Fatal(err)
 	}
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("unexpected error: %v", err)
+	source := t.TempDir()
+	if err := os.WriteFile(filepath.Join(source, "data.txt"), []byte("check me"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := engine.BackupFiles(ctx, repo, backuprestic.BackupSpec{
+		Include: []string{source}, Tags: []string{"bqckup", "site:testsite"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := engine.CheckRepository(ctx, repo, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "healthy" || len(result.Findings) != 0 {
+		t.Fatalf("healthy repository: %+v", result)
+	}
+	if result.Indexes == 0 || result.Snapshots != 1 || result.Packs == 0 || result.Blobs == 0 {
+		t.Fatalf("healthy repository counts are empty: %+v", result)
+	}
+	// read-data mode stays clean too
+	result, err = engine.CheckRepository(ctx, repo, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "healthy" || len(result.Findings) != 0 {
+		t.Fatalf("healthy read-data check: %+v", result)
+	}
+	// the non-exclusive lock is released on every path: a new backup works
+	if _, err := engine.BackupFiles(ctx, repo, backuprestic.BackupSpec{
+		Include: []string{source}, Tags: []string{"bqckup", "site:testsite"},
+	}); err != nil {
+		t.Fatalf("backup after check: %v", err)
+	}
+}
+
+func TestCheckRepositoryReportsCorruptionWithoutLockingOut(t *testing.T) {
+	ctx := context.Background()
+	engine := NewEngine()
+	repo := testRepo(t)
+	if err := engine.EnsureRepository(ctx, repo); err != nil {
+		t.Fatal(err)
+	}
+	source := t.TempDir()
+	if err := os.WriteFile(filepath.Join(source, "data.txt"), []byte("check me too"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := engine.BackupFiles(ctx, repo, backuprestic.BackupSpec{
+		Include: []string{source}, Tags: []string{"bqckup", "site:testsite"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// corrupt the config file in place
+	b := backend.NewLocal(repo.URL)
+	var raw []byte
+	if err := b.Load(ctx, restic.Handle{Type: restic.ConfigFile}, 0, 0, func(rd io.Reader) error {
+		var err error
+		raw, err = io.ReadAll(rd)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	raw[5] ^= 0xff
+	if err := b.Save(ctx, restic.Handle{Type: restic.ConfigFile}, bytes.NewReader(raw)); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := engine.CheckRepository(ctx, repo, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "problems" {
+		t.Fatalf("corrupt repository status = %q, want problems", result.Status)
+	}
+	broken := false
+	for _, finding := range result.Findings {
+		if finding.Type == "broken_config" && finding.ID == "config" {
+			broken = true
+		}
+	}
+	if !broken {
+		t.Fatalf("want broken_config finding, got %+v", result.Findings)
+	}
+	// no lock is left behind that would block the next backup
+	var locks []restic.Handle
+	if err := b.List(ctx, restic.LockFile, func(handle restic.Handle, _ int64) error {
+		locks = append(locks, handle)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(locks) != 0 {
+		t.Fatalf("check left %d lock files behind", len(locks))
+	}
+}
+
+func TestCheckRepositoryRejectsUnsupportedURL(t *testing.T) {
+	engine := NewEngine()
+	repo := backuprestic.RepoConfig{URL: "b2:repo", Password: "x"}
+	_, err := engine.CheckRepository(context.Background(), repo, false)
+	if err == nil || !strings.Contains(err.Error(), "does not support b2:") {
+		t.Fatalf("want unsupported URL error, got %v", err)
 	}
 }

@@ -1,5 +1,3 @@
-// Test-only copy of the pack reader. Move back to production code when
-// restore (L2) actually reads pack files.
 package pack
 
 import (
@@ -35,6 +33,14 @@ func Parse(data []byte, master *crypto.MasterKey) ([]Blob, error) {
 		return nil, err
 	}
 	return blobs, nil
+}
+
+// ParseHeader decodes a decrypted pack header (the entry sequence only).
+// It is the ranged-read counterpart of Parse: the repository check reads
+// just the header bytes of a pack and compares the entries against the
+// index, so no payload and no trailer are available here.
+func ParseHeader(header []byte) ([]Blob, error) {
+	return parseHeader(header)
 }
 
 // parseHeader decodes the decrypted header entry sequence.

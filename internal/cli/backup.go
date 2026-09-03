@@ -272,6 +272,7 @@ func newBackupCommand(opts *options) *cobra.Command {
 	restore.Flags().BoolVar(&force, "force", false, "overwrite existing files without asking")
 	restore.Flags().BoolVar(&quiet, "quiet", false, "print nothing on success")
 	command.AddCommand(restore)
+	command.AddCommand(newCheckCommand(opts))
 	return command
 }
 

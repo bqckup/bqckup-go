@@ -62,6 +62,14 @@ type Repository struct {
 	dataBlobs  []index.Entry
 	treeBlobs  []index.Entry
 	zstd       *zstd.Encoder
+
+	// checkIndexDocs are the index documents the tolerant check open
+	// (CheckOpen) loaded, one entry per healthy index file in list order,
+	// with checkIndexFiles counting the files examined (healthy and
+	// broken). The strict Open path leaves both zero: only the repository
+	// check reads them, and a strict-open repository is never checked.
+	checkIndexDocs  []index.Index
+	checkIndexFiles int
 }
 
 func newMasterIndex() *index.MasterIndex { return index.NewMasterIndex() }
