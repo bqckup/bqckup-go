@@ -41,6 +41,7 @@ type Discord struct {
 	name       string
 	webhookURL string
 <<<<<<< HEAD
+<<<<<<< HEAD
 	client     *http.Client
 }
 
@@ -50,15 +51,20 @@ func NewDiscord(name, webhookURL string) *Discord {
 		webhookURL: webhookURL,
 =======
 	lookupEnv  func(string) (string, bool)
+=======
+>>>>>>> 6d30ed8 (feat: support inline notification credentials)
 	client     *http.Client
 }
 
-func NewDiscord(name, webhookURL string, lookupEnv func(string) (string, bool)) *Discord {
+func NewDiscord(name, webhookURL string) *Discord {
 	return &Discord{
 		name:       name,
 		webhookURL: webhookURL,
+<<<<<<< HEAD
 		lookupEnv:  lookupEnv,
 >>>>>>> 3e1e8c2 (refactor: simplify secret reference config keys)
+=======
+>>>>>>> 6d30ed8 (feat: support inline notification credentials)
 		client:     &http.Client{Timeout: 10 * time.Second},
 	}
 }
@@ -67,6 +73,7 @@ func (d *Discord) Name() string { return d.name }
 
 func (d *Discord) Send(ctx context.Context, payload Payload) error {
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 	url, ok := d.lookupEnv(d.webhookURL)
 	if !ok || url == "" {
@@ -74,6 +81,8 @@ func (d *Discord) Send(ctx context.Context, payload Payload) error {
 	}
 
 >>>>>>> 3e1e8c2 (refactor: simplify secret reference config keys)
+=======
+>>>>>>> 6d30ed8 (feat: support inline notification credentials)
 	lastSuccess := "No successful backup yet"
 	if payload.LastSuccessfulAt != "" {
 		if t, err := time.Parse(time.RFC3339, payload.LastSuccessfulAt); err == nil {

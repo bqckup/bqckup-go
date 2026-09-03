@@ -49,6 +49,9 @@ func Load(ctx context.Context, dir string) (Config, error) {
 	if err := validateNotificationCredentialFile(rootPath, root.Notifications); err != nil {
 		return Config{}, err
 	}
+	if err := validateNotificationCredentialFile(rootPath, root.Notifications); err != nil {
+		return Config{}, err
+	}
 
 	storagePath, err := storagePath(dir)
 	if err != nil {

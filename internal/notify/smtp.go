@@ -44,13 +44,8 @@ func NewSMTP(name string, channel config.Channel, roots *x509.CertPool) *SMTP {
 		name:        name,
 		host:        channel.Host,
 		port:        channel.Port,
-<<<<<<< HEAD
 		username:    channel.Username,
 		password:    channel.Password,
-=======
-		usernameEnv: channel.Username,
-		passwordEnv: channel.Password,
->>>>>>> 3e1e8c2 (refactor: simplify secret reference config keys)
 		from:        channel.From,
 		to:          channel.To,
 		roots:       roots,
