@@ -71,8 +71,8 @@ func TestRunPassesOnValidConfiguration(t *testing.T) {
 <<<<<<< HEAD
 func TestRunTreatsIncrementalPasswordAsLiteralConfig(t *testing.T) {
 =======
-func TestRunFailsWhenPasswordIsMissing(t *testing.T) {
->>>>>>> 3e1e8c2 (refactor: simplify secret reference config keys)
+func TestRunTreatsIncrementalPasswordAsLiteralConfig(t *testing.T) {
+>>>>>>> 1ee1f63 (refactor: load all config values directly from yaml)
 	_ = os.Unsetenv("UNSET_DOCTOR_PASS_VAR")
 	cfg := testConfig(t)
 	cfg.Sites[0].Incremental.Password = "UNSET_DOCTOR_PASS_VAR"
