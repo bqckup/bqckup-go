@@ -93,7 +93,11 @@ func (a *Archiver) Backup(ctx context.Context, spec BackupSpec) (incremental.ID,
 		if err := ctx.Err(); err != nil {
 			return incremental.ID{}, Summary{}, err
 		}
+<<<<<<< HEAD
 		if err := state.backupPathAt(ctx, path, fmt.Sprintf("%d", i)); err != nil {
+=======
+		if err := state.backupPath(ctx, path); err != nil {
+>>>>>>> 79c249c (feat: namespace backups and refresh v0.0.5 releases)
 			return incremental.ID{}, Summary{}, err
 		}
 	}
@@ -403,11 +407,14 @@ func (s *backupState) nodeForAt(ctx context.Context, path string, info os.FileIn
 
 // dirTree walks one directory and returns the subtree blob ID.
 func (s *backupState) dirTree(ctx context.Context, dir string) (*incremental.ID, error) {
+<<<<<<< HEAD
 	id, _, err := s.dirTreeAt(ctx, dir, "", nil)
 	return id, err
 }
 
 func (s *backupState) dirTreeAt(ctx context.Context, dir, key string, old *tree.Node) (*incremental.ID, bool, error) {
+=======
+>>>>>>> 79c249c (feat: namespace backups and refresh v0.0.5 releases)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, false, fmt.Errorf("archiver: read dir %s: %w", dir, err)

@@ -50,7 +50,11 @@ func TestRestoreResolvesLatestBySiteTag(t *testing.T) {
 		taggedSnapshot(strings.Repeat("c", 64), "site:site-c", newer.Add(time.Hour)),
 	}}
 	engine := &fakeSnapshotRestorer{summary: incremental.RestoreSummary{SnapshotID: strings.Repeat("b", 64)}}
+<<<<<<< HEAD
 	restorer := &Restorer{Snapshots: snapshots, Engine: engine}
+=======
+	restorer := &Restorer{Snapshots: snapshots, Engine: engine, EnvLookup: restoreEnvLookup()}
+>>>>>>> 79c249c (feat: namespace backups and refresh v0.0.5 releases)
 
 	result, err := restorer.RestoreSiteSnapshot(context.Background(), "local-primary", "latest", "/tmp/restore", restoreSite(), config.Storage{Type: "local", Directory: "/srv/repos"}, nil)
 	require.NoError(t, err)
@@ -65,7 +69,11 @@ func TestRestoreResolvesIDPrefix(t *testing.T) {
 		taggedSnapshot(strings.Repeat("e", 64), "site:site-b", time.Date(2026, 12, 11, 6, 0, 0, 0, time.UTC)),
 	}}
 	engine := &fakeSnapshotRestorer{summary: incremental.RestoreSummary{SnapshotID: full}}
+<<<<<<< HEAD
 	restorer := &Restorer{Snapshots: snapshots, Engine: engine}
+=======
+	restorer := &Restorer{Snapshots: snapshots, Engine: engine, EnvLookup: restoreEnvLookup()}
+>>>>>>> 79c249c (feat: namespace backups and refresh v0.0.5 releases)
 
 	_, err := restorer.RestoreSiteSnapshot(context.Background(), "local-primary", "abcd1234", "/tmp/restore", restoreSite(), config.Storage{Type: "local", Directory: "/srv/repos"}, nil)
 	require.NoError(t, err)
