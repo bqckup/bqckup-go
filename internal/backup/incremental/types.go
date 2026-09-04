@@ -59,3 +59,42 @@ type RestoreSummary struct {
 // existing path the restore would replace. A nil return means proceed; a
 // non-nil error aborts the restore and is propagated unchanged.
 type RestoreOverwrite func(conflicts []string) error
+
+// Finding is one defect a repository check reported. Type is one of the
+// finding kinds and ID names the object (its full hex storage ID, or the
+// literal "config" for the config file). The optional fields appear only
+// where the finding type defines them: missing and corrupt blobs carry the
+// snapshot or the pack they were found under, a missing pack carries its
+// index entry count, and detail holds a safe message only — never errors,
+// paths, or secrets.
+type Finding struct {
+	Type       string `json:"type"`
+	ID         string `json:"id"`
+	SnapshotID string `json:"snapshot_id,omitempty"`
+	PackID     string `json:"pack_id,omitempty"`
+	BlobCount  int    `json:"blob_count,omitempty"`
+	Detail     string `json:"detail,omitempty"`
+}
+
+// CheckResult is the outcome of one repository check. Status is "healthy"
+// or "problems"; the counts report the objects examined and findings are
+// always complete (never capped).
+type CheckResult struct {
+	ReadData        bool      `json:"read_data"`
+	Status          string    `json:"status"`
+	DurationSeconds float64   `json:"duration_seconds"`
+	Indexes         int       `json:"indexes"`
+	Snapshots       int       `json:"snapshots"`
+	Packs           int       `json:"packs"`
+	Blobs           int       `json:"blobs"`
+	Findings        []Finding `json:"findings"`
+}
+
+// RepairResult is the outcome of rebuilding a repository's index files.
+type RepairResult struct {
+	DurationSeconds   float64 `json:"duration_seconds"`
+	PacksProcessed    int     `json:"packs_processed"`
+	BlobsIndexed      int     `json:"blobs_indexed"`
+	OldIndexesRemoved int     `json:"old_indexes_removed"`
+	NewIndexesWritten int     `json:"new_indexes_written"`
+}

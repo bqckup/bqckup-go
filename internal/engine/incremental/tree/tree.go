@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+
+	"github.com/bqckup/bqckup-go/internal/engine/incremental"
 )
 
 // errNotOrdered mirrors restic's ErrTreeNotOrdered.
@@ -25,6 +27,11 @@ func (t *Tree) Add(node *Node) error {
 // Marshal returns the canonical tree bytes: {"nodes":[...]} + trailing
 // newline. Deterministic: sorted nodes, fixed struct field order.
 func (t *Tree) Marshal() ([]byte, error) {
+	for _, node := range t.Nodes {
+		if node != nil && node.Type == TypeFile && node.Content == nil {
+			node.Content = []incremental.ID{}
+		}
+	}
 	doc, err := json.Marshal(t)
 	if err != nil {
 		return nil, fmt.Errorf("tree: marshal: %w", err)
@@ -38,9 +45,12 @@ func Unmarshal(data []byte) (*Tree, error) {
 	if err := json.Unmarshal(data, &t); err != nil {
 		return nil, fmt.Errorf("tree: unmarshal: %w", err)
 	}
-	for i := 1; i < len(t.Nodes); i++ {
-		if t.Nodes[i-1].Name >= t.Nodes[i].Name {
+	for i := 0; i < len(t.Nodes); i++ {
+		if i > 0 && t.Nodes[i-1].Name >= t.Nodes[i].Name {
 			return nil, fmt.Errorf("%w: %q then %q", errNotOrdered, t.Nodes[i-1].Name, t.Nodes[i].Name)
+		}
+		if t.Nodes[i] != nil && t.Nodes[i].Type == TypeFile && t.Nodes[i].Content == nil {
+			t.Nodes[i].Content = []incremental.ID{}
 		}
 	}
 	return &t, nil

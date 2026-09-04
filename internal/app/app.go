@@ -39,6 +39,8 @@ type App struct {
 	stores           map[string]storage.Store
 	snapshots        backup.SnapshotLister
 	restorer         backup.SnapshotRestorer
+	checker          backup.RepositoryChecker
+	repairer         backup.IndexRepairer
 	reportBuilder    *report.Builder
 	reportDispatcher *report.Dispatcher
 	closeOnce        sync.Once
@@ -107,6 +109,8 @@ func Open(ctx context.Context, configDir string) (*App, error) {
 		stores:           stores,
 		snapshots:        engine,
 		restorer:         engine,
+		checker:          engine,
+		repairer:         engine,
 		reportBuilder:    reportBuilder,
 		reportDispatcher: reportDispatcher,
 		closeDatabase:    closeDatabase,
@@ -394,6 +398,61 @@ func siteUsesDestination(site config.Site, destination string) bool {
 		}
 	}
 	return false
+}
+
+// CheckRepository runs the read-only integrity check of one incremental
+// site's repository on one of its destinations. Validation mirrors
+// ListSiteSnapshots: the site must exist, be enabled, use incremental
+// mode, and actually send backups to the destination. Nothing is written
+// to history and no storage.Store is resolved.
+func (a *App) CheckRepository(ctx context.Context, siteName, destinationName string, readData bool) (backup.CheckOutcome, error) {
+	site, ok := a.configuration.Site(siteName)
+	if !ok {
+		return backup.CheckOutcome{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q was not found", siteName), nil)
+	}
+	if !site.Enabled {
+		return backup.CheckOutcome{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q is disabled", siteName), nil)
+	}
+	if site.BackupMode != "incremental" {
+		return backup.CheckOutcome{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf(
+			"site %q uses full backup mode; use 'bqckup history list --site %s --details' to inspect stored archives",
+			siteName, siteName), nil)
+	}
+	storageConfig, ok := a.configuration.Storages[destinationName]
+	if !ok {
+		return backup.CheckOutcome{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("storage destination %q was not found", destinationName), nil)
+	}
+	if !siteUsesDestination(site, destinationName) {
+		return backup.CheckOutcome{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q does not send backups to destination %q", siteName, destinationName), nil)
+	}
+	return (&backup.Checker{ServerID: a.configuration.ServerID, Engine: a.checker}).CheckSite(ctx, destinationName, readData, site, storageConfig)
+}
+
+// RepairIndex rebuilds the index files of one incremental site's repository
+// on one of its destinations. Validation mirrors CheckRepository: the site
+// must exist, be enabled, use incremental mode, and actually send backups to
+// the destination. Nothing is written to history and no storage.Store is resolved.
+func (a *App) RepairIndex(ctx context.Context, siteName, destinationName string) (backup.RepairOutcome, error) {
+	site, ok := a.configuration.Site(siteName)
+	if !ok {
+		return backup.RepairOutcome{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q was not found", siteName), nil)
+	}
+	if !site.Enabled {
+		return backup.RepairOutcome{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q is disabled", siteName), nil)
+	}
+	if site.BackupMode != "incremental" {
+		return backup.RepairOutcome{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf(
+			"site %q uses full backup mode; use 'bqckup history list --site %s --details' to inspect stored archives",
+			siteName, siteName), nil)
+	}
+	storageConfig, ok := a.configuration.Storages[destinationName]
+	if !ok {
+		return backup.RepairOutcome{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("storage destination %q was not found", destinationName), nil)
+	}
+	if !siteUsesDestination(site, destinationName) {
+		return backup.RepairOutcome{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q does not send backups to destination %q", siteName, destinationName), nil)
+	}
+	return (&backup.Repairer{ServerID: a.configuration.ServerID, Engine: a.repairer}).RepairSite(ctx, destinationName, site, storageConfig)
 }
 
 // RestoreSnapshot restores one snapshot of one incremental site into the

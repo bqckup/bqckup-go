@@ -4,8 +4,16 @@ All notable changes to Bqckup are documented in this file.
 
 ## Unreleased
 
+## v0.0.8
+
 - Retry transient S3 upload failures up to ten times with the AWS SDK's
   standard exponential backoff, including incremental repository uploads.
+- Show byte-level progress during backup and update operations, while retaining
+  a heartbeat for redirected output.
+- Add read-only incremental repository integrity checks, with optional
+  full blob authentication and machine-readable findings.
+- Add a locked `backup repair-index` operation that rebuilds indexes from pack
+  headers before removing the old index files.
 - Place batch backup spacing between site result blocks instead of between a
   site's start and result lines.
 - Show immediate update progress, an interactive spinner, and a redirected
