@@ -238,3 +238,55 @@ func TestRestoreSnapshotDefaultsLatest(t *testing.T) {
 	require.NotNil(t, flag)
 	assert.Equal(t, "latest", flag.DefValue)
 }
+
+func TestRestoreConfirmHooksCalled(t *testing.T) {
+	var out bytes.Buffer
+	var promptCalled, answerCalled bool
+	confirm := resticRestoreOverwrite{
+		in:       strings.NewReader("y\n"),
+		out:      &out,
+		tty:      func(io.Reader) bool { return true },
+		onPrompt: func() { promptCalled = true },
+		onAnswer: func() { answerCalled = true },
+	}.confirm
+	require.NoError(t, confirm([]string{"/x"}))
+	assert.True(t, promptCalled)
+	assert.True(t, answerCalled)
+}
+
+func TestRestoreReportsTextProgress(t *testing.T) {
+	configDir, _ := checkSeedConfigDir(t)
+	if code, _ := runCheckCommand(t, configDir, "backup", "run", "site-b", "--force"); code != 0 {
+		t.Fatalf("seed backup failed with exit %d", code)
+	}
+	targetDir := filepath.Join(t.TempDir(), "restored")
+	root, stdout, stderr := commandForTest(t, "--config-dir", configDir, "backup", "restore", "site-b", "--destination", "local-primary", "--target", targetDir)
+	require.NoError(t, root.Execute())
+	assert.Equal(t, "[>] restore:site-b: restoring snapshot latest from local-primary to "+targetDir+"\n", stderr.String())
+	assert.Contains(t, stdout.String(), "restored snapshot")
+}
+
+func TestRestoreQuietSuppressesProgress(t *testing.T) {
+	configDir, _ := checkSeedConfigDir(t)
+	if code, _ := runCheckCommand(t, configDir, "backup", "run", "site-b", "--force"); code != 0 {
+		t.Fatalf("seed backup failed with exit %d", code)
+	}
+	targetDir := filepath.Join(t.TempDir(), "restored")
+	root, stdout, stderr := commandForTest(t, "--config-dir", configDir, "backup", "restore", "site-b", "--destination", "local-primary", "--target", targetDir, "--quiet")
+	require.NoError(t, root.Execute())
+	assert.Empty(t, stderr.String())
+	assert.Empty(t, stdout.String())
+}
+
+func TestRestoreJSONSuppressesStderrProgress(t *testing.T) {
+	configDir, _ := checkSeedConfigDir(t)
+	if code, _ := runCheckCommand(t, configDir, "backup", "run", "site-b", "--force"); code != 0 {
+		t.Fatalf("seed backup failed with exit %d", code)
+	}
+	targetDir := filepath.Join(t.TempDir(), "restored")
+	root, stdout, stderr := commandForTest(t, "--config-dir", configDir, "--output", "json", "backup", "restore", "site-b", "--destination", "local-primary", "--target", targetDir)
+	require.NoError(t, root.Execute())
+	assert.Empty(t, stderr.String())
+	assert.NotEmpty(t, stdout.String())
+}
+

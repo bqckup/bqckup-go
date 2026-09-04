@@ -254,8 +254,29 @@ func newBackupCommand(opts *options) *cobra.Command {
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return withApplication(cmd, opts.configDir, func(application *app.App) error {
-				confirm := resticRestoreOverwrite{force: force, in: cmd.InOrStdin(), out: cmd.ErrOrStderr()}.confirm
+				var heartbeat *progressHeartbeat
+				if opts.output != "json" && !quiet {
+					if err := writeRestoreStartText(cmd.ErrOrStderr(), args[0], destination, snapshot, target); err != nil {
+						return err
+					}
+					heartbeat = startProgressHeartbeat(cmd.ErrOrStderr(), "restore", args[0], "restoring")
+				}
+				var onPrompt, onAnswer func()
+				if heartbeat != nil {
+					onPrompt = heartbeat.Pause
+					onAnswer = heartbeat.Resume
+				}
+				confirm := resticRestoreOverwrite{
+					force:    force,
+					in:       cmd.InOrStdin(),
+					out:      cmd.ErrOrStderr(),
+					onPrompt: onPrompt,
+					onAnswer: onAnswer,
+				}.confirm
 				result, err := application.RestoreSnapshot(cmd.Context(), args[0], destination, snapshot, target, confirm)
+				if heartbeat != nil {
+					heartbeat.Stop()
+				}
 				if err != nil {
 					return err
 				}
@@ -471,15 +492,20 @@ func (h *backupProgressHeartbeat) Stop() {
 // the established error categories (preflight for non-terminal stdin,
 // cancellation for a declined prompt).
 type resticRestoreOverwrite struct {
-	force bool
-	in    io.Reader
-	out   io.Writer
-	tty   func(io.Reader) bool // injectable for tests; defaults to isTerminalReader
+	force    bool
+	in       io.Reader
+	out      io.Writer
+	tty      func(io.Reader) bool // injectable for tests; defaults to isTerminalReader
+	onPrompt func()
+	onAnswer func()
 }
 
 func (c resticRestoreOverwrite) confirm(conflicts []string) error {
 	if c.force {
 		return nil
+	}
+	if c.onPrompt != nil {
+		c.onPrompt()
 	}
 	for _, path := range conflicts {
 		fmt.Fprintf(c.out, "  %s\n", path)
@@ -493,6 +519,9 @@ func (c resticRestoreOverwrite) confirm(conflicts []string) error {
 		return apperror.Wrap(apperror.CategoryPreflight, fmt.Sprintf("restore would overwrite %d files; re-run with --force to overwrite them", len(conflicts)), nil)
 	}
 	line, _ := bufio.NewReader(c.in).ReadString('\n')
+	if c.onAnswer != nil {
+		c.onAnswer()
+	}
 	if answer := strings.TrimSpace(line); answer != "y" && answer != "Y" {
 		return apperror.Wrap(apperror.CategoryCancellation, "restore cancelled by user", nil)
 	}
