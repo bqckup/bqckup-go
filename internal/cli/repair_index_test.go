@@ -130,3 +130,26 @@ func TestRepairIndexEndToEndCommand(t *testing.T) {
 	assert.Greater(t, report["blobs_indexed"], float64(0))
 	assert.Equal(t, float64(1), report["new_indexes_written"])
 }
+
+func TestRepairIndexReportsTextProgress(t *testing.T) {
+	configDir, _ := checkSeedConfigDir(t)
+	if code, _ := runCheckCommand(t, configDir, "backup", "run", "site-b", "--force"); code != 0 {
+		t.Fatalf("seed backup failed with exit %d", code)
+	}
+	root, stdout, stderr := commandForTest(t, "--config-dir", configDir, "backup", "repair-index", "site-b", "--destination", "local-primary")
+	require.NoError(t, root.Execute())
+	assert.Equal(t, "[>] repair-index:site-b: repairing index on local-primary\n", stderr.String())
+	assert.Contains(t, stdout.String(), "repair-index site-b/local-primary:")
+}
+
+func TestRepairIndexJSONModeSuppressesStderrProgress(t *testing.T) {
+	configDir, _ := checkSeedConfigDir(t)
+	if code, _ := runCheckCommand(t, configDir, "backup", "run", "site-b", "--force"); code != 0 {
+		t.Fatalf("seed backup failed with exit %d", code)
+	}
+	root, stdout, stderr := commandForTest(t, "--config-dir", configDir, "--output", "json", "backup", "repair-index", "site-b", "--destination", "local-primary")
+	require.NoError(t, root.Execute())
+	assert.Empty(t, stderr.String())
+	assert.NotEmpty(t, stdout.String())
+}
+

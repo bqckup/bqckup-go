@@ -29,7 +29,17 @@ func newRepairIndexCommand(opts *options) *cobra.Command {
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return withApplication(cmd, opts.configDir, func(application *app.App) error {
+				var heartbeat *progressHeartbeat
+				if opts.output != "json" {
+					if err := writeRepairIndexStartText(cmd.ErrOrStderr(), args[0], destination); err != nil {
+						return err
+					}
+					heartbeat = startProgressHeartbeat(cmd.ErrOrStderr(), "repair-index", args[0], "repairing")
+				}
 				outcome, err := application.RepairIndex(cmd.Context(), args[0], destination)
+				if heartbeat != nil {
+					heartbeat.Stop()
+				}
 				if err != nil {
 					return err
 				}
