@@ -20,6 +20,7 @@ import (
 	"github.com/bqckup/bqckup-go/internal/notify"
 	"github.com/bqckup/bqckup-go/internal/platform/lock"
 	"github.com/bqckup/bqckup-go/internal/process"
+	"github.com/bqckup/bqckup-go/internal/report"
 	"github.com/bqckup/bqckup-go/internal/retention"
 	"github.com/bqckup/bqckup-go/internal/storage"
 	localstorage "github.com/bqckup/bqckup-go/internal/storage/local"
@@ -32,17 +33,21 @@ type remoteStorageResolver interface {
 }
 
 type App struct {
-	configuration config.Config
-	runner        *backup.Runner
-	repository    *history.Repository
-	stores        map[string]storage.Store
-	snapshots     backup.SnapshotLister
-	restorer      backup.SnapshotRestorer
-	closeOnce     sync.Once
-	closeErr      error
-	closeDatabase func() error
-	logger        *appLogger
-	closeLogger   func() error
+	configuration    config.Config
+	runner           *backup.Runner
+	repository       *history.Repository
+	stores           map[string]storage.Store
+	snapshots        backup.SnapshotLister
+	restorer         backup.SnapshotRestorer
+	checker          backup.RepositoryChecker
+	repairer         backup.IndexRepairer
+	reportBuilder    *report.Builder
+	reportDispatcher *report.Dispatcher
+	closeOnce        sync.Once
+	closeErr         error
+	closeDatabase    func() error
+	logger           *appLogger
+	closeLogger      func() error
 }
 
 func Open(ctx context.Context, configDir string) (*App, error) {
@@ -95,17 +100,40 @@ func Open(ctx context.Context, configDir string) (*App, error) {
 		Clock:              clock.System{},
 		TemporaryDirectory: configuration.App.TemporaryDirectory,
 	})
+	reportBuilder := report.NewBuilder(repository)
+	reportDispatcher := buildReportDispatcher(configuration.Notifications, repository)
 	return &App{
-		configuration: configuration,
-		runner:        runner,
-		repository:    repository,
-		stores:        stores,
-		snapshots:     engine,
-		restorer:      engine,
-		closeDatabase: closeDatabase,
-		logger:        logger,
-		closeLogger:   closeLogger,
+		configuration:    configuration,
+		runner:           runner,
+		repository:       repository,
+		stores:           stores,
+		snapshots:        engine,
+		restorer:         engine,
+		checker:          engine,
+		repairer:         engine,
+		reportBuilder:    reportBuilder,
+		reportDispatcher: reportDispatcher,
+		closeDatabase:    closeDatabase,
+		logger:           logger,
+		closeLogger:      closeLogger,
 	}, nil
+}
+
+// buildReportDispatcher constructs the report dispatcher from the configured
+// channels and routes. It shares the same channel map as the backup notifier.
+func buildReportDispatcher(notifications config.Notifications, repo *history.Repository) *report.Dispatcher {
+	channels := make(map[string]notify.Channel, len(notifications.Channels))
+	for name, channel := range notifications.Channels {
+		switch channel.Type {
+		case "smtp":
+			channels[name] = notify.NewSMTP(name, channel, nil)
+		case "webhook":
+			channels[name] = notify.NewWebhook(name, channel.URL)
+		case "discord":
+			channels[name] = notify.NewDiscord(name, channel.WebhookURL)
+		}
+	}
+	return report.NewDispatcher(channels, notifications.Routes, repo)
 }
 
 // buildNotifier constructs the notification dispatcher from the configured
@@ -210,6 +238,12 @@ func buildStores(ctx context.Context, configured map[string]config.Storage) (map
 }
 
 func (a *App) Configuration() config.Config { return a.configuration }
+
+// SetBackupProgress configures the optional progress reporter used by
+// subsequent backup runs in this application instance.
+func (a *App) SetBackupProgress(progress backup.Progress) {
+	a.runner.SetProgress(progress)
+}
 
 func (a *App) RunBackup(ctx context.Context, siteName string, force bool) (backup.RunResult, error) {
 	a.logger.write(logInfo, fmt.Sprintf("event=backup_start site=%q force=%t", siteName, force))
@@ -366,6 +400,61 @@ func siteUsesDestination(site config.Site, destination string) bool {
 	return false
 }
 
+// CheckRepository runs the read-only integrity check of one incremental
+// site's repository on one of its destinations. Validation mirrors
+// ListSiteSnapshots: the site must exist, be enabled, use incremental
+// mode, and actually send backups to the destination. Nothing is written
+// to history and no storage.Store is resolved.
+func (a *App) CheckRepository(ctx context.Context, siteName, destinationName string, readData bool) (backup.CheckOutcome, error) {
+	site, ok := a.configuration.Site(siteName)
+	if !ok {
+		return backup.CheckOutcome{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q was not found", siteName), nil)
+	}
+	if !site.Enabled {
+		return backup.CheckOutcome{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q is disabled", siteName), nil)
+	}
+	if site.BackupMode != "incremental" {
+		return backup.CheckOutcome{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf(
+			"site %q uses full backup mode; use 'bqckup history list --site %s --details' to inspect stored archives",
+			siteName, siteName), nil)
+	}
+	storageConfig, ok := a.configuration.Storages[destinationName]
+	if !ok {
+		return backup.CheckOutcome{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("storage destination %q was not found", destinationName), nil)
+	}
+	if !siteUsesDestination(site, destinationName) {
+		return backup.CheckOutcome{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q does not send backups to destination %q", siteName, destinationName), nil)
+	}
+	return (&backup.Checker{ServerID: a.configuration.ServerID, Engine: a.checker}).CheckSite(ctx, destinationName, readData, site, storageConfig)
+}
+
+// RepairIndex rebuilds the index files of one incremental site's repository
+// on one of its destinations. Validation mirrors CheckRepository: the site
+// must exist, be enabled, use incremental mode, and actually send backups to
+// the destination. Nothing is written to history and no storage.Store is resolved.
+func (a *App) RepairIndex(ctx context.Context, siteName, destinationName string) (backup.RepairOutcome, error) {
+	site, ok := a.configuration.Site(siteName)
+	if !ok {
+		return backup.RepairOutcome{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q was not found", siteName), nil)
+	}
+	if !site.Enabled {
+		return backup.RepairOutcome{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q is disabled", siteName), nil)
+	}
+	if site.BackupMode != "incremental" {
+		return backup.RepairOutcome{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf(
+			"site %q uses full backup mode; use 'bqckup history list --site %s --details' to inspect stored archives",
+			siteName, siteName), nil)
+	}
+	storageConfig, ok := a.configuration.Storages[destinationName]
+	if !ok {
+		return backup.RepairOutcome{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("storage destination %q was not found", destinationName), nil)
+	}
+	if !siteUsesDestination(site, destinationName) {
+		return backup.RepairOutcome{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q does not send backups to destination %q", siteName, destinationName), nil)
+	}
+	return (&backup.Repairer{ServerID: a.configuration.ServerID, Engine: a.repairer}).RepairSite(ctx, destinationName, site, storageConfig)
+}
+
 // RestoreSnapshot restores one snapshot of one incremental site into the
 // target directory. Validation mirrors ListSiteSnapshots; the confirm
 // callback is passed through to the engine unchanged.
@@ -442,6 +531,45 @@ func (a *App) Link(ctx context.Context, destinationName, key string, expires tim
 		return storage.DownloadLink{}, apperror.Wrap(apperror.CategoryInternal, "a configured storage destination is unavailable", nil)
 	}
 	return (&backup.Linker{}).Link(ctx, destinationName, site, store, key, expires)
+}
+
+// SendDailyReport builds and delivers the daily backup summary report for the
+// calendar day containing t in the configured timezone. It is a no-op when
+// daily reports are disabled or the report for that day has already been sent.
+func (a *App) SendDailyReport(ctx context.Context, t time.Time) error {
+	cfg := a.configuration.Reports.Daily
+	if !cfg.Enabled {
+		return nil
+	}
+	tz, err := time.LoadLocation(cfg.Timezone)
+	if err != nil {
+		return fmt.Errorf("daily report timezone: %w", err)
+	}
+	data, err := a.reportBuilder.BuildDailyReport(ctx, t, tz, cfg.IncludeEmptyDays)
+	if err != nil {
+		return err
+	}
+	return a.reportDispatcher.SendDaily(ctx, data, cfg.NotificationRoute)
+}
+
+// SendMonthlyReport builds and delivers the monthly consolidated backup report
+// for the calendar month containing t in the configured timezone. It is a
+// no-op when monthly reports are disabled or the report for that month has
+// already been sent.
+func (a *App) SendMonthlyReport(ctx context.Context, t time.Time) error {
+	cfg := a.configuration.Reports.Monthly
+	if !cfg.Enabled {
+		return nil
+	}
+	tz, err := time.LoadLocation(cfg.Timezone)
+	if err != nil {
+		return fmt.Errorf("monthly report timezone: %w", err)
+	}
+	data, err := a.reportBuilder.BuildMonthlyReport(ctx, t, tz, cfg.IncludeEmptyDays)
+	if err != nil {
+		return err
+	}
+	return a.reportDispatcher.SendMonthly(ctx, data, cfg.NotificationRoute)
 }
 
 func (a *App) Close() error {

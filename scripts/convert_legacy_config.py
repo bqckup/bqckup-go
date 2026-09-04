@@ -24,7 +24,7 @@ try:
 except ImportError:
     print("error: PyYAML is required; install it with: python3 -m pip install PyYAML", file=sys.stderr)
     raise SystemExit(2)
-
+im
 
 INTERVALS = {
     "hourly": "1h",

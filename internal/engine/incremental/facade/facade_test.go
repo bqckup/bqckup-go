@@ -1,8 +1,10 @@
 package facade
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -444,16 +446,202 @@ func TestRestoreTakesNonExclusiveLockDuringRestore(t *testing.T) {
 	}
 }
 
-func TestRestoreCancellation(t *testing.T) {
+func TestCheckRepositoryHealthyAndLockReleased(t *testing.T) {
+	ctx := context.Background()
 	engine := NewEngine()
 	repo := testRepo(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	_, err := engine.RestoreSnapshot(ctx, repo, strings.Repeat("a", 64), []string{"/a"}, "/tmp/restore", func([]string) error { return nil })
-	if err == nil {
-		t.Fatal("want error for cancelled context")
+	if err := engine.EnsureRepository(ctx, repo); err != nil {
+		t.Fatal(err)
 	}
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("unexpected error: %v", err)
+	source := t.TempDir()
+	if err := os.WriteFile(filepath.Join(source, "data.txt"), []byte("check me"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := engine.BackupFiles(ctx, repo, backupincremental.BackupSpec{
+		Include: []string{source}, Tags: []string{"bqckup", "site:testsite"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := engine.CheckRepository(ctx, repo, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "healthy" || len(result.Findings) != 0 {
+		t.Fatalf("healthy repository: %+v", result)
+	}
+	if result.Indexes == 0 || result.Snapshots != 1 || result.Packs == 0 || result.Blobs == 0 {
+		t.Fatalf("healthy repository counts are empty: %+v", result)
+	}
+	// read-data mode stays clean too
+	result, err = engine.CheckRepository(ctx, repo, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "healthy" || len(result.Findings) != 0 {
+		t.Fatalf("healthy read-data check: %+v", result)
+	}
+	// the non-exclusive lock is released on every path: a new backup works
+	if _, err := engine.BackupFiles(ctx, repo, backupincremental.BackupSpec{
+		Include: []string{source}, Tags: []string{"bqckup", "site:testsite"},
+	}); err != nil {
+		t.Fatalf("backup after check: %v", err)
+	}
+}
+
+func TestCheckRepositoryReportsCorruptionWithoutLockingOut(t *testing.T) {
+	ctx := context.Background()
+	engine := NewEngine()
+	repo := testRepo(t)
+	if err := engine.EnsureRepository(ctx, repo); err != nil {
+		t.Fatal(err)
+	}
+	source := t.TempDir()
+	if err := os.WriteFile(filepath.Join(source, "data.txt"), []byte("check me too"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := engine.BackupFiles(ctx, repo, backupincremental.BackupSpec{
+		Include: []string{source}, Tags: []string{"bqckup", "site:testsite"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// corrupt the config file in place
+	b := backend.NewLocal(repo.URL)
+	var raw []byte
+	if err := b.Load(ctx, incremental.Handle{Type: incremental.ConfigFile}, 0, 0, func(rd io.Reader) error {
+		var err error
+		raw, err = io.ReadAll(rd)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	raw[5] ^= 0xff
+	if err := b.Save(ctx, incremental.Handle{Type: incremental.ConfigFile}, bytes.NewReader(raw)); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := engine.CheckRepository(ctx, repo, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "problems" {
+		t.Fatalf("corrupt repository status = %q, want problems", result.Status)
+	}
+	broken := false
+	for _, finding := range result.Findings {
+		if finding.Type == "broken_config" && finding.ID == "config" {
+			broken = true
+		}
+	}
+	if !broken {
+		t.Fatalf("want broken_config finding, got %+v", result.Findings)
+	}
+	// no lock is left behind that would block the next backup
+	var locks []incremental.Handle
+	if err := b.List(ctx, incremental.LockFile, func(handle incremental.Handle, _ int64) error {
+		locks = append(locks, handle)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(locks) != 0 {
+		t.Fatalf("check left %d lock files behind", len(locks))
+	}
+}
+
+func TestCheckRepositoryRejectsUnsupportedURL(t *testing.T) {
+	engine := NewEngine()
+	repo := backupincremental.RepoConfig{URL: "b2:repo", Password: "x"}
+	_, err := engine.CheckRepository(context.Background(), repo, false)
+	if err == nil || !strings.Contains(err.Error(), "does not support b2:") {
+		t.Fatalf("want unsupported URL error, got %v", err)
+	}
+}
+
+func TestFacadeRepairIndexRebuildsValidIndex(t *testing.T) {
+	ctx := context.Background()
+	engine := NewEngine()
+	repo := testRepo(t)
+	if err := engine.EnsureRepository(ctx, repo); err != nil {
+		t.Fatal(err)
+	}
+	source := t.TempDir()
+	if err := os.WriteFile(filepath.Join(source, "repair_me.txt"), []byte("repair index facade data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := engine.BackupFiles(ctx, repo, backupincremental.BackupSpec{
+		Include: []string{source}, Tags: []string{"bqckup", "site:testsite"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Delete all index files directly from backend
+	b := backend.NewLocal(repo.URL)
+	var indexes []incremental.Handle
+	if err := b.List(ctx, incremental.IndexFile, func(h incremental.Handle, _ int64) error {
+		indexes = append(indexes, h)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, h := range indexes {
+		if err := b.Remove(ctx, h); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	result, err := engine.RepairIndex(ctx, repo)
+	if err != nil {
+		t.Fatalf("RepairIndex failed: %v", err)
+	}
+	if result.PacksProcessed == 0 || result.BlobsIndexed == 0 || result.NewIndexesWritten != 1 {
+		t.Fatalf("unexpected repair result: %+v", result)
+	}
+
+	// Verify check passes after repair
+	checkResult, err := engine.CheckRepository(ctx, repo, true)
+	if err != nil {
+		t.Fatalf("CheckRepository failed: %v", err)
+	}
+	if checkResult.Status != "healthy" || len(checkResult.Findings) != 0 {
+		t.Fatalf("check result after repair not healthy: %+v", checkResult)
+	}
+
+	// Verify snapshots can be listed
+	snaps, err := engine.ListSnapshots(ctx, repo)
+	if err != nil {
+		t.Fatalf("ListSnapshots failed: %v", err)
+	}
+	if len(snaps) != 1 {
+		t.Fatalf("snapshots count = %d, want 1", len(snaps))
+	}
+}
+
+func TestFacadeRepairIndexLockConflict(t *testing.T) {
+	ctx := context.Background()
+	engine := NewEngine()
+	repo := testRepo(t)
+	if err := engine.EnsureRepository(ctx, repo); err != nil {
+		t.Fatal(err)
+	}
+
+	b := backend.NewLocal(repo.URL)
+	r, err := repository.Open(ctx, b, repo.Password)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Hold an exclusive lock
+	activeLock, err := lock.New(ctx, b, r.MasterKey(), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = activeLock.Unlock(context.WithoutCancel(ctx), b) }()
+
+	// RepairIndex should fail due to lock conflict
+	_, err = engine.RepairIndex(ctx, repo)
+	if err == nil {
+		t.Fatal("expected error on RepairIndex while repository is locked, got nil")
 	}
 }

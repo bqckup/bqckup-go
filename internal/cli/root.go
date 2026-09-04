@@ -66,6 +66,7 @@ func NewRoot(info buildinfo.Info) *cobra.Command {
 	root.AddCommand(newBackupCommand(opts))
 	root.AddCommand(newDoctorCommand(opts))
 	root.AddCommand(newHistoryCommand(opts))
+	root.AddCommand(newReportCommand(opts))
 	root.AddCommand(newStorageCommand(opts))
 	root.AddCommand(newUpdateCommand(opts))
 	root.AddCommand(&cobra.Command{
@@ -147,6 +148,9 @@ func formatErrorMessage(err error) string {
 func ExitCode(err error) int {
 	if err == nil {
 		return 0
+	}
+	if errors.Is(err, errCheckProblems) {
+		return 1
 	}
 	var configError *config.Error
 	if errors.Is(err, ErrInvalidInput) || errors.As(err, &configError) || strings.Contains(err.Error(), "unknown command") {

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path"
 	"sort"
@@ -60,6 +61,17 @@ func newWithClients(options Options, uploader uploaderAPI, client objectAPI, pre
 }
 
 func (s *Store) Put(ctx context.Context, pkg storage.Package, key string) (storage.StoredPackage, error) {
+	return s.put(ctx, pkg, key, nil)
+}
+
+// PutWithProgress is like Put but reports how many bytes the uploader has
+// consumed so far through progress. Only body bytes are counted, never the
+// object key or metadata; the local verification read pass is not counted.
+func (s *Store) PutWithProgress(ctx context.Context, pkg storage.Package, key string, progress func(int64)) (storage.StoredPackage, error) {
+	return s.put(ctx, pkg, key, progress)
+}
+
+func (s *Store) put(ctx context.Context, pkg storage.Package, key string, progress func(int64)) (storage.StoredPackage, error) {
 	if err := ctx.Err(); err != nil {
 		return storage.StoredPackage{}, err
 	}
@@ -77,10 +89,14 @@ func (s *Store) Put(ctx context.Context, pkg storage.Package, key string) (stora
 		return storage.StoredPackage{}, apperror.Hide("could not open backup package", err)
 	}
 	defer file.Close()
+	body := io.Reader(file)
+	if progress != nil {
+		body = countingReader{next: body, progress: progress}
+	}
 	_, err = s.uploader.UploadObject(ctx, &transfermanager.UploadObjectInput{
 		Bucket:        aws.String(s.bucket),
 		Key:           aws.String(finalKey),
-		Body:          file,
+		Body:          body,
 		IfNoneMatch:   aws.String("*"),
 		MpuObjectSize: aws.Int64(size),
 		Metadata: map[string]string{
@@ -163,6 +179,21 @@ func metadataValue(metadata map[string]string, name string) string {
 		}
 	}
 	return ""
+}
+
+// countingReader reports every byte it forwards to next, once, so a progress
+// consumer sees the actual bytes transferred rather than the buffer size.
+type countingReader struct {
+	next     io.Reader
+	progress func(int64)
+}
+
+func (r countingReader) Read(p []byte) (int, error) {
+	n, err := r.next.Read(p)
+	if n > 0 {
+		r.progress(int64(n))
+	}
+	return n, err
 }
 
 func isCollision(err error) bool {
