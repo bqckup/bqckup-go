@@ -442,7 +442,6 @@ func writeBackupStartText(out io.Writer, progress app.BackupRunProgress) error {
 	return err
 }
 
-
 // resticRestoreOverwrite implements the engine's conflict confirmation: it
 // lists every conflict, prompts once on stderr, and maps the outcome to
 // the established error categories (preflight for non-terminal stdin,

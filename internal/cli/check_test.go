@@ -334,4 +334,3 @@ func TestBackupCheckJSONModeSuppressesStderrProgress(t *testing.T) {
 	assert.Empty(t, stderr.String())
 	assert.NotEmpty(t, stdout.String())
 }
-
