@@ -41,6 +41,17 @@ func New(root string) (*Store, error) {
 }
 
 func (s *Store) Put(ctx context.Context, pkg storage.Package, key string) (stored storage.StoredPackage, err error) {
+	return s.put(ctx, pkg, key, nil)
+}
+
+// PutWithProgress is like Put but reports the number of bytes copied so far
+// through progress. It reports only bytes actually written to the staging
+// file (the archive/package payload), never the object key or SHA-256.
+func (s *Store) PutWithProgress(ctx context.Context, pkg storage.Package, key string, progress func(int64)) (stored storage.StoredPackage, err error) {
+	return s.put(ctx, pkg, key, progress)
+}
+
+func (s *Store) put(ctx context.Context, pkg storage.Package, key string, progress func(int64)) (stored storage.StoredPackage, err error) {
 	if err := ctx.Err(); err != nil {
 		return stored, err
 	}
@@ -83,7 +94,11 @@ func (s *Store) Put(ctx context.Context, pkg storage.Package, key string) (store
 	}
 	defer source.Close()
 	hash := sha256.New()
-	size, err := ctxcopy.Copy(ctx, io.MultiWriter(staging, hash), source)
+	destination := io.MultiWriter(staging, hash)
+	if progress != nil {
+		destination = countingWriter{next: destination, progress: progress}
+	}
+	size, err := ctxcopy.Copy(ctx, destination, source)
 	if err != nil {
 		return stored, err
 	}
@@ -113,6 +128,21 @@ func (s *Store) Put(ctx context.Context, pkg storage.Package, key string) (store
 		return stored, err
 	}
 	return storage.StoredPackage{Key: key, Size: size, SHA256: actualSHA}, nil
+}
+
+// countingWriter reports every byte it forwards to next, once, so a progress
+// consumer sees the actual bytes written rather than the buffer size.
+type countingWriter struct {
+	next     io.Writer
+	progress func(int64)
+}
+
+func (w countingWriter) Write(p []byte) (int, error) {
+	n, err := w.next.Write(p)
+	if n > 0 {
+		w.progress(int64(n))
+	}
+	return n, err
 }
 
 func (s *Store) Delete(ctx context.Context, key string) error {

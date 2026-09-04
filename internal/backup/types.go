@@ -25,11 +25,13 @@ type Exporter interface {
 	Export(ctx context.Context, source config.DatabaseSource, destination string) (Package, error)
 }
 
+type EstimatedSizeProvider interface {
+	EstimateSize(ctx context.Context, source config.DatabaseSource) (int64, bool, error)
+}
+
 type IncrementalEngine interface {
 	EnsureRepository(ctx context.Context, repo incremental.RepoConfig) error
 	BackupFiles(ctx context.Context, repo incremental.RepoConfig, spec incremental.BackupSpec) (incremental.SnapshotSummary, error)
-	// ApplyRetention forgets snapshots beyond keepLast for the site and
-	// prunes unreachable data; it returns the reclaimed bytes.
 	ApplyRetention(ctx context.Context, repo incremental.RepoConfig, keepLast int, siteName string) (int64, error)
 	// Unlock removes stale repository locks (never a live one).
 	Unlock(ctx context.Context, repo incremental.RepoConfig) error

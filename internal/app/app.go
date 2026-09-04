@@ -235,6 +235,12 @@ func buildStores(ctx context.Context, configured map[string]config.Storage) (map
 
 func (a *App) Configuration() config.Config { return a.configuration }
 
+// SetBackupProgress configures the optional progress reporter used by
+// subsequent backup runs in this application instance.
+func (a *App) SetBackupProgress(progress backup.Progress) {
+	a.runner.SetProgress(progress)
+}
+
 func (a *App) RunBackup(ctx context.Context, siteName string, force bool) (backup.RunResult, error) {
 	a.logger.write(logInfo, fmt.Sprintf("event=backup_start site=%q force=%t", siteName, force))
 	site, ok := a.configuration.Site(siteName)
