@@ -306,3 +306,32 @@ func TestBackupCheckNoRepositoryIsCommandFailure(t *testing.T) {
 	assert.NotContains(t, stdout, "supersecret")
 	assert.NotContains(t, stdout, "problems found")
 }
+
+func TestBackupCheckReportsTextProgress(t *testing.T) {
+	configDir, _ := checkSeedConfigDir(t)
+	if code, _ := runCheckCommand(t, configDir, "backup", "run", "site-b", "--force"); code != 0 {
+		t.Fatalf("seed backup failed with exit %d", code)
+	}
+	root, stdout, stderr := commandForTest(t, "--config-dir", configDir, "backup", "check", "site-b", "--destination", "local-primary")
+	require.NoError(t, root.Execute())
+	assert.Equal(t, "[>] check:site-b: checking repository on local-primary\n", stderr.String())
+	assert.Equal(t, "check site-b/local-primary: healthy\n", stdout.String())
+
+	// Test with --read-data
+	rootRD, stdoutRD, stderrRD := commandForTest(t, "--config-dir", configDir, "backup", "check", "site-b", "--destination", "local-primary", "--read-data")
+	require.NoError(t, rootRD.Execute())
+	assert.Equal(t, "[>] check:site-b: checking repository on local-primary (read-data)\n", stderrRD.String())
+	assert.Equal(t, "check site-b/local-primary: healthy\n", stdoutRD.String())
+}
+
+func TestBackupCheckJSONModeSuppressesStderrProgress(t *testing.T) {
+	configDir, _ := checkSeedConfigDir(t)
+	if code, _ := runCheckCommand(t, configDir, "backup", "run", "site-b", "--force"); code != 0 {
+		t.Fatalf("seed backup failed with exit %d", code)
+	}
+	root, stdout, stderr := commandForTest(t, "--config-dir", configDir, "--output", "json", "backup", "check", "site-b", "--destination", "local-primary")
+	require.NoError(t, root.Execute())
+	assert.Empty(t, stderr.String())
+	assert.NotEmpty(t, stdout.String())
+}
+

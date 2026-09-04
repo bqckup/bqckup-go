@@ -43,7 +43,17 @@ func newCheckCommand(opts *options) *cobra.Command {
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return withApplication(cmd, opts.configDir, func(application *app.App) error {
+				var heartbeat *progressHeartbeat
+				if opts.output != "json" {
+					if err := writeCheckStartText(cmd.ErrOrStderr(), args[0], destination, readData); err != nil {
+						return err
+					}
+					heartbeat = startProgressHeartbeat(cmd.ErrOrStderr(), "check", args[0], "checking")
+				}
 				outcome, err := application.CheckRepository(cmd.Context(), args[0], destination, readData)
+				if heartbeat != nil {
+					heartbeat.Stop()
+				}
 				if err != nil {
 					return err
 				}
