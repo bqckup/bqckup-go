@@ -307,10 +307,10 @@ func TestDiscordReportEmbedUsesOperationalSummary(t *testing.T) {
 	body := <-received
 	assert.Len(t, body.Embeds, 1)
 	assert.Equal(t, "Daily Backup Report · 2026-08-31", body.Embeds[0].Title)
-	assert.Contains(t, body.Embeds[0].Description, "We have not detected any changes")
-	assert.Contains(t, body.Embeds[0].Description, "Check the configured storage destination")
+	assert.Contains(t, body.Embeds[0].Description, "Backup activity was recorded")
+	assert.Contains(t, body.Embeds[0].Description, "Check your storage configuration destination")
 	assert.Contains(t, body.Embeds[0].Description, "local-primary")
-	assert.Contains(t, body.Embeds[0].Description, "Attempt to force a backup")
+	assert.Contains(t, body.Embeds[0].Description, "attempt to force a backup")
 	assert.NotContains(t, body.Embeds[0].Description, "Operational Summary")
 	assert.Empty(t, body.Content)
 }

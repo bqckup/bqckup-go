@@ -281,23 +281,23 @@ Bqckup
 // renderReportHTML builds the branded email body for daily/monthly reports.
 // It renders a site-summary table instead of the per-run rows.
 func (s *SMTP) renderReportHTML(subject string, payload Payload, logoSrc ...string) string {
-    src := "cid:" + logoContentID
-    if len(logoSrc) > 0 && logoSrc[0] != "" {
-        src = logoSrc[0]
-    }
-    r := payload.ReportData
-    var body strings.Builder
-    
-    // Menghitung jumlah sukses secara eksplisit
-    totalDomains := len(r.Sites)
-    successfulDomainsCount := 0
-    for _, site := range r.Sites {
-        if site.Failed == 0 && site.Successful > 0 {
-            successfulDomainsCount++
-        }
-    }
+	src := "cid:" + logoContentID
+	if len(logoSrc) > 0 && logoSrc[0] != "" {
+		src = logoSrc[0]
+	}
+	r := payload.ReportData
+	var body strings.Builder
 
-    fmt.Fprintf(&body, `<!DOCTYPE html>
+	// Menghitung jumlah sukses secara eksplisit
+	totalDomains := len(r.Sites)
+	successfulDomainsCount := 0
+	for _, site := range r.Sites {
+		if site.Failed == 0 && site.Successful > 0 {
+			successfulDomainsCount++
+		}
+	}
+
+	fmt.Fprintf(&body, `<!DOCTYPE html>
 <html>
 <body style="margin:0;padding:0;background:#f6f8fa;font-family:sans-serif;">
 <div style="max-width:600px;margin:24px auto;background:#ffffff;border-radius:6px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
@@ -327,23 +327,23 @@ Bqckup
 </tr>
 `, src, reportColor(), html.EscapeString(subject), html.EscapeString(serverLine(payload.Hostname, payload.ServerIP)), r.Overall.Successful, r.Overall.Failed, totalDomains)
 
-    for _, site := range r.Sites {
-        fmt.Fprintf(&body,
-            `<tr><td style="padding:8px 24px;border-top:1px solid #e1e4e8;">%s</td><td style="padding:8px 12px;text-align:center;border-top:1px solid #e1e4e8;">%d</td><td style="padding:8px 12px;text-align:center;border-top:1px solid #e1e4e8;">%d</td></tr>
+	for _, site := range r.Sites {
+		fmt.Fprintf(&body,
+			`<tr><td style="padding:8px 24px;border-top:1px solid #e1e4e8;">%s</td><td style="padding:8px 12px;text-align:center;border-top:1px solid #e1e4e8;">%d</td><td style="padding:8px 12px;text-align:center;border-top:1px solid #e1e4e8;">%d</td></tr>
 `,
-            html.EscapeString(site.SiteName), site.Successful, site.Failed,
-        )
-    }
-    if len(r.Sites) == 0 {
-        body.WriteString(`<tr><td colspan="3" style="padding:16px 24px;border-top:1px solid #e1e4e8;color:#586069;text-align:center;">No backup runs recorded for this period.</td></tr>
+			html.EscapeString(site.SiteName), site.Successful, site.Failed,
+		)
+	}
+	if len(r.Sites) == 0 {
+		body.WriteString(`<tr><td colspan="3" style="padding:16px 24px;border-top:1px solid #e1e4e8;color:#586069;text-align:center;">No backup runs recorded for this period.</td></tr>
 `)
-    }
-    body.WriteString(`</table>
+	}
+	body.WriteString(`</table>
 `)
-    fmt.Fprintf(&body, `<p style="padding:16px 24px 24px;margin:0;border-top:1px solid #e1e4e8;font-size:12px;color:#586069;">%s</p>
+	fmt.Fprintf(&body, `<p style="padding:16px 24px 24px;margin:0;border-top:1px solid #e1e4e8;font-size:12px;color:#586069;">%s</p>
 </div>
 </body>
 </html>
 `, html.EscapeString(monitoringFooter(time.Now())))
-    return body.String()
+	return body.String()
 }
