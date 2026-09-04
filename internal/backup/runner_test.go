@@ -190,10 +190,10 @@ func (p *recordingProgress) StartStage(label string, total int64) {
 	}{label: label, total: total})
 }
 
-func (*recordingProgress) Add(int64) {}
+func (*recordingProgress) Add(int64)    {}
 func (*recordingProgress) FinishStage() {}
-func (*recordingProgress) FailStage() {}
-func (*recordingProgress) Done() {}
+func (*recordingProgress) FailStage()   {}
+func (*recordingProgress) Done()        {}
 
 func TestRunnerUsesKnownTotalsForLargeStages(t *testing.T) {
 	deps := successfulDependencies(t)
