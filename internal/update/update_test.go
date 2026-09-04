@@ -142,7 +142,6 @@ type customTransport struct {
 func (t *customTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	// Rewrite request URL to point to test server
 	req.URL.Scheme = "http"
-	req.URL.Host = req.URL.Host
 	if req.URL.Host == "github.com" {
 		u, _ := req.URL.Parse(t.serverURL + req.URL.Path)
 		req.URL = u
