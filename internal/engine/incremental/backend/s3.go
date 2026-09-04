@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/aws/retry"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/feature/s3/transfermanager"
@@ -17,6 +16,7 @@ import (
 	"github.com/aws/smithy-go"
 	"github.com/bqckup/bqckup-go/internal/apperror"
 	"github.com/bqckup/bqckup-go/internal/engine/incremental"
+	"github.com/bqckup/bqckup-go/internal/storage/s3retry"
 )
 
 // S3Options configures an S3-compatible repository backend (S3, R2,
@@ -75,9 +75,7 @@ func NewS3(ctx context.Context, options S3Options) (*S3, error) {
 			"",
 		)),
 		awsconfig.WithRetryer(func() aws.Retryer {
-			return retry.NewStandard(func(retryOptions *retry.StandardOptions) {
-				retryOptions.MaxAttempts = 3
-			})
+			return s3retry.New()
 		}),
 	)
 	if err != nil {

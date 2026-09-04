@@ -4,6 +4,8 @@ All notable changes to Bqckup are documented in this file.
 
 ## Unreleased
 
+- Retry transient S3 upload failures up to ten times with the AWS SDK's
+  standard exponential backoff, including incremental repository uploads.
 - Place batch backup spacing between site result blocks instead of between a
   site's start and result lines.
 - Show immediate update progress, an interactive spinner, and a redirected
