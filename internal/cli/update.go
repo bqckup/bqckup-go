@@ -31,13 +31,6 @@ func warnIfNeedsSudo(out io.Writer, target string) {
 	if !isSystemDirectory(dir) {
 		return
 	}
-	checkPath := filepath.Join(dir, ".bqckup-write-check")
-	file, err := os.OpenFile(checkPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
-	if err == nil {
-		_ = file.Close()
-		_ = os.Remove(checkPath)
-		return
-	}
 	color := ansiColor{on: isTerminalWriter(out)}
 	_, _ = fmt.Fprintf(out, "%s this binary is installed in %s; run with sudo to update it\n", color.yellow("[WARN]"), dir)
 }
