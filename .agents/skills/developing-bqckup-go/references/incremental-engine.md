@@ -20,6 +20,8 @@ compatibility, and runner tests relevant to the request.
   for configurations where `server_id` is empty.
 - Preserve compatibility with the official Restic repository format. Treat
   `restic_compat` tests as the executable interoperability contract.
+- When reusing an unchanged parent node, preserve a non-nil empty `content`
+  list for empty files; Restic rejects `content: null`.
 - Backup and retention use exclusive locks. Listing uses non-exclusive locks.
   Automatically clean stale non-exclusive locks; stale exclusive locks require
   explicit `bqckup backup unlock <site>`.
@@ -34,6 +36,10 @@ compatibility, and runner tests relevant to the request.
   snapshots, writes only to an explicit target, and honors safe overwrite
   confirmation. Restore does not write backup history.
 - Full archive mode remains supported and behaviorally separate.
+
+Operator-facing commands are `backup snapshots` for listing and
+`backup restore` for restoring to an explicit target. Document these commands
+with `<placeholder>` values and never imply that restore is unavailable.
 
 ## Scope boundaries
 

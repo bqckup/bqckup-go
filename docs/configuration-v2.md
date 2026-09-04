@@ -8,6 +8,22 @@ Bqckup reads three YAML files from `/etc/bqckup` by default:
 /etc/bqckup/sites/<site>.yaml
 ```
 
+## Supported values
+
+Use these exact values; configuration decoding is strict.
+
+| Field | Available values |
+| --- | --- |
+| `app.log_level` | `debug`, `info`, `warn`, `error` |
+| `storage.type` | `local`, `s3`, `r2` |
+| `site.backup_mode` | `full` (default), `incremental` |
+| database `engine` | `mysql`, `postgres` |
+| notification channel `type` | `smtp`, `webhook`, `discord` |
+| notification route `events` | `all`, `backup_failed`, `backup_cancelled`, `backup_no_change` |
+
+Values shown as `<placeholder>` are documentation placeholders. Replace them
+with real values before use.
+
 The root and site files use the current schema automatically, so new YAML files
 should omit the `version` field. Existing files that explicitly contain
 `version: 2` remain accepted for backward compatibility.
@@ -187,24 +203,25 @@ notifications:
   channels:
     email:
       type: smtp
-      host: smtp.example.com
+      host: <smtp-host>
       port: 587
-      username: backup-user
-      password: replace-with-smtp-password
-      from: bqckup@example.com
+      username: <smtp-user>
+      password: <smtp-password>
+      from: <sender-address>
       to:
-        - ops@example.com
+        - <recipient-address>
 
     webhook:
       type: webhook
-      url: https://hooks.example.com/bqckup
+      url: <webhook-url>
 
     discord:
       type: discord
-      webhook_url: https://discord.com/api/webhooks/replace-me
+      webhook_url: <discord-webhook-url>
 
   routes:
-    - events: [all]
+    # events options: all | backup_failed | backup_cancelled | backup_no_change
+    - events: [backup_failed]
       channels: [email, discord]
 ```
 
@@ -224,6 +241,10 @@ notifications:
   matched through several routes is sent once per event. Duplicate channel
   names in the YAML map are not detected: the last definition wins (yaml map
   semantics).
+- **Per-event notifications are opt-in**. For a quiet installation, leave the
+  `notifications` block unset and rely on the scheduled daily/monthly report
+  routes instead. This keeps operational monitoring in aggregate reports rather
+  than sending a message for every backup event.
 - **Delivery**: after a run is recorded terminal in history, every channel of
   every matching route is attempted, sequentially, with the same sanitized
   payload (machine hostname and IP, run id, site, status, timestamps,

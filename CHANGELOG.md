@@ -2,6 +2,17 @@
 
 All notable changes to Bqckup are documented in this file.
 
+## Unreleased
+
+- Place batch backup spacing between site result blocks instead of between a
+  site's start and result lines.
+- Show immediate update progress, an interactive spinner, and a redirected
+  heartbeat while `bqckup update` downloads, verifies, and installs a release.
+- Simplify the operator documentation and list supported configuration values
+  beside examples, including notification route events and channel types.
+- Align command references with the delivered snapshot listing, restore,
+  summary, and notification features.
+
 ## v0.0.7
 
 - Reuse unchanged files and directory trees from the previous matching

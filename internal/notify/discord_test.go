@@ -87,7 +87,7 @@ func TestDiscordEmbedFailed(t *testing.T) {
 	assert.False(t, embed.Fields[6].Inline)
 
 	assert.Equal(t, "Try this", embed.Fields[7].Name)
-	assert.Equal(t, "1. Check the site's data and logs. If the backup started but never finished, it likely timed out or crashed.\n2. Run `bqckup backup run example.org --force` and watch the output.", embed.Fields[7].Value)
+	assert.Equal(t, "1. Check the site's data and logs. If the backup started but never finished, confirm that no backup process for the site is still running.\n2. Once no backup is active, run `bqckup backup run example.org --force` and watch the output.", embed.Fields[7].Value)
 	assert.False(t, embed.Fields[7].Inline)
 }
 
@@ -272,4 +272,45 @@ func TestDiscordReturnsErrorsLikeWebhook(t *testing.T) {
 	}))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unsupported protocol scheme")
+}
+
+func TestDiscordReportEmbedUsesOperationalSummary(t *testing.T) {
+	received := make(chan discordPayload, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body discordPayload
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		received <- body
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(server.Close)
+
+	discord := NewDiscord("discord", server.URL)
+	payload := Payload{
+		Event:    Event(config.EventDailyReport),
+		Hostname: "backup-host",
+		ServerIP: "192.168.1.129",
+		ReportData: &ReportData{
+			ReportType: "daily",
+			Period:     "2026-08-31",
+			Overall: ReportPeriodSummary{
+				TotalRuns:    2,
+				Successful:   1,
+				Failed:       1,
+				TotalBytes:   1536,
+				Destinations: []ReportDestinationSummary{{Name: "local-primary"}},
+			},
+			Sites: []SiteReportSummary{{SiteName: "example", TotalRuns: 2, Successful: 1, Failed: 1, LastStatus: "success"}},
+		},
+	}
+	require.NoError(t, discord.Send(context.Background(), payload))
+
+	body := <-received
+	assert.Len(t, body.Embeds, 1)
+	assert.Equal(t, "Daily Backup Report · 2026-08-31", body.Embeds[0].Title)
+	assert.Contains(t, body.Embeds[0].Description, "We have not detected any changes")
+	assert.Contains(t, body.Embeds[0].Description, "Check the configured storage destination")
+	assert.Contains(t, body.Embeds[0].Description, "local-primary")
+	assert.Contains(t, body.Embeds[0].Description, "Attempt to force a backup")
+	assert.NotContains(t, body.Embeds[0].Description, "Operational Summary")
+	assert.Empty(t, body.Content)
 }

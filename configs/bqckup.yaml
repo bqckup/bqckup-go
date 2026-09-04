@@ -7,26 +7,42 @@ app:
   log_level: info
   # log_file: /var/log/bqckup/bqckup.log
 
-# Optional: notify operators when a run reaches a terminal state.
-# Notification credentials and URLs are written directly here. Keep this file
-# owned by the service account with mode 0600. See docs/configuration-v2.md.
+# Keep per-event notifications commented out unless you want immediate backup
+# alerts. The default operational mode is scheduled daily/monthly summaries.
 # notifications:
 #   channels:
 #     email:
 #       type: smtp
-#       host: smtp.example.com
+#       host: <smtp-host>
 #       port: 587
-#       username: backup-user
-#       password: replace-with-smtp-password
-#       from: bqckup@example.com
+#       username: <smtp-user>
+#       password: <smtp-password>
+#       from: <sender-address>
 #       to:
-#         - ops@example.com
+#         - <recipient-address>
 #     webhook:
 #       type: webhook
-#       url: https://hooks.example.com/bqckup
+#       url: <webhook-url>
 #     discord:
 #       type: discord
-#       webhook_url: https://discord.com/api/webhooks/replace-me
+#       webhook_url: <discord-webhook-url>
 #   routes:
-#     - events: [all]
+#     - events: [backup_failed]
 #       channels: [email, discord, webhook]
+
+# reports:
+#   daily:
+#     enabled: true
+#     timezone: UTC
+#     schedule:
+#       time: "08:00"
+#     notification_route: daily-report-route
+#     include_empty_days: false
+#   monthly:
+#     enabled: true
+#     timezone: UTC
+#     schedule:
+#       day_of_month: 1
+#       time: "08:00"
+#     notification_route: monthly-report-route
+#     include_empty_days: false

@@ -179,6 +179,21 @@ func TestBackupRunWithoutSiteRunsEveryEnabledSite(t *testing.T) {
 	assert.Empty(t, disabledMatches)
 }
 
+func TestBackupRunTextSeparatesSiteBlocks(t *testing.T) {
+	configDir, _ := writeCLIConfig(t)
+	writeCLISite(t, configDir, "site-b", true)
+
+	root, _, _ := commandForTest(t, "--config-dir", configDir, "backup", "run", "--force")
+	combined := new(bytes.Buffer)
+	root.SetOut(combined)
+	root.SetErr(combined)
+	require.NoError(t, root.Execute())
+
+	output := combined.String()
+	assert.Contains(t, output, "[>] backup:example: starting full backup to local-primary\n[OK] example: success")
+	assert.Contains(t, output, "\n\n[>] backup:site-b: starting full backup to local-primary\n[OK] site-b: success")
+}
+
 func TestExitCodeMapping(t *testing.T) {
 	assert.Equal(t, 2, ExitCode(fmt.Errorf("bad flag: %w", ErrInvalidInput)))
 }

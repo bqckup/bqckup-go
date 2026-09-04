@@ -4,6 +4,11 @@
 
 Bqckup Go is a CLI-only modular monolith. One process loads immutable configuration, wires concrete adapters, executes one command, and closes its SQLite connection. There is no HTTP server, internal scheduler, or web UI.
 
+For operators, the shortest path is: `init` → edit the three YAML files →
+`config validate` → `doctor` → `backup run`. Use `backup snapshots` and
+`backup restore` only for incremental sites; use `storage list` and
+`storage link` for stored full-mode packages.
+
 ```text
 cmd/bqckup       process signals and exit
     ↓
@@ -53,14 +58,14 @@ and cross-tool locking; the binary is not part of production execution.
 Repositories in Restic format v1 are not supported. They must be migrated to
 format v2 before being configured in Bqckup.
 
-Retention (keep_last per site tag) forgets old snapshots and prunes
+Retention (`keep_last` per site tag) forgets old snapshots and prunes
 unreachable pack data with a mark-and-sweep pass (no repack): the new
 index is written before any pack is deleted, so a crash at any point
-leaves `restic check` green. Set retention also prunes the
+leaves `restic check` green. Retention also prunes the
 `bqckup/<server_id>/<site>/<timestamp>/` package sets in every mode, so database
 dumps stored there by incremental runs are kept for `keep_last` runs
-too. Restore is a future phase with an explicit destination and no silent
-overwrites.
+too. Restore requires an explicit destination and never silently overwrites
+existing files.
 
 ## Boundaries
 
