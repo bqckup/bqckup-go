@@ -181,12 +181,26 @@ func validateCredentialSource(field string, value Storage) (bool, error) {
 		return false, validationError("config/storages.yaml", field+".credentials.source", "source must be remote")
 	}
 	if credentials.URL == "" {
-		return false, validationError("config/storages.yaml", field+".credentials.url", "url environment variable is required")
+		return false, validationError("config/storages.yaml", field+".credentials.url", "url is required")
 	}
-	if !validEnvName.MatchString(credentials.URL) {
-		return false, validationError("config/storages.yaml", field+".credentials.url", "must be a valid environment variable name")
+	if err := validateRemoteProviderURL(field+".credentials.url", credentials.URL); err != nil {
+		return false, err
 	}
 	return true, nil
+}
+
+func validateRemoteProviderURL(field, raw string) error {
+	parsed, err := url.ParseRequestURI(raw)
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "https" && parsed.Scheme != "http") {
+		return validationError("config/storages.yaml", field, "must be an absolute HTTP(S) URL")
+	}
+	if parsed.User != nil || parsed.Fragment != "" {
+		return validationError("config/storages.yaml", field, "must not contain user information or a fragment")
+	}
+	if parsed.Scheme == "http" && !isLoopbackHost(parsed.Hostname()) {
+		return validationError("config/storages.yaml", field, "must use HTTPS unless the host is loopback")
+	}
+	return nil
 }
 
 func validateRemotePlaceholders(field string, value Storage) error {

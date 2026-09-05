@@ -12,7 +12,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
 	"sort"
 	"strings"
 	"time"
@@ -70,9 +69,9 @@ func (r *Resolver) Resolve(ctx context.Context, configured map[string]config.Sto
 		if storage.Credentials.Source != "remote" {
 			continue
 		}
-		providerURL, ok := os.LookupEnv(storage.Credentials.URL)
-		if !ok || strings.TrimSpace(providerURL) == "" {
-			return nil, unavailable(errors.New("remote storage configuration URL environment variable is unset"))
+		providerURL := strings.TrimSpace(storage.Credentials.URL)
+		if providerURL == "" {
+			return nil, unavailable(errors.New("remote storage configuration URL is empty"))
 		}
 		parsed, err := url.Parse(providerURL)
 		if err != nil || validateProviderURL(parsed) != nil {

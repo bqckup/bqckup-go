@@ -27,6 +27,5 @@ storages:
     type: s3
     credentials:
       source: remote
-      url: BQCKUP_MANAGED_S3_CREDENTIAL_URL
-    prefix: company-managed
+      url: https://credentials.example.com/bqckup/storage
     primary: false

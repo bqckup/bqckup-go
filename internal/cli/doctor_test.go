@@ -326,7 +326,7 @@ app:
     type: s3
     credentials:
       source: remote
-      url: BQCKUP_DOCTOR_URL
+      url: https://127.0.0.1:1/storage
 `, fmt.Sprintf(`version: 2
 site:
   name: test-site
@@ -340,8 +340,6 @@ site:
     minimum_interval: 24h
     keep_last: 7
 `, sourceDir))
-
-	t.Setenv("BQCKUP_DOCTOR_URL", "") // empty → resolver fails without dialing
 
 	var stdout, stderr bytes.Buffer
 	root := NewRoot(buildinfo.Info{})

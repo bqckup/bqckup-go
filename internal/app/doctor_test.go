@@ -58,16 +58,16 @@ site:
 // remote S3 entry (empty bucket/keys: an unresolved remote entry must have
 // those fields empty or config.Load rejects it) and whose site sends backups
 // to it.
-func writeRemoteStorageFixture(t *testing.T) (string, string) {
+func writeRemoteStorageFixture(t *testing.T, providerURL string) (string, string) {
 	t.Helper()
 	configDir, backupRoot := writeApplicationConfig(t)
-	require.NoError(t, os.WriteFile(filepath.Join(configDir, "config", "storages.yaml"), []byte(`storages:
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, "config", "storages.yaml"), fmt.Appendf(nil, `storages:
   remote:
     type: s3
     credentials:
       source: remote
-      url: BQCKUP_REMOTE_URL
-`), 0o600))
+      url: %s
+`, providerURL), 0o600))
 	sitePath := filepath.Join(configDir, "sites", "example.yaml")
 	siteBody, err := os.ReadFile(sitePath)
 	require.NoError(t, err)
@@ -80,8 +80,7 @@ func TestOpenDoctorResolvesRemoteStorage(t *testing.T) {
 		_, _ = w.Write([]byte(`{"bucket":"remote-bucket","access_key_id":"remote-key","secret_access_key":"remote-secret","endpoint":"https://s3.example.com","region":"us-east-1"}`))
 	}))
 	t.Cleanup(server.Close)
-	t.Setenv("BQCKUP_REMOTE_URL", server.URL)
-	configDir, _ := writeRemoteStorageFixture(t)
+	configDir, _ := writeRemoteStorageFixture(t, server.URL)
 
 	checker, err := OpenDoctor(t.Context(), configDir)
 	require.NoError(t, err)
@@ -95,24 +94,22 @@ func TestOpenDoctorResolvesRemoteStorage(t *testing.T) {
 }
 
 func TestOpenDoctorRemoteProviderUnavailable(t *testing.T) {
-	t.Run("empty env", func(t *testing.T) {
-		t.Setenv("BQCKUP_REMOTE_URL", "") // empty → unset branch, no dial
-		configDir, _ := writeRemoteStorageFixture(t)
+	t.Run("empty URL", func(t *testing.T) {
+		configDir, _ := writeRemoteStorageFixture(t, "")
 
 		checker, err := OpenDoctor(t.Context(), configDir)
 		require.NoError(t, err)
-		require.Contains(t, checker.StoreErrs, "remote")
-		assert.Equal(t, "remote storage configuration is unavailable", checker.StoreErrs["remote"].Error())
+		require.Error(t, checker.LoadErr)
+		assert.Contains(t, checker.LoadErr.Error(), "credentials.url")
 	})
 	t.Run("invalid url never leaks", func(t *testing.T) {
-		t.Setenv("BQCKUP_REMOTE_URL", "ht!tp://bad url") // fails url.Parse/validateProviderURL, no dial
-		configDir, _ := writeRemoteStorageFixture(t)
+		configDir, _ := writeRemoteStorageFixture(t, "ht!tp://bad url")
 
 		checker, err := OpenDoctor(t.Context(), configDir)
 		require.NoError(t, err)
-		require.Contains(t, checker.StoreErrs, "remote")
-		assert.Equal(t, "remote storage configuration is unavailable", checker.StoreErrs["remote"].Error())
-		assert.NotContains(t, checker.StoreErrs["remote"].Error(), "bad url")
+		require.Error(t, checker.LoadErr)
+		assert.Contains(t, checker.LoadErr.Error(), "credentials.url")
+		assert.NotContains(t, checker.LoadErr.Error(), "bad url")
 	})
 }
 
@@ -122,8 +119,7 @@ func TestOpenDoctorRemoteProviderGarbage(t *testing.T) {
 		_, _ = w.Write([]byte(`{"access_key_id":"garbage-key","secret_access_key":"garbage-secret","region":"us-east-1"}`))
 	}))
 	t.Cleanup(server.Close)
-	t.Setenv("BQCKUP_REMOTE_URL", server.URL)
-	configDir, _ := writeRemoteStorageFixture(t)
+	configDir, _ := writeRemoteStorageFixture(t, server.URL)
 
 	checker, err := OpenDoctor(t.Context(), configDir)
 	require.NoError(t, err)
@@ -135,7 +131,6 @@ func TestOpenDoctorRemoteProviderGarbage(t *testing.T) {
 }
 
 func TestOpenDoctorMixedLocalAndRemote(t *testing.T) {
-	t.Setenv("BQCKUP_REMOTE_URL", "") // unset → remote fails fast, no dial
 	configDir, backupRoot := writeApplicationConfig(t)
 	require.NoError(t, os.WriteFile(filepath.Join(configDir, "config", "storages.yaml"), fmt.Appendf(nil, `storages:
   local-primary:
@@ -145,7 +140,7 @@ func TestOpenDoctorMixedLocalAndRemote(t *testing.T) {
     type: s3
     credentials:
       source: remote
-      url: BQCKUP_REMOTE_URL
+      url: https://provider.example/credentials
 `, backupRoot), 0o600))
 	sitePath := filepath.Join(configDir, "sites", "example.yaml")
 	siteBody, err := os.ReadFile(sitePath)

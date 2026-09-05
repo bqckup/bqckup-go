@@ -34,7 +34,7 @@ func (f fakeRemoteStorageResolver) Resolve(context.Context, map[string]config.St
 func TestResolveRemoteStorageConfigurationValidatesResolvedValues(t *testing.T) {
 	configuration := validApplicationConfig(t)
 	configuration.Storages = map[string]config.Storage{
-		"remote": {Type: "s3", Credentials: config.StorageCredentials{Source: "remote", URL: "BQCKUP_REMOTE_URL"}},
+		"remote": {Type: "s3", Credentials: config.StorageCredentials{Source: "remote", URL: "https://provider.example/credentials"}},
 	}
 	configuration.Sites[0].Destinations = []config.Destination{{Storage: "remote"}}
 	resolvedStorage := config.Storage{
@@ -73,15 +73,14 @@ func TestOpenResolvesRemoteStorageBeforeBuildingDestinations(t *testing.T) {
 		_, _ = w.Write([]byte(`{"bucket":"remote-bucket","access_key_id":"remote-key","secret_access_key":"remote-secret","region":"us-east-1"}`))
 	}))
 	t.Cleanup(server.Close)
-	t.Setenv("BQCKUP_REMOTE_URL", server.URL)
 	configDir, _ := writeApplicationConfig(t)
-	require.NoError(t, os.WriteFile(filepath.Join(configDir, "config", "storages.yaml"), []byte(`storages:
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, "config", "storages.yaml"), fmt.Appendf(nil, `storages:
   remote:
     type: s3
     credentials:
       source: remote
-      url: BQCKUP_REMOTE_URL
-`), 0o600))
+      url: %s
+`, server.URL), 0o600))
 	sitePath := filepath.Join(configDir, "sites", "example.yaml")
 	siteBody, err := os.ReadFile(sitePath)
 	require.NoError(t, err)
