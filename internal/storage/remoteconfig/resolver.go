@@ -39,9 +39,65 @@ type Resolver struct {
 	client *http.Client
 }
 
+// remoteDialer resolves provider hosts explicitly so IPv4 addresses are tried
+// before IPv6. Some credential providers authorize the server's IPv4 address
+// but not its IPv6 address; IPv6 remains available as a fallback.
+type remoteDialer struct {
+	lookupIPAddr func(context.Context, string) ([]net.IPAddr, error)
+	dialContext  func(context.Context, string, string) (net.Conn, error)
+}
+
+func newRemoteDialer() remoteDialer {
+	dialer := &net.Dialer{}
+	return remoteDialer{
+		lookupIPAddr: net.DefaultResolver.LookupIPAddr,
+		dialContext:  dialer.DialContext,
+	}
+}
+
+func (d remoteDialer) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
+	host, port, err := net.SplitHostPort(address)
+	if err != nil {
+		return d.dialContext(ctx, network, address)
+	}
+	addresses, err := d.lookupIPAddr(ctx, host)
+	if err != nil {
+		return d.dialContext(ctx, network, address)
+	}
+	ordered := make([]net.IPAddr, 0, len(addresses))
+	for _, address := range addresses {
+		if address.IP.To4() != nil {
+			ordered = append(ordered, address)
+		}
+	}
+	for _, address := range addresses {
+		if address.IP.To4() == nil {
+			ordered = append(ordered, address)
+		}
+	}
+	var lastErr error
+	for _, candidate := range ordered {
+		connection, err := d.dialContext(ctx, network, net.JoinHostPort(candidate.IP.String(), port))
+		if err == nil {
+			return connection, nil
+		}
+		lastErr = err
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+	}
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	return d.dialContext(ctx, network, address)
+}
+
 func New() *Resolver {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.DialContext = newRemoteDialer().DialContext
 	return &Resolver{client: &http.Client{
-		Timeout: requestTimeout,
+		Timeout:   requestTimeout,
+		Transport: transport,
 		CheckRedirect: func(request *http.Request, _ []*http.Request) error {
 			if err := validateProviderURL(request.URL); err != nil {
 				return errors.New("unsafe remote storage configuration redirect")

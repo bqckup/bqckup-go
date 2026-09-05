@@ -2,7 +2,9 @@ package remoteconfig
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,6 +15,30 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestRemoteDialerPrefersIPv4ThenFallsBackToIPv6(t *testing.T) {
+	var addresses []string
+	server, client := net.Pipe()
+	t.Cleanup(func() { _ = server.Close() })
+	t.Cleanup(func() { _ = client.Close() })
+	dialer := remoteDialer{
+		lookupIPAddr: func(context.Context, string) ([]net.IPAddr, error) {
+			return []net.IPAddr{{IP: net.ParseIP("2001:db8::1")}, {IP: net.ParseIP("192.0.2.10")}}, nil
+		},
+		dialContext: func(_ context.Context, _ string, address string) (net.Conn, error) {
+			addresses = append(addresses, address)
+			if address == "192.0.2.10:443" {
+				return nil, errors.New("IPv4 unavailable")
+			}
+			return client, nil
+		},
+	}
+
+	connection, err := dialer.DialContext(t.Context(), "tcp", "provider.example:443")
+	require.NoError(t, err)
+	require.Same(t, client, connection)
+	assert.Equal(t, []string{"192.0.2.10:443", "[2001:db8::1]:443"}, addresses)
+}
 
 func TestResolverLoadsRemoteStorageConfigurationIntoMemory(t *testing.T) {
 	var method, accept, acceptEncoding, userAgent string
