@@ -15,9 +15,10 @@ import (
 )
 
 func TestResolverLoadsRemoteStorageConfigurationIntoMemory(t *testing.T) {
-	var method, accept string
+	var method, accept, acceptEncoding string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		method, accept = r.Method, r.Header.Get("Accept")
+		acceptEncoding = r.Header.Get("Accept-Encoding")
 		_, _ = w.Write([]byte(`{"bucket":"remote-bucket","access_key_id":"remote-key","secret_access_key":"remote-secret","endpoint":"https://objects.example.invalid","region":"us-east-1"}`))
 	}))
 	t.Cleanup(server.Close)
@@ -30,6 +31,7 @@ func TestResolverLoadsRemoteStorageConfigurationIntoMemory(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, http.MethodGet, method)
 	assert.Equal(t, "application/json", accept)
+	assert.Equal(t, "identity", acceptEncoding)
 	assert.Equal(t, "remote-bucket", resolved["remote"].Bucket)
 	assert.Equal(t, "remote-key", resolved["remote"].AccessKeyID)
 	assert.Equal(t, "remote-secret", resolved["remote"].SecretAccessKey)
