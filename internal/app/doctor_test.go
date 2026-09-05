@@ -99,8 +99,8 @@ func TestOpenDoctorRemoteProviderUnavailable(t *testing.T) {
 
 		checker, err := OpenDoctor(t.Context(), configDir)
 		require.NoError(t, err)
-		require.Error(t, checker.LoadErr)
-		assert.Contains(t, checker.LoadErr.Error(), "credentials.url")
+		require.Contains(t, checker.StoreErrs, "remote")
+		assert.Equal(t, "remote storage configuration is unavailable", checker.StoreErrs["remote"].Error())
 	})
 	t.Run("invalid url never leaks", func(t *testing.T) {
 		configDir, _ := writeRemoteStorageFixture(t, "ht!tp://bad url")
