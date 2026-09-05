@@ -23,7 +23,7 @@ type localPathProvider interface {
 	LocalPath(key string) (string, error)
 }
 
-// Linker creates download links for stored artifacts.
+// Linker creates download links for stored packages.
 type Linker struct{}
 
 func (l *Linker) Link(ctx context.Context, destination string, site config.Site, store storage.Store, key string, expires time.Duration) (storage.DownloadLink, error) {
@@ -44,7 +44,7 @@ func (l *Linker) Link(ctx context.Context, destination string, site config.Site,
 	}
 	if site.BackupMode != "full" {
 		return storage.DownloadLink{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf(
-			"site %q uses incremental backups; download links only apply to full-mode archive artifacts, use restore instead",
+			"site %q uses incremental backups; download links only apply to full-mode archive packages, use restore instead",
 			site.Name), nil)
 	}
 	link, err := generator.PresignLink(ctx, key, expires)

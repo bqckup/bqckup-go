@@ -28,10 +28,10 @@ func summaryTestConfig() config.Config {
 	}
 }
 
-func summaryRun(site string, status history.RunStatus, started time.Time, artifacts ...history.Artifact) history.BackupRun {
+func summaryRun(site string, status history.RunStatus, started time.Time, packages ...history.Package) history.BackupRun {
 	run := history.BackupRun{
 		ID: site + "-" + string(status), SiteName: site, Status: status,
-		StartedAt: started, DurationMillis: 2000, Artifacts: artifacts,
+		StartedAt: started, DurationMillis: 2000, Packages: packages,
 	}
 	if status != history.StatusRunning {
 		finished := started.Add(2 * time.Second)
@@ -59,9 +59,9 @@ func TestBuildSummariesStatusSemantics(t *testing.T) {
 
 func TestBuildSummariesLogicalDedupAcrossDestinations(t *testing.T) {
 	run := summaryRun("web", history.StatusSuccess, time.Now().UTC(),
-		history.Artifact{SourceKind: "file", SourceName: "data.txt", Destination: "s3-primary", Size: 100},
-		history.Artifact{SourceKind: "file", SourceName: "data.txt", Destination: "home", Size: 40},
-		history.Artifact{SourceKind: "database", SourceName: "app", Destination: "s3-primary", Size: 10},
+		history.Package{SourceKind: "file", SourceName: "data.txt", Destination: "s3-primary", Size: 100},
+		history.Package{SourceKind: "file", SourceName: "data.txt", Destination: "home", Size: 40},
+		history.Package{SourceKind: "database", SourceName: "app", Destination: "s3-primary", Size: 10},
 	)
 	views := buildSummaries(summaryTestConfig(), []history.BackupRun{run}, "")
 	view := views[1]
@@ -75,7 +75,7 @@ func TestBuildSummariesLogicalDedupAcrossDestinations(t *testing.T) {
 func TestBuildSummariesIgnoresOrphanRuns(t *testing.T) {
 	runs := []history.BackupRun{
 		summaryRun("ghost", history.StatusSuccess, time.Now().UTC(),
-			history.Artifact{SourceKind: "file", SourceName: "x", Destination: "home", Size: 999}),
+			history.Package{SourceKind: "file", SourceName: "x", Destination: "home", Size: 999}),
 	}
 	for _, view := range buildSummaries(summaryTestConfig(), runs, "") {
 		assert.Equal(t, 0, view.SuccessfulBackups)
@@ -105,8 +105,8 @@ func TestBuildSummariesNeverRunAndFailedLastRun(t *testing.T) {
 
 func TestBuildSummariesIncrementalSizesAsRecorded(t *testing.T) {
 	run := summaryRun("web", history.StatusSuccess, time.Now().UTC(),
-		history.Artifact{SourceKind: "snapshot", SourceName: "web", Destination: "s3-primary", Size: 500},
-		history.Artifact{SourceKind: "snapshot", SourceName: "web", Destination: "home", Size: 300},
+		history.Package{SourceKind: "snapshot", SourceName: "web", Destination: "s3-primary", Size: 500},
+		history.Package{SourceKind: "snapshot", SourceName: "web", Destination: "home", Size: 300},
 	)
 	view := buildSummaries(summaryTestConfig(), []history.BackupRun{run}, "web")[0]
 	assert.Equal(t, int64(500), view.TotalRecordedSize) // largest copy wins
@@ -125,21 +125,22 @@ func TestWriteSummaryTextPanels(t *testing.T) {
 
 	started := time.Date(2026, 8, 22, 17, 46, 0, 0, time.UTC)
 	run := summaryRun("web", history.StatusSuccess, started,
-		history.Artifact{SourceKind: "file", SourceName: "data.txt", Destination: "s3-primary", Size: 1024},
+		history.Package{SourceKind: "file", SourceName: "data.txt", Destination: "s3-primary", Size: 1024},
 	)
 	views := buildSummaries(summaryTestConfig(), []history.BackupRun{run}, "")
 	var output bytes.Buffer
 	require.NoError(t, writeSummaryText(&output, views))
 	text := output.String()
 
-	assert.True(t, strings.Index(text, "Backup Summary for db") < strings.Index(text, "Backup Summary for web"), "sites sorted by name")
+	assert.True(t, strings.Index(text, "db\n") < strings.Index(text, "web\n"), "sites sorted by name")
+	assert.NotContains(t, text, "Backup Summary for")
 	assert.NotContains(t, text, "\x1b[") // colors only on a TTY
 	assert.Contains(t, text, "Status              : disabled\n")
 	assert.Contains(t, text, "Enabled             : no\n")
 	assert.Contains(t, text, "Status              : idle\n")
 	assert.Contains(t, text, "Enabled             : yes\n")
 	assert.Contains(t, text, "Backup Mode         : full\n")
-	assert.Contains(t, text, "Last Backup         : 22 Aug 2026, 17:46 UTC\n")
+	assert.Contains(t, text, "Last Backup         : 22 Aug 2026 17:46\n")
 	assert.Contains(t, text, "Last Backup Status  : success\n")
 	assert.Contains(t, text, "Last Backup Duration: 2s\n")
 	assert.Contains(t, text, "Last Backup Size    : 1.0 KiB\n")
@@ -201,10 +202,10 @@ func TestBackupSummaryCommandDisabledAndNeverRun(t *testing.T) {
 	root, stdout, _ := commandForTest(t, "--config-dir", configDir, "backup", "summary")
 	require.NoError(t, root.Execute())
 	text := stdout.String()
-	assert.Contains(t, text, "Backup Summary for fresh\n")
+	assert.Contains(t, text, "fresh\n")
 	assert.Contains(t, text, "Last Backup         : -\n")
 	assert.Contains(t, text, "Successful Backups  : 0\n")
-	assert.Contains(t, text, "Backup Summary for site-disabled\n")
+	assert.Contains(t, text, "site-disabled\n")
 	assert.Contains(t, text, "Status              : disabled\n")
 	assert.Contains(t, text, "Enabled             : no\n")
 }
@@ -265,7 +266,7 @@ func TestBackupSummaryCommandEmptyConfig(t *testing.T) {
 func TestAnsiColorWrap(t *testing.T) {
 	assert.Equal(t, "idle", ansiColor{}.status("idle"))
 	on := ansiColor{on: true}
-	assert.Equal(t, "\x1b[1mBackup Summary for web\x1b[0m", on.bold("Backup Summary for web"))
+	assert.Equal(t, "\x1b[1mweb\x1b[0m", on.bold("web"))
 	assert.Equal(t, "\x1b[2mdisabled\x1b[0m", on.status("disabled"))
 	assert.Equal(t, "\x1b[33mrunning\x1b[0m", on.status("running"))
 	assert.Equal(t, "\x1b[32midle\x1b[0m", on.status("idle"))

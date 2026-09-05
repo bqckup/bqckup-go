@@ -25,30 +25,30 @@ import (
 )
 
 func TestPutUploadsConditionallyAndVerifiesMetadata(t *testing.T) {
-	artifact := sourceArtifact(t, []byte("verified backup"))
+	pkg := sourcePackage(t, []byte("verified backup"))
 	uploader := &fakeUploader{}
-	client := &fakeClient{headOutput: verifiedHead(artifact)}
+	client := &fakeClient{headOutput: verifiedHead(pkg)}
 	store := newWithClients(Options{Provider: ProviderS3, Bucket: "backups", Region: "us-east-1", Prefix: "company"}, uploader, client, nil)
 
-	stored, err := store.Put(context.Background(), artifact, "bqckup/site/2026-08-05T00-00-00Z/files.tar.gz")
+	stored, err := store.Put(context.Background(), pkg, "bqckup/site/2026-08-05T00-00-00Z/files.tar.gz")
 	require.NoError(t, err)
 	require.NotNil(t, uploader.input)
 	assert.Equal(t, "*", aws.ToString(uploader.input.IfNoneMatch))
 	assert.Equal(t, "company/bqckup/site/2026-08-05T00-00-00Z/files.tar.gz", aws.ToString(uploader.input.Key))
-	assert.Equal(t, artifact.Size, aws.ToInt64(uploader.input.MpuObjectSize))
-	assert.Equal(t, artifact.SHA256, uploader.input.Metadata[checksumMetadata])
-	assert.Equal(t, strconv.FormatInt(artifact.Size, 10), uploader.input.Metadata[sizeMetadata])
-	assert.Equal(t, artifact.SHA256, stored.SHA256)
-	assert.Equal(t, artifact.Size, stored.Size)
+	assert.Equal(t, pkg.Size, aws.ToInt64(uploader.input.MpuObjectSize))
+	assert.Equal(t, pkg.SHA256, uploader.input.Metadata[checksumMetadata])
+	assert.Equal(t, strconv.FormatInt(pkg.Size, 10), uploader.input.Metadata[sizeMetadata])
+	assert.Equal(t, pkg.SHA256, stored.SHA256)
+	assert.Equal(t, pkg.Size, stored.Size)
 }
 
-func TestPutRejectsLocalArtifactMismatchBeforeUpload(t *testing.T) {
-	artifact := sourceArtifact(t, []byte("actual"))
-	artifact.SHA256 = hex.EncodeToString(make([]byte, sha256.Size))
+func TestPutRejectsLocalPackageMismatchBeforeUpload(t *testing.T) {
+	pkg := sourcePackage(t, []byte("actual"))
+	pkg.SHA256 = hex.EncodeToString(make([]byte, sha256.Size))
 	uploader := &fakeUploader{}
 	store := newWithClients(Options{Bucket: "backups"}, uploader, &fakeClient{}, nil)
 
-	_, err := store.Put(context.Background(), artifact, "bqckup/site/2026-08-05T00-00-00Z/files.tar.gz")
+	_, err := store.Put(context.Background(), pkg, "bqckup/site/2026-08-05T00-00-00Z/files.tar.gz")
 	require.Error(t, err)
 	assert.Nil(t, uploader.input)
 }
@@ -58,40 +58,40 @@ func TestPutPreservesCancellation(t *testing.T) {
 	cancel()
 	store := newWithClients(Options{Bucket: "backups"}, &fakeUploader{}, &fakeClient{}, nil)
 
-	_, err := store.Put(ctx, sourceArtifact(t, []byte("backup")), "bqckup/site/2026-08-05T00-00-00Z/files.tar.gz")
+	_, err := store.Put(ctx, sourcePackage(t, []byte("backup")), "bqckup/site/2026-08-05T00-00-00Z/files.tar.gz")
 	require.ErrorIs(t, err, context.Canceled)
 }
 
 func TestPutReturnsStableCollisionError(t *testing.T) {
-	artifact := sourceArtifact(t, []byte("backup"))
+	pkg := sourcePackage(t, []byte("backup"))
 	uploader := &fakeUploader{err: &smithy.GenericAPIError{Code: "PreconditionFailed", Message: "provider secret response"}}
 	store := newWithClients(Options{Bucket: "backups"}, uploader, &fakeClient{}, nil)
 
-	_, err := store.Put(context.Background(), artifact, "bqckup/site/2026-08-05T00-00-00Z/files.tar.gz")
+	_, err := store.Put(context.Background(), pkg, "bqckup/site/2026-08-05T00-00-00Z/files.tar.gz")
 	require.ErrorIs(t, err, ErrObjectExists)
 	assert.NotContains(t, err.Error(), "provider secret response")
 }
 
 func TestPutCleansUpExactObjectWhenRemoteVerificationFails(t *testing.T) {
-	artifact := sourceArtifact(t, []byte("backup"))
+	pkg := sourcePackage(t, []byte("backup"))
 	client := &fakeClient{headOutput: &s3.HeadObjectOutput{
-		ContentLength: aws.Int64(artifact.Size + 1),
-		Metadata:      map[string]string{checksumMetadata: artifact.SHA256, sizeMetadata: strconv.FormatInt(artifact.Size, 10)},
+		ContentLength: aws.Int64(pkg.Size + 1),
+		Metadata:      map[string]string{checksumMetadata: pkg.SHA256, sizeMetadata: strconv.FormatInt(pkg.Size, 10)},
 	}}
 	store := newWithClients(Options{Bucket: "backups", Prefix: "company"}, &fakeUploader{}, client, nil)
 
-	_, err := store.Put(context.Background(), artifact, "bqckup/site/2026-08-05T00-00-00Z/files.tar.gz")
+	_, err := store.Put(context.Background(), pkg, "bqckup/site/2026-08-05T00-00-00Z/files.tar.gz")
 	require.Error(t, err)
 	require.NotNil(t, client.deleteInput)
 	assert.Equal(t, "company/bqckup/site/2026-08-05T00-00-00Z/files.tar.gz", aws.ToString(client.deleteInput.Key))
 }
 
-func verifiedHead(artifact storage.Artifact) *s3.HeadObjectOutput {
+func verifiedHead(pkg storage.Package) *s3.HeadObjectOutput {
 	return &s3.HeadObjectOutput{
-		ContentLength: aws.Int64(artifact.Size),
+		ContentLength: aws.Int64(pkg.Size),
 		Metadata: map[string]string{
-			checksumMetadata: artifact.SHA256,
-			sizeMetadata:     strconv.FormatInt(artifact.Size, 10),
+			checksumMetadata: pkg.SHA256,
+			sizeMetadata:     strconv.FormatInt(pkg.Size, 10),
 		},
 	}
 }
@@ -151,96 +151,96 @@ func (f *fakeClient) DeleteObjects(_ context.Context, input *s3.DeleteObjectsInp
 	return f.deleteObjectsOutput, f.deleteObjectsErr
 }
 
-func TestListArtifactsReturnsEveryObjectUnderTheSet(t *testing.T) {
+func TestListPackagesReturnsEveryObjectUnderTheSet(t *testing.T) {
 	created := time.Date(2026, 11, 10, 3, 0, 12, 0, time.UTC)
 	client := &fakeClient{listOutputs: []*s3.ListObjectsV2Output{
 		{Contents: []types.Object{
-			{Key: aws.String("company/bqckup/site-a/2026-11-10T03-00-00.000000000Z/files.tar.gz"), Size: aws.Int64(100), LastModified: aws.Time(created)},
-			{Key: aws.String("company/bqckup/site-a/2026-11-10T03-00-00.000000000Z/databases/db.sql.gz"), Size: aws.Int64(50), LastModified: aws.Time(created.Add(time.Second))},
+			{Key: aws.String("company/bqckup/site-a/2026-11-10/03-00-12-files.tar.gz"), Size: aws.Int64(100), LastModified: aws.Time(created)},
+			{Key: aws.String("company/bqckup/site-a/2026-11-10/03-00-12-db.sql.gz"), Size: aws.Int64(50), LastModified: aws.Time(created.Add(time.Second))},
 		}, IsTruncated: aws.Bool(true), NextContinuationToken: aws.String("next")},
 		{Contents: []types.Object{
-			{Key: aws.String("company/bqckup/site-a/2026-11-10T03-00-00.000000000Z/databases/db2.sql.gz"), Size: aws.Int64(25), LastModified: aws.Time(created.Add(2 * time.Second))},
+			{Key: aws.String("company/bqckup/site-a/2026-11-10/03-00-12-db2.sql.gz"), Size: aws.Int64(25), LastModified: aws.Time(created.Add(2 * time.Second))},
 		}, IsTruncated: aws.Bool(false)},
 	}}
 	store := newWithClients(Options{Bucket: "backups", Prefix: "company"}, &fakeUploader{}, client, nil)
 
-	artifacts, err := store.ListArtifacts(context.Background(), "bqckup/site-a/2026-11-10T03-00-00.000000000Z")
+	packages, err := store.ListPackages(context.Background(), "bqckup/site-a/2026-11-10/03-00-12")
 	require.NoError(t, err)
-	require.Len(t, artifacts, 3)
-	assert.Equal(t, "bqckup/site-a/2026-11-10T03-00-00.000000000Z/files.tar.gz", artifacts[0].Key)
-	assert.Equal(t, int64(100), artifacts[0].Size)
-	assert.Equal(t, created, artifacts[0].CreatedAt)
-	assert.Equal(t, "bqckup/site-a/2026-11-10T03-00-00.000000000Z/databases/db.sql.gz", artifacts[1].Key)
-	assert.Equal(t, "bqckup/site-a/2026-11-10T03-00-00.000000000Z/databases/db2.sql.gz", artifacts[2].Key)
-	assert.Equal(t, int64(25), artifacts[2].Size)
+	require.Len(t, packages, 3)
+	assert.Equal(t, "bqckup/site-a/2026-11-10/03-00-12-files.tar.gz", packages[0].Key)
+	assert.Equal(t, int64(100), packages[0].Size)
+	assert.Equal(t, created, packages[0].CreatedAt)
+	assert.Equal(t, "bqckup/site-a/2026-11-10/03-00-12-db.sql.gz", packages[1].Key)
+	assert.Equal(t, "bqckup/site-a/2026-11-10/03-00-12-db2.sql.gz", packages[2].Key)
+	assert.Equal(t, int64(25), packages[2].Size)
 	require.Len(t, client.listInputs, 2)
-	assert.Equal(t, "company/bqckup/site-a/2026-11-10T03-00-00.000000000Z/", aws.ToString(client.listInputs[0].Prefix))
+	assert.Equal(t, "company/bqckup/site-a/2026-11-10/", aws.ToString(client.listInputs[0].Prefix))
 	assert.Equal(t, "next", aws.ToString(client.listInputs[1].ContinuationToken))
 }
 
-func TestListArtifactsSkipsKeysOutsideTheSet(t *testing.T) {
+func TestListPackagesSkipsKeysOutsideTheSet(t *testing.T) {
 	created := time.Date(2026, 11, 10, 3, 0, 0, 0, time.UTC)
 	client := &fakeClient{listOutputs: []*s3.ListObjectsV2Output{
 		{Contents: []types.Object{
-			{Key: aws.String("company/bqckup/site-a/2026-11-10T03-00-00.000000000Z/files.tar.gz"), Size: aws.Int64(1), LastModified: aws.Time(created)},
+			{Key: aws.String("company/bqckup/site-a/2026-11-10/03-00-00-files.tar.gz"), Size: aws.Int64(1), LastModified: aws.Time(created)},
 			// Foreign keys must not surface: another set, another site, a restic blob prefix.
-			{Key: aws.String("company/bqckup/site-a/2026-11-11T03-00-00.000000000Z/files.tar.gz"), Size: aws.Int64(2), LastModified: aws.Time(created)},
-			{Key: aws.String("company/bqckup/site-b/2026-11-10T03-00-00.000000000Z/files.tar.gz"), Size: aws.Int64(3), LastModified: aws.Time(created)},
+			{Key: aws.String("company/bqckup/site-a/2026-11-11/03-00-00-files.tar.gz"), Size: aws.Int64(2), LastModified: aws.Time(created)},
+			{Key: aws.String("company/bqckup/site-b/2026-11-10/03-00-00-files.tar.gz"), Size: aws.Int64(3), LastModified: aws.Time(created)},
 		}, IsTruncated: aws.Bool(false)},
 	}}
 	store := newWithClients(Options{Bucket: "backups", Prefix: "company"}, &fakeUploader{}, client, nil)
 
-	artifacts, err := store.ListArtifacts(context.Background(), "bqckup/site-a/2026-11-10T03-00-00.000000000Z")
+	packages, err := store.ListPackages(context.Background(), "bqckup/site-a/2026-11-10/03-00-00")
 	require.NoError(t, err)
-	require.Len(t, artifacts, 1)
-	assert.Equal(t, "bqckup/site-a/2026-11-10T03-00-00.000000000Z/files.tar.gz", artifacts[0].Key)
+	require.Len(t, packages, 1)
+	assert.Equal(t, "bqckup/site-a/2026-11-10/03-00-00-files.tar.gz", packages[0].Key)
 }
 
-func TestListArtifactsRejectsInvalidPrefixes(t *testing.T) {
+func TestListPackagesRejectsInvalidPrefixes(t *testing.T) {
 	store := newWithClients(Options{Bucket: "backups"}, &fakeUploader{}, &fakeClient{}, nil)
 	for _, invalid := range []string{
 		"bqckup",
 		"bqckup/site-a",
 		"bqckup/site-a/not-a-timestamp",
-		"bqckup/site-a/2026-11-10T03-00-00.000000000Z/",
+		"bqckup/site-a/2026-11-10/03-00-00/",
 		"../bqckup/site-a/2026-11-10T03-00-00.000000000Z",
 	} {
-		_, err := store.ListArtifacts(context.Background(), invalid)
+		_, err := store.ListPackages(context.Background(), invalid)
 		assert.Error(t, err, invalid)
 	}
 }
 
-func TestListArtifactsPreservesCancellation(t *testing.T) {
+func TestListPackagesPreservesCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	store := newWithClients(Options{Bucket: "backups"}, &fakeUploader{}, &fakeClient{}, nil)
-	_, err := store.ListArtifacts(ctx, "bqckup/site-a/2026-11-10T03-00-00.000000000Z")
+	_, err := store.ListPackages(ctx, "bqckup/site-a/2026-11-10T03-00-00.000000000Z")
 	require.ErrorIs(t, err, context.Canceled)
 }
 
-func TestListArtifactsRedactsProviderErrors(t *testing.T) {
+func TestListPackagesRedactsProviderErrors(t *testing.T) {
 	client := &fakeClient{listErr: &smithy.GenericAPIError{Code: "AccessDenied", Message: "provider secret response"}}
 	store := newWithClients(Options{Bucket: "backups"}, &fakeUploader{}, client, nil)
-	_, err := store.ListArtifacts(context.Background(), "bqckup/site-a/2026-11-10T03-00-00.000000000Z")
+	_, err := store.ListPackages(context.Background(), "bqckup/site-a/2026-11-10T03-00-00.000000000Z")
 	require.Error(t, err)
 	assert.NotContains(t, err.Error(), "provider secret response")
 }
 
-func TestListArtifactsRejectsMissingContinuationToken(t *testing.T) {
+func TestListPackagesRejectsMissingContinuationToken(t *testing.T) {
 	client := &fakeClient{listOutputs: []*s3.ListObjectsV2Output{
 		{Contents: []types.Object{}, IsTruncated: aws.Bool(true)},
 	}}
 	store := newWithClients(Options{Bucket: "backups"}, &fakeUploader{}, client, nil)
-	_, err := store.ListArtifacts(context.Background(), "bqckup/site-a/2026-11-10T03-00-00.000000000Z")
+	_, err := store.ListPackages(context.Background(), "bqckup/site-a/2026-11-10T03-00-00.000000000Z")
 	require.Error(t, err)
 }
 
-func sourceArtifact(t *testing.T, contents []byte) storage.Artifact {
+func sourcePackage(t *testing.T, contents []byte) storage.Package {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "artifact.tar.gz")
+	path := filepath.Join(t.TempDir(), "pkg.tar.gz")
 	require.NoError(t, os.WriteFile(path, contents, 0o600))
 	sum := sha256.Sum256(contents)
-	return storage.Artifact{Path: path, Size: int64(len(contents)), SHA256: hex.EncodeToString(sum[:])}
+	return storage.Package{Path: path, Size: int64(len(contents)), SHA256: hex.EncodeToString(sum[:])}
 }
 
 func testPresigner(t *testing.T) presignerAPI {

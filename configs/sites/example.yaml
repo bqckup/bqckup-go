@@ -1,6 +1,12 @@
 site:
   name: example
   enabled: true
+  # backup_mode options: full (default) | incremental
+  # For incremental backups, uncomment these fields and set a strong password.
+  # Keep this file at mode 0600. Full mode is the default.
+  # backup_mode: incremental
+  # incremental:
+  #   password: replace-with-a-strong-repository-password
   sources:
     files:
       include:
@@ -11,6 +17,7 @@ site:
     databases:
       - name: mysql-example
         enabled: false
+        # engine options: mysql | postgres
         engine: mysql
       - name: postgres-example
         enabled: false

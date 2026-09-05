@@ -8,7 +8,7 @@ import (
 
 	"github.com/bqckup/bqckup-go/internal/apperror"
 	"github.com/bqckup/bqckup-go/internal/backup"
-	"github.com/bqckup/bqckup-go/internal/backup/restic"
+	"github.com/bqckup/bqckup-go/internal/backup/incremental"
 	"github.com/bqckup/bqckup-go/internal/config"
 	"github.com/bqckup/bqckup-go/internal/storage"
 	"github.com/stretchr/testify/assert"
@@ -17,14 +17,14 @@ import (
 
 type appRemoteLister struct {
 	appFakeStore
-	sets      []storage.BackupSet
-	artifacts []storage.RemoteArtifact
+	sets     []storage.BackupSet
+	packages []storage.RemotePackage
 }
 
 type appFakeStore struct{}
 
-func (appFakeStore) Put(context.Context, storage.Artifact, string) (storage.StoredArtifact, error) {
-	return storage.StoredArtifact{}, errors.New("unused")
+func (appFakeStore) Put(context.Context, storage.Package, string) (storage.StoredPackage, error) {
+	return storage.StoredPackage{}, errors.New("unused")
 }
 func (appFakeStore) Delete(context.Context, string) error { return errors.New("unused") }
 func (appFakeStore) ListBackupSets(context.Context, string) ([]storage.BackupSet, error) {
@@ -35,16 +35,16 @@ func (appFakeStore) Probe(context.Context) error { return nil }
 func (a *appRemoteLister) ListBackupSets(context.Context, string) ([]storage.BackupSet, error) {
 	return a.sets, nil
 }
-func (a *appRemoteLister) ListArtifacts(context.Context, string) ([]storage.RemoteArtifact, error) {
-	return a.artifacts, nil
+func (a *appRemoteLister) ListPackages(context.Context, string) ([]storage.RemotePackage, error) {
+	return a.packages, nil
 }
 
 type appSnapshotLister struct {
-	snapshots []restic.Snapshot
-	gotRepo   restic.RepoConfig
+	snapshots []incremental.Snapshot
+	gotRepo   incremental.RepoConfig
 }
 
-func (a *appSnapshotLister) ListSnapshots(_ context.Context, repo restic.RepoConfig) ([]restic.Snapshot, error) {
+func (a *appSnapshotLister) ListSnapshots(_ context.Context, repo incremental.RepoConfig) ([]incremental.Snapshot, error) {
 	a.gotRepo = repo
 	return a.snapshots, nil
 }
@@ -113,11 +113,11 @@ func TestListRemoteContentsLocalDestinationPointsToHistory(t *testing.T) {
 	assert.Contains(t, err.Error(), "--details")
 }
 
-func TestListRemoteContentsFullModeListsArtifacts(t *testing.T) {
+func TestListRemoteContentsFullModeListsPackages(t *testing.T) {
 	created := time.Date(2026, 11, 10, 3, 0, 0, 0, time.UTC)
 	store := &appRemoteLister{
 		sets: []storage.BackupSet{{Key: "bqckup/site-a/2026-11-10T03-00-00.000000000Z", CreatedAt: created}},
-		artifacts: []storage.RemoteArtifact{
+		packages: []storage.RemotePackage{
 			{Key: "bqckup/site-a/2026-11-10T03-00-00.000000000Z/files.tar.gz", Size: 42, CreatedAt: created},
 		},
 	}
@@ -125,27 +125,33 @@ func TestListRemoteContentsFullModeListsArtifacts(t *testing.T) {
 
 	listing, err := application.ListRemoteContents(context.Background(), "site-a", "s3-primary")
 	require.NoError(t, err)
-	require.Len(t, listing.Artifacts, 1)
-	assert.Equal(t, "s3-primary", listing.Artifacts[0].Destination)
-	assert.Equal(t, int64(42), listing.Artifacts[0].Size)
+	require.Len(t, listing.Packages, 1)
+	assert.Equal(t, "s3-primary", listing.Packages[0].Destination)
+	assert.Equal(t, int64(42), listing.Packages[0].Size)
 }
 
 func TestListRemoteContentsIncrementalModeWiresRepositoryConfig(t *testing.T) {
 	site := remoteSite()
 	site.BackupMode = "incremental"
-	site.Incremental = config.Incremental{PasswordEnv: "TEST_REPO_PASSWORD"}
-	t.Setenv("TEST_REPO_PASSWORD", "secret")
-	snapshots := &appSnapshotLister{snapshots: []restic.Snapshot{
+	site.Incremental = config.Incremental{Password: "secret"}
+	site.Sources.Databases = []config.DatabaseSource{{Name: "app", Enabled: true, Engine: "mysql"}}
+	snapshots := &appSnapshotLister{snapshots: []incremental.Snapshot{
 		{ID: "0123456789abcdef", Paths: []string{"/var/www"}, Size: 7, CreatedAt: time.Now()},
 	}}
+	remote := &appRemoteLister{
+		sets:     []storage.BackupSet{{Key: "bqckup/site-a/2026-11-10T03-00-00.000000000Z"}},
+		packages: []storage.RemotePackage{{Key: "bqckup/site-a/2026-11-10T03-00-00.000000000Z/databases/app.sql.gz", Size: 42}},
+	}
 	application := listingApp(t, site, map[string]config.Storage{
 		"s3-primary": {Type: "s3", Bucket: "backups", Prefix: "company"},
-	}, map[string]storage.Store{"s3-primary": &appRemoteLister{}})
+	}, map[string]storage.Store{"s3-primary": remote})
 	application.snapshots = snapshots
 
 	listing, err := application.ListRemoteContents(context.Background(), "site-a", "s3-primary")
 	require.NoError(t, err)
 	require.Len(t, listing.Snapshots, 1)
+	require.Len(t, listing.DatabasePackages, 1)
+	assert.Equal(t, "bqckup/site-a/2026-11-10T03-00-00.000000000Z/databases/app.sql.gz", listing.DatabasePackages[0].Key)
 	assert.Equal(t, "01234567", listing.Snapshots[0].ID)
 	assert.Equal(t, "secret", snapshots.gotRepo.Password)
 	assert.Equal(t, "backups", snapshots.gotRepo.Bucket)

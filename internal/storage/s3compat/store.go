@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path"
 	"sort"
@@ -59,28 +60,43 @@ func newWithClients(options Options, uploader uploaderAPI, client objectAPI, pre
 	return &Store{bucket: options.Bucket, prefix: options.Prefix, uploader: uploader, client: client, presigner: presigner}
 }
 
-func (s *Store) Put(ctx context.Context, artifact storage.Artifact, key string) (storage.StoredArtifact, error) {
+func (s *Store) Put(ctx context.Context, pkg storage.Package, key string) (storage.StoredPackage, error) {
+	return s.put(ctx, pkg, key, nil)
+}
+
+// PutWithProgress is like Put but reports how many bytes the uploader has
+// consumed so far through progress. Only body bytes are counted, never the
+// object key or metadata; the local verification read pass is not counted.
+func (s *Store) PutWithProgress(ctx context.Context, pkg storage.Package, key string, progress func(int64)) (storage.StoredPackage, error) {
+	return s.put(ctx, pkg, key, progress)
+}
+
+func (s *Store) put(ctx context.Context, pkg storage.Package, key string, progress func(int64)) (storage.StoredPackage, error) {
 	if err := ctx.Err(); err != nil {
-		return storage.StoredArtifact{}, err
+		return storage.StoredPackage{}, err
 	}
 	finalKey, err := storage.JoinPrefix(s.prefix, key)
 	if err != nil {
-		return storage.StoredArtifact{}, err
+		return storage.StoredPackage{}, err
 	}
-	checksum, size, err := inspectArtifact(ctx, artifact)
+	checksum, size, err := inspectPackage(ctx, pkg)
 	if err != nil {
-		return storage.StoredArtifact{}, err
+		return storage.StoredPackage{}, err
 	}
 
-	file, err := os.Open(artifact.Path)
+	file, err := os.Open(pkg.Path)
 	if err != nil {
-		return storage.StoredArtifact{}, apperror.Hide("could not open backup artifact", err)
+		return storage.StoredPackage{}, apperror.Hide("could not open backup package", err)
 	}
 	defer file.Close()
+	body := io.Reader(file)
+	if progress != nil {
+		body = countingReader{next: body, progress: progress}
+	}
 	_, err = s.uploader.UploadObject(ctx, &transfermanager.UploadObjectInput{
 		Bucket:        aws.String(s.bucket),
 		Key:           aws.String(finalKey),
-		Body:          file,
+		Body:          body,
 		IfNoneMatch:   aws.String("*"),
 		MpuObjectSize: aws.Int64(size),
 		Metadata: map[string]string{
@@ -90,12 +106,12 @@ func (s *Store) Put(ctx context.Context, artifact storage.Artifact, key string) 
 	})
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return storage.StoredArtifact{}, err
+			return storage.StoredPackage{}, err
 		}
 		if isCollision(err) {
-			return storage.StoredArtifact{}, apperror.Hide(ErrObjectExists.Error(), ErrObjectExists)
+			return storage.StoredPackage{}, apperror.Hide(ErrObjectExists.Error(), ErrObjectExists)
 		}
-		return storage.StoredArtifact{}, apperror.Hide("S3-compatible upload failed", err)
+		return storage.StoredPackage{}, apperror.Hide("S3-compatible upload failed", err)
 	}
 
 	head, err := s.client.HeadObject(ctx, &s3.HeadObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(finalKey)})
@@ -107,28 +123,28 @@ func (s *Store) Put(ctx context.Context, artifact storage.Artifact, key string) 
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			verificationErr = err
 		} else {
-			verificationErr = apperror.Hide("remote artifact verification failed", err)
+			verificationErr = apperror.Hide("remote package verification failed", err)
 		}
 		_, cleanupErr := s.client.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(finalKey)})
 		if cleanupErr != nil {
 			verificationErr = apperror.Hide(verificationErr.Error(), errors.Join(verificationErr, cleanupErr))
 		}
-		return storage.StoredArtifact{}, verificationErr
+		return storage.StoredPackage{}, verificationErr
 	}
 
-	return storage.StoredArtifact{Key: finalKey, Size: size, SHA256: checksum}, nil
+	return storage.StoredPackage{Key: finalKey, Size: size, SHA256: checksum}, nil
 }
 
-func inspectArtifact(ctx context.Context, artifact storage.Artifact) (string, int64, error) {
-	if artifact.Size < 0 || len(artifact.SHA256) != sha256.Size*2 {
-		return "", 0, errors.New("artifact size and SHA-256 are required")
+func inspectPackage(ctx context.Context, pkg storage.Package) (string, int64, error) {
+	if pkg.Size < 0 || len(pkg.SHA256) != sha256.Size*2 {
+		return "", 0, errors.New("package size and SHA-256 are required")
 	}
-	if _, err := hex.DecodeString(artifact.SHA256); err != nil {
-		return "", 0, errors.New("artifact SHA-256 is invalid")
+	if _, err := hex.DecodeString(pkg.SHA256); err != nil {
+		return "", 0, errors.New("package SHA-256 is invalid")
 	}
-	file, err := os.Open(artifact.Path)
+	file, err := os.Open(pkg.Path)
 	if err != nil {
-		return "", 0, apperror.Hide("could not inspect backup artifact", err)
+		return "", 0, apperror.Hide("could not inspect backup package", err)
 	}
 	defer file.Close()
 	hash := sha256.New()
@@ -137,8 +153,8 @@ func inspectArtifact(ctx context.Context, artifact storage.Artifact) (string, in
 		return "", size, err
 	}
 	checksum := hex.EncodeToString(hash.Sum(nil))
-	if size != artifact.Size || !strings.EqualFold(checksum, artifact.SHA256) {
-		return "", size, errors.New("local artifact verification failed")
+	if size != pkg.Size || !strings.EqualFold(checksum, pkg.SHA256) {
+		return "", size, errors.New("local package verification failed")
 	}
 	return checksum, size, nil
 }
@@ -163,6 +179,21 @@ func metadataValue(metadata map[string]string, name string) string {
 		}
 	}
 	return ""
+}
+
+// countingReader reports every byte it forwards to next, once, so a progress
+// consumer sees the actual bytes transferred rather than the buffer size.
+type countingReader struct {
+	next     io.Reader
+	progress func(int64)
+}
+
+func (r countingReader) Read(p []byte) (int, error) {
+	n, err := r.next.Read(p)
+	if n > 0 {
+		r.progress(int64(n))
+	}
+	return n, err
 }
 
 func isCollision(err error) bool {
@@ -261,6 +292,15 @@ func (s *Store) Delete(ctx context.Context, backupSetPrefix string) error {
 		return err
 	}
 	requestPrefix := finalPrefix + "/"
+	flatRun := ""
+	parts := strings.Split(backupSetPrefix, "/")
+	if len(parts) >= 2 {
+		setName := path.Join(parts[len(parts)-2], parts[len(parts)-1])
+		if storage.IsFlatBackupSet(setName) {
+			requestPrefix = path.Dir(finalPrefix) + "/"
+			flatRun = path.Base(finalPrefix) + "-"
+		}
+	}
 	var continuation *string
 	for {
 		output, listErr := s.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
@@ -277,7 +317,7 @@ func (s *Store) Delete(ctx context.Context, backupSetPrefix string) error {
 		identifiers := make([]types.ObjectIdentifier, 0, len(output.Contents))
 		for _, object := range output.Contents {
 			key := aws.ToString(object.Key)
-			if strings.HasPrefix(key, requestPrefix) {
+			if strings.HasPrefix(key, requestPrefix) && (flatRun == "" || strings.HasPrefix(strings.TrimPrefix(key, requestPrefix), flatRun)) {
 				identifiers = append(identifiers, types.ObjectIdentifier{Key: aws.String(key)})
 			}
 		}
@@ -362,7 +402,7 @@ func (s *Store) ListBackupSets(ctx context.Context, sitePrefix string) ([]storag
 	return sets, nil
 }
 
-func (s *Store) ListArtifacts(ctx context.Context, setPrefix string) ([]storage.RemoteArtifact, error) {
+func (s *Store) ListPackages(ctx context.Context, setPrefix string) ([]storage.RemotePackage, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -374,7 +414,16 @@ func (s *Store) ListArtifacts(ctx context.Context, setPrefix string) ([]storage.
 		return nil, err
 	}
 	requestPrefix := finalPrefix + "/"
-	var artifacts []storage.RemoteArtifact
+	flatRun := ""
+	parts := strings.Split(setPrefix, "/")
+	if len(parts) >= 2 {
+		setName := path.Join(parts[len(parts)-2], parts[len(parts)-1])
+		if storage.IsFlatBackupSet(setName) {
+			requestPrefix = path.Dir(finalPrefix) + "/"
+			flatRun = path.Base(finalPrefix) + "-"
+		}
+	}
+	var packages []storage.RemotePackage
 	var continuation *string
 	for {
 		output, listErr := s.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
@@ -383,7 +432,7 @@ func (s *Store) ListArtifacts(ctx context.Context, setPrefix string) ([]storage.
 			ContinuationToken: continuation,
 		})
 		if listErr != nil {
-			return nil, remoteOperationError("could not list remote backup artifacts", listErr)
+			return nil, remoteOperationError("could not list remote backup packages", listErr)
 		}
 		if output == nil {
 			return nil, errors.New("remote object listing returned no result")
@@ -393,14 +442,18 @@ func (s *Store) ListArtifacts(ctx context.Context, setPrefix string) ([]storage.
 			if !strings.HasPrefix(key, requestPrefix) {
 				continue
 			}
-			artifacts = append(artifacts, storage.RemoteArtifact{
-				Key:       setPrefix + "/" + strings.TrimPrefix(key, requestPrefix),
+			remainder := strings.TrimPrefix(key, requestPrefix)
+			if flatRun != "" && !strings.HasPrefix(remainder, flatRun) {
+				continue
+			}
+			packages = append(packages, storage.RemotePackage{
+				Key:       path.Join(path.Dir(setPrefix), remainder),
 				Size:      aws.ToInt64(object.Size),
 				CreatedAt: aws.ToTime(object.LastModified),
 			})
 		}
 		if !aws.ToBool(output.IsTruncated) {
-			return artifacts, nil
+			return packages, nil
 		}
 		if output.NextContinuationToken == nil || aws.ToString(output.NextContinuationToken) == "" {
 			return nil, errors.New("remote object listing omitted its continuation token")
@@ -417,7 +470,8 @@ func validateSitePrefix(sitePrefix string) error {
 		return err
 	}
 	parts := strings.Split(sitePrefix, "/")
-	if len(parts) != 2 || parts[0] != "bqckup" || !config.SafeName.MatchString(parts[1]) {
+	if (len(parts) != 2 || parts[0] != "bqckup" || !config.SafeName.MatchString(parts[1])) &&
+		(len(parts) != 3 || parts[0] != "bqckup" || !config.SafeName.MatchString(parts[1]) || !config.SafeName.MatchString(parts[2])) {
 		return errors.New("invalid backup site prefix")
 	}
 	return nil
@@ -428,10 +482,20 @@ func validateBackupSetPrefix(prefix string) error {
 		return err
 	}
 	parts := strings.Split(prefix, "/")
-	if (len(parts) != 3 && len(parts) != 4) || parts[0] != "bqckup" || !config.SafeName.MatchString(parts[1]) {
+	if (len(parts) != 3 && len(parts) != 4 && len(parts) != 5) || parts[0] != "bqckup" {
 		return errors.New("invalid backup set prefix")
 	}
-	if _, err := storage.ParseBackupSet(strings.Join(parts[2:], "/")); err != nil {
+	if len(parts) >= 4 && !config.SafeName.MatchString(parts[1]) {
+		return errors.New("invalid backup set prefix")
+	}
+	if len(parts) == 5 && !config.SafeName.MatchString(parts[2]) {
+		return errors.New("invalid backup set prefix")
+	}
+	setStart := 2
+	if len(parts) == 5 {
+		setStart = 3
+	}
+	if _, err := storage.ParseBackupSet(strings.Join(parts[setStart:], "/")); err != nil {
 		return errors.New("invalid backup set prefix")
 	}
 	return nil
@@ -439,6 +503,11 @@ func validateBackupSetPrefix(prefix string) error {
 
 func parseBackupSetRemainder(remainder string) (string, time.Time, error) {
 	parts := strings.Split(remainder, "/")
+	if len(parts) >= 2 {
+		if setName, createdAt, err := storage.BackupSetForPackage(parts[0], parts[1]); err == nil {
+			return setName, createdAt, nil
+		}
+	}
 	if len(parts) >= 3 {
 		setName := path.Join(parts[0], parts[1])
 		if createdAt, err := storage.ParseBackupSet(setName); err == nil {

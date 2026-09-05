@@ -18,8 +18,8 @@ import (
 
 // writeIncrementalSiteConfig adds an incremental site "site-b" on
 // "local-primary" to the config directory created by writeCLIConfig.
-// passwordEnv is the repository password environment variable name.
-func writeIncrementalSiteConfig(t *testing.T, configDir, passwordEnv string) {
+// password is the literal repository password stored in protected site YAML.
+func writeIncrementalSiteConfig(t *testing.T, configDir, password string) {
 	t.Helper()
 	require.NoError(t, os.WriteFile(filepath.Join(configDir, "sites", "site-b.yaml"), []byte(`version: 2
 site:
@@ -27,7 +27,7 @@ site:
   enabled: true
   backup_mode: incremental
   incremental:
-    password_env: `+passwordEnv+`
+    password: "`+password+`"
   sources:
     files:
       include: [/srv/example/data]
@@ -56,6 +56,8 @@ func TestBackupSnapshotsRequiresSite(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrInvalidInput)
 	assert.Equal(t, 2, ExitCode(err))
+	assert.Contains(t, err.Error(), "Usage:\n  bqckup backup snapshots <site> --destination <destination>")
+	assert.Contains(t, err.Error(), "Example:\n  bqckup backup snapshots incremental-test --destination testing")
 }
 
 func TestBackupSnapshotsFullModeSiteFails(t *testing.T) {
@@ -69,19 +71,18 @@ func TestBackupSnapshotsFullModeSiteFails(t *testing.T) {
 	assert.Contains(t, message, "--details")
 }
 
-func TestBackupSnapshotsMissingPasswordEnvFails(t *testing.T) {
+func TestBackupSnapshotsMissingPasswordFails(t *testing.T) {
 	configDir, _ := writeCLIConfig(t)
-	writeIncrementalSiteConfig(t, configDir, "MISSING_PASSWORD_ENV")
+	writeIncrementalSiteConfig(t, configDir, "")
 	root, _, _ := commandForTest(t, "--config-dir", configDir, "backup", "snapshots", "site-b", "--destination", "local-primary")
 	err := root.Execute()
 	require.Error(t, err)
-	assert.Equal(t, 3, ExitCode(err))
+	assert.Equal(t, 2, ExitCode(err))
 }
 
 func TestBackupSnapshotsBrokenRepositoryFailsRedacted(t *testing.T) {
-	t.Setenv("RESTIC_PASSWORD", "supersecret")
 	configDir, _ := writeCLIConfig(t)
-	writeIncrementalSiteConfig(t, configDir, "RESTIC_PASSWORD")
+	writeIncrementalSiteConfig(t, configDir, "supersecret")
 	root, _, _ := commandForTest(t, "--config-dir", configDir, "backup", "snapshots", "site-b", "--destination", "local-primary")
 	err := root.Execute()
 	require.Error(t, err)
@@ -129,19 +130,18 @@ func TestRestoreFullModeSiteFails(t *testing.T) {
 	assert.Contains(t, message, "--details")
 }
 
-func TestRestoreMissingPasswordEnvFails(t *testing.T) {
+func TestRestoreMissingPasswordFails(t *testing.T) {
 	configDir, _ := writeCLIConfig(t)
-	writeIncrementalSiteConfig(t, configDir, "MISSING_PASSWORD_ENV")
+	writeIncrementalSiteConfig(t, configDir, "")
 	root, _, _ := commandForTest(t, "--config-dir", configDir, "backup", "restore", "site-b", "--destination", "local-primary", "--target", "/tmp/restore")
 	err := root.Execute()
 	require.Error(t, err)
-	assert.Equal(t, 3, ExitCode(err))
+	assert.Equal(t, 2, ExitCode(err))
 }
 
 func TestRestoreUnknownSnapshotFails(t *testing.T) {
-	t.Setenv("RESTIC_PASSWORD", "supersecret")
 	configDir, _ := writeCLIConfig(t)
-	writeIncrementalSiteConfig(t, configDir, "RESTIC_PASSWORD")
+	writeIncrementalSiteConfig(t, configDir, "supersecret")
 	root, _, _ := commandForTest(t, "--config-dir", configDir, "backup", "restore", "site-b", "--destination", "local-primary", "--target", "/tmp/restore")
 	err := root.Execute()
 	require.Error(t, err)
@@ -237,4 +237,25 @@ func TestRestoreSnapshotDefaultsLatest(t *testing.T) {
 	flag := restore.Flags().Lookup("snapshot")
 	require.NotNil(t, flag)
 	assert.Equal(t, "latest", flag.DefValue)
+}
+
+func TestBackupRunJSONModeSuppressesProgressBar(t *testing.T) {
+	configDir, _ := writeCLIConfig(t)
+	root, stdout, stderr := commandForTest(t, "--config-dir", configDir, "--output", "json", "backup", "run", "example", "--force")
+	require.NoError(t, root.Execute())
+	assert.Empty(t, stderr.String())
+
+	var result map[string]any
+	require.NoError(t, json.Unmarshal(stdout.Bytes(), &result))
+	assert.Equal(t, "example", result["site_name"])
+	assert.Equal(t, "success", result["status"])
+}
+
+func TestBackupRunTextModeEmitsProgressHeader(t *testing.T) {
+	configDir, _ := writeCLIConfig(t)
+	root, stdout, stderr := commandForTest(t, "--config-dir", configDir, "backup", "run", "example", "--force")
+	require.NoError(t, root.Execute())
+
+	assert.Contains(t, stderr.String(), "backup:example: starting full backup to local-primary")
+	assert.Contains(t, stdout.String(), "[OK] example: success")
 }

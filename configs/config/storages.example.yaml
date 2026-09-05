@@ -28,4 +28,5 @@ storages:
     credentials:
       source: remote
       url: https://credentials.example.com/bqckup/storage
+    prefix: company-managed
     primary: false

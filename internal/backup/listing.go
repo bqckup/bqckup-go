@@ -3,13 +3,12 @@ package backup
 import (
 	"context"
 	"fmt"
-	"os"
-	"path"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/bqckup/bqckup-go/internal/apperror"
-	"github.com/bqckup/bqckup-go/internal/backup/restic"
+	"github.com/bqckup/bqckup-go/internal/backup/incremental"
 	"github.com/bqckup/bqckup-go/internal/config"
 	"github.com/bqckup/bqckup-go/internal/storage"
 )
@@ -19,16 +18,16 @@ import (
 // is exactly the "local destinations are not listed" error.
 type RemoteLister interface {
 	ListBackupSets(ctx context.Context, sitePrefix string) ([]storage.BackupSet, error)
-	ListArtifacts(ctx context.Context, setPrefix string) ([]storage.RemoteArtifact, error)
+	ListPackages(ctx context.Context, setPrefix string) ([]storage.RemotePackage, error)
 }
 
 // SnapshotLister lists snapshots through the incremental engine.
 type SnapshotLister interface {
-	ListSnapshots(ctx context.Context, repo restic.RepoConfig) ([]restic.Snapshot, error)
+	ListSnapshots(ctx context.Context, repo incremental.RepoConfig) ([]incremental.Snapshot, error)
 }
 
-// ArtifactRow is one stored object in a full-mode listing.
-type ArtifactRow struct {
+// PackageRow is one stored object in a full-mode listing.
+type PackageRow struct {
 	Destination string
 	Key         string
 	Size        int64
@@ -46,29 +45,23 @@ type SnapshotRow struct {
 
 // Listing is the result of listing one remote destination.
 type Listing struct {
-	Mode        string
-	Site        string
-	Destination string
-	Artifacts   []ArtifactRow
-	Snapshots   []SnapshotRow
+	Mode             string
+	Site             string
+	Destination      string
+	Packages         []PackageRow
+	Snapshots        []SnapshotRow
+	DatabasePackages []PackageRow
 }
 
 // Lister lists the live remote contents of one destination. It never
 // writes, deletes, or locks anything beyond the engine's short-lived
 // non-exclusive snapshot lock.
 type Lister struct {
+	ServerID  string
 	Snapshots SnapshotLister
-	EnvLookup func(string) (string, bool)
 }
 
-func (l *Lister) lookupEnv(key string) (string, bool) {
-	if l.EnvLookup != nil {
-		return l.EnvLookup(key)
-	}
-	return os.LookupEnv(key)
-}
-
-// List branches on the site's backup mode: full lists archive artifacts
+// List branches on the site's backup mode: full lists stored packages
 // under every UTC backup set, incremental lists snapshots through the
 // engine. Local destinations fail as config errors: this command exists
 // for remote destinations, local-only users have history.
@@ -89,9 +82,9 @@ func (l *Lister) List(ctx context.Context, destination string, site config.Site,
 	}
 	switch site.BackupMode {
 	case "full":
-		return l.listArtifacts(ctx, destination, site, remote)
+		return l.listPackages(ctx, destination, site, remote)
 	case "incremental":
-		return l.listSnapshots(ctx, destination, site, storageConfig)
+		return l.listSnapshots(ctx, destination, site, storageConfig, remote)
 	default:
 		return Listing{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q has an unsupported backup mode %q", site.Name, site.BackupMode), nil)
 	}
@@ -111,38 +104,38 @@ func (l *Lister) ListSiteSnapshots(ctx context.Context, destination string, site
 			"site %q uses full backup mode; use 'bqckup history list --site %s --details' to inspect stored archives",
 			site.Name, site.Name), nil)
 	}
-	return l.listSnapshots(ctx, destination, site, storageConfig)
+	return l.listSnapshots(ctx, destination, site, storageConfig, nil)
 }
 
-func (l *Lister) listArtifacts(ctx context.Context, destination string, site config.Site, remote RemoteLister) (Listing, error) {
-	sets, err := remote.ListBackupSets(ctx, path.Join("bqckup", site.Name))
+func (l *Lister) listPackages(ctx context.Context, destination string, site config.Site, remote RemoteLister) (Listing, error) {
+	sets, err := remote.ListBackupSets(ctx, backupSitePrefix(site.Name, l.ServerID))
 	if err != nil {
 		return Listing{}, apperror.Wrap(apperror.CategoryStorage, "could not list remote backup sets", err)
 	}
 	sort.Slice(sets, func(i, j int) bool { return sets[i].CreatedAt.After(sets[j].CreatedAt) })
 	listing := Listing{Mode: "full", Site: site.Name, Destination: destination}
 	for _, set := range sets {
-		artifacts, err := remote.ListArtifacts(ctx, set.Key)
+		packages, err := remote.ListPackages(ctx, set.Key)
 		if err != nil {
-			return Listing{}, apperror.Wrap(apperror.CategoryStorage, "could not list remote backup artifacts", err)
+			return Listing{}, apperror.Wrap(apperror.CategoryStorage, "could not list remote backup packages", err)
 		}
-		for _, artifact := range artifacts {
-			listing.Artifacts = append(listing.Artifacts, ArtifactRow{
+		for _, pkg := range packages {
+			listing.Packages = append(listing.Packages, PackageRow{
 				Destination: destination,
-				Key:         artifact.Key,
-				Size:        artifact.Size,
-				CreatedAt:   artifact.CreatedAt,
+				Key:         pkg.Key,
+				Size:        pkg.Size,
+				CreatedAt:   pkg.CreatedAt,
 			})
 		}
 	}
 	return listing, nil
 }
 
-func (l *Lister) listSnapshots(ctx context.Context, destination string, site config.Site, storageConfig config.Storage) (Listing, error) {
+func (l *Lister) listSnapshots(ctx context.Context, destination string, site config.Site, storageConfig config.Storage, remote RemoteLister) (Listing, error) {
 	if l.Snapshots == nil {
 		return Listing{}, apperror.Wrap(apperror.CategoryInternal, "incremental backup engine is unavailable", nil)
 	}
-	repo, err := buildRepoConfig(site, storageConfig, l.lookupEnv, true)
+	repo, err := buildRepoConfig(site, storageConfig, true, l.ServerID)
 	if err != nil {
 		return Listing{}, apperror.Wrap(apperror.CategoryPreflight, "could not build repository configuration", err)
 	}
@@ -164,5 +157,34 @@ func (l *Lister) listSnapshots(ctx context.Context, destination string, site con
 			CreatedAt: snapshot.CreatedAt,
 		})
 	}
+	if remote != nil && hasEnabledDatabaseSources(site) {
+		packages, err := l.listDatabasePackages(ctx, destination, site, remote)
+		if err != nil {
+			return Listing{}, err
+		}
+		listing.DatabasePackages = packages
+	}
 	return listing, nil
+}
+
+func (l *Lister) listDatabasePackages(ctx context.Context, destination string, site config.Site, remote RemoteLister) ([]PackageRow, error) {
+	sets, err := remote.ListBackupSets(ctx, backupSitePrefix(site.Name, l.ServerID))
+	if err != nil {
+		return nil, apperror.Wrap(apperror.CategoryStorage, "could not list remote database backup sets", err)
+	}
+	sort.Slice(sets, func(i, j int) bool { return sets[i].CreatedAt.After(sets[j].CreatedAt) })
+	packages := make([]PackageRow, 0)
+	for _, set := range sets {
+		rows, err := remote.ListPackages(ctx, set.Key)
+		if err != nil {
+			return nil, apperror.Wrap(apperror.CategoryStorage, "could not list remote database packages", err)
+		}
+		for _, pkg := range rows {
+			if !strings.HasSuffix(pkg.Key, ".sql.gz") {
+				continue
+			}
+			packages = append(packages, PackageRow{Destination: destination, Key: pkg.Key, Size: pkg.Size, CreatedAt: pkg.CreatedAt})
+		}
+	}
+	return packages, nil
 }

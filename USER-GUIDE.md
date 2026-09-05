@@ -4,6 +4,23 @@ This guide covers installation, configuration, daily backup operations,
 scheduling, restore, and common failures. It is written for operators of the
 `bqckup` command-line application.
 
+## Quick reference
+
+| Setting | Available values |
+| --- | --- |
+| `app.log_level` | `debug`, `info`, `warn`, `error` |
+| `storage.type` | `local`, `s3`, `r2` |
+| `backup_mode` | `full` (default), `incremental` |
+| database `engine` | `mysql`, `postgres` |
+| notification channel `type` | `smtp`, `webhook`, `discord` |
+| notification route `events` | `all`, `backup_failed`, `backup_cancelled`, `backup_no_change`, `daily_report`, `monthly_report` |
+| `reports.daily.enabled` | `true`, `false` |
+| `reports.monthly.enabled` | `true`, `false` |
+
+Values written as `<placeholder>` in this guide must be replaced before use.
+They are documentation placeholders, not valid event, channel, or credential
+values.
+
 ## 1. How Bqckup works
 
 Bqckup reads one configuration tree, backs up one named site at a time, writes
@@ -79,21 +96,35 @@ Initialization never overwrites an existing configuration file.
 `bqckup.yaml`:
 
 ```yaml
+server_id: 207.180.252.231
+
 app:
   state_database: /var/lib/bqckup/bqckup.db
   temporary_directory: /var/lib/bqckup/tmp
   lock_directory: /var/lib/bqckup/locks
   log_level: info
+  log_file: /var/log/bqckup/bqckup.log # optional; file mode 0600
 ```
 
-Relative paths are resolved from the configuration directory. The environment
-variables `BQCKUP_STATE_DATABASE`, `BQCKUP_TEMPORARY_DIRECTORY`,
-`BQCKUP_LOCK_DIRECTORY`, and `BQCKUP_LOG_LEVEL` can override these settings.
+Relative paths are resolved from the configuration directory. Values inside
+the YAML are authoritative and are not overridden by environment variables.
+`log_level` accepts `debug`, `info`, `warn`, or `error`. When `log_file` is
+set, Bqckup appends operational events to that file and creates it with mode
+`0600`.
 
-## 4. Configure storage
+## 4. Configure server and storage
 
-Edit `config/storages.yaml`. Storage names use lowercase letters, numbers,
-dots, underscores, and hyphens.
+Set the global server identity in `bqckup.yaml`:
+
+```yaml
+server_id: 207.180.252.231
+```
+
+Each Bqckup installation should use its own stable server ID.
+
+Edit `config/storages.yaml`. Storage, site, and database names may use letters,
+numbers, dots, underscores, and hyphens, but must start with a letter or
+number.
 
 ### Local storage
 
@@ -210,7 +241,7 @@ Important rules:
 - Every enabled site needs at least one destination, either explicitly or
   through one primary storage.
 
-A site file containing a database password must have mode `0600`, must be a
+A site file containing a database or incremental repository password must have mode `0600`, must be a
 regular file, and must not be a symbolic link:
 
 ```bash
@@ -222,7 +253,7 @@ Bqckup passes database passwords to exporters through `MYSQL_PWD` or
 
 ### Incremental backup example
 
-Change the site mode and add an environment-variable name:
+Change the site mode and add the repository password directly:
 
 ```yaml
 site:
@@ -230,7 +261,7 @@ site:
   enabled: true
   backup_mode: incremental
   incremental:
-    password_env: BQCKUP_REPOSITORY_PASSWORD
+    password: replace-with-a-strong-repository-password
   sources:
     files:
       include:
@@ -246,18 +277,15 @@ site:
     keep_last: 7
 ```
 
-Set the password in the environment used to run Bqckup:
+The value is stored in this protected YAML file. Keep it at mode `0600`, do
+not commit it, and do not add the removed `incremental.engine` field; the
+built-in engine is always used.
 
-```bash
-export BQCKUP_REPOSITORY_PASSWORD='replace-with-a-strong-secret'
-```
-
-The value is not stored in YAML. Do not add the removed
-`incremental.engine` field; the built-in engine is always used.
-
-Incremental repositories are stored below `restic/<site>/` inside each
-destination. Full backup sets are stored below
-`bqckup/<site>/<UTC timestamp>/`.
+Incremental repositories are stored below
+`bqckup/<server_id>/<site>/incremental-backup/` inside each destination. Full
+packages are stored below `bqckup/<server_id>/<site>/<YYYY-MM-DD>/` and use
+`<HH-mm-ss>-<package>.gz` names. Packages from one run share the same time
+prefix.
 
 ## 6. Validate before running
 
@@ -273,8 +301,147 @@ bqckup doctor --site website
 ```
 
 `config validate` checks the complete YAML structure. `doctor` also checks
-writable application directories, required database tools, and incremental
-password environment variables.
+writable application directories, required database tools, and configured
+incremental passwords without printing their values.
+
+## Notifications
+
+Add this optional section to the root `bqckup.yaml`:
+
+```yaml
+notifications:
+  channels:
+    email:
+      type: smtp
+      host: <smtp-host>
+      port: 587
+      username: <smtp-user>
+      password: <smtp-password>
+      from: <sender-address>
+      to: [<recipient-address>]
+  routes:
+    # events options: all | backup_failed | backup_cancelled | backup_no_change
+    - events: [backup_failed]
+      channels: [email]
+```
+
+Channel `type` options are `smtp`, `webhook`, and `discord`. Route `events`
+options are `all`, `backup_failed`, `backup_cancelled`, `backup_no_change`,
+`daily_report`, and `monthly_report`. Successful runs, skipped runs, and
+preflight failures send no notification. Delivery is best effort and never
+changes backup history or the run result. Keep the root file at mode `0600`
+when it contains credentials or URLs.
+
+## Scheduled reports
+
+Bqckup can send a daily backup summary and a monthly consolidated report
+through any configured notification channel. Reports are triggered by an
+external scheduler calling `bqckup report send daily` or
+`bqckup report send monthly`; Bqckup has no internal scheduler.
+
+Each report type is configured in the optional `reports:` section of
+`bqckup.yaml`. A named route (`name:` field on the route) connects the report
+to its delivery channels.
+
+### Configuration
+
+```yaml
+notifications:
+  channels:
+    email:
+      type: smtp
+      host: <smtp-host>
+      port: 587
+      username: <smtp-user>
+      password: <smtp-password>
+      from: <sender-address>
+      to: [<recipient-address>]
+  routes:
+    - name: daily-report-route
+      events: [daily_report]
+      channels: [email]
+    - name: monthly-report-route
+      events: [monthly_report]
+      channels: [email]
+
+reports:
+  daily:
+    enabled: true
+    timezone: UTC
+    schedule:
+      time: "08:00"
+    notification_route: daily-report-route
+    include_empty_days: false
+  monthly:
+    enabled: true
+    timezone: UTC
+    schedule:
+      day_of_month: 1
+      time: "08:00"
+    notification_route: monthly-report-route
+    include_empty_days: false
+```
+
+Report configuration fields:
+
+| Field | Description |
+| --- | --- |
+| `enabled` | Set to `true` to activate this report type. |
+| `timezone` | IANA timezone name, e.g. `UTC`, `America/New_York`, `Asia/Jakarta`. |
+| `schedule.time` | Time of day in `HH:MM` format (used by the external scheduler as a reference). |
+| `schedule.day_of_month` | Day of month to send the monthly report (1–28, monthly only). |
+| `notification_route` | Name of the route in `notifications.routes` that delivers this report. |
+| `include_empty_days` | When `true`, include days or sites with no runs in the report. |
+
+The `notification_route` value must match the `name:` field of a route in
+`notifications.routes`. Route names are optional for backup-event routes but
+required for report routes.
+
+### Sending reports
+
+Send the daily report for today:
+
+```bash
+bqckup report send daily
+```
+
+Send the daily report for a specific date:
+
+```bash
+bqckup report send daily --date 2025-01-15
+```
+
+Send the monthly report for the current month:
+
+```bash
+bqckup report send monthly
+```
+
+Send the monthly report for a specific month:
+
+```bash
+bqckup report send monthly --month 2025-01
+```
+
+Each report is delivered at most once per period. If the report for a given
+date or month has already been sent, the command exits successfully without
+sending again.
+
+### Scheduling reports with cron
+
+Add cron entries to trigger reports after your daily backup window:
+
+```cron
+# Send daily report at 08:00
+0 8 * * * root /usr/local/bin/bqckup report send daily
+
+# Send monthly report on the 1st of each month at 08:00
+0 8 1 * * root /usr/local/bin/bqckup report send monthly
+```
+
+The `schedule.time` and `schedule.day_of_month` fields in `bqckup.yaml` are
+reference values for documentation and validation only. The actual delivery
+time is controlled entirely by the external scheduler.
 
 ## 7. Daily operations
 
@@ -295,6 +462,33 @@ Ignore `minimum_interval` for one run:
 ```bash
 bqckup backup run website --force
 ```
+
+Text output immediately shows which site and backup mode are running, shows a
+loading spinner in an interactive terminal (or a heartbeat every five seconds
+when redirected), then prints that site's result when it finishes. `--output
+json` suppresses these progress lines so stdout remains valid machine-readable
+JSON.
+
+Storage listing follows the backup mode: full sites show archive objects,
+while incremental sites show file snapshots. If an incremental site has an
+enabled database source, its database exports appear in a separate
+`DATABASE PACKAGES` table. JSON output uses `snapshots` and
+`database_packages` fields for that mixed result.
+
+`--force` does not bypass an active site lock. If the command reports
+`already_running`, confirm whether another process is backing up the same site
+and wait for it to finish or stop a genuinely stuck process before retrying.
+Do not delete the lock file while a process may still hold it.
+
+Update the installed Linux binary to the latest release:
+
+```bash
+sudo bqckup update
+```
+
+The update command shows a spinner in an interactive terminal or a heartbeat
+every five seconds when redirected while it downloads, verifies, and installs
+the release. Use `--version <version>` to install a specific release.
 
 List recent history:
 
@@ -329,14 +523,43 @@ Example cron entry for a daily run at 02:30:
 30 2 * * * /usr/local/bin/bqckup backup run website
 ```
 
+To also send a daily report at 08:00 and a monthly report on the 1st:
+
+```cron
+30 2 * * * root /usr/local/bin/bqckup backup run website
+0  8 * * * root /usr/local/bin/bqckup report send daily
+0  8 1 * * root /usr/local/bin/bqckup report send monthly
+```
+
 Use the same operating-system user for scheduled and manual runs. Mixing root
 and non-root runs can leave storage or history files with incompatible
-ownership. Ensure incremental password variables are available to the
-scheduler without writing them into the command line or repository.
+ownership. Ensure the scheduler's service account can read the protected site
+and storage YAML files.
 
 ## 9. Restore
 
-Bqckup does not currently provide a restore command.
+The built-in restore command is for incremental sites. Full-mode archives are
+restored manually as described below.
+
+List incremental snapshots from a destination:
+
+```bash
+bqckup backup snapshots website --destination local-primary
+```
+
+Restore the newest snapshot into an explicit directory:
+
+```bash
+bqckup backup restore website \
+  --destination local-primary \
+  --snapshot latest \
+  --target /tmp/bqckup-restore
+```
+
+Use an ID or ID prefix instead of `latest`. Existing files are never silently
+overwritten; review the conflict list and confirm, or use `--force`. Add
+`--quiet` to suppress a successful text summary. Restore does not create a
+backup-history record.
 
 ### Restore a full backup
 
@@ -370,10 +593,10 @@ replacing production data.
 
 ### Restore an incremental snapshot
 
-Incremental repositories use the standard Restic repository format. Install
-the official `restic` command, provide the same repository password and
-storage credentials, run `restic snapshots`, and restore to an explicit empty
-target directory. Never restore directly over production data.
+The repositories use the standard Restic format, so the official `restic`
+command can also be used when needed. Provide the same repository password and
+storage credentials, then restore to an explicit empty target directory. Never
+restore directly over production data.
 
 ## 10. Troubleshooting
 
@@ -385,6 +608,7 @@ target directory. Never restore directly over production data.
 | `could not export database` | The exporter failed. | Check connectivity, credentials, grants, and whether the database service is running. |
 | `could not store backup artifact` | A destination rejected or could not receive data. | Check directory permissions, network access, bucket, endpoint, region, and credentials. |
 | `minimum_interval` skip | The previous successful run is too recent. | Wait or run once with `--force`. |
+| `already_running` skip | Another process holds this site's backup lock. | Let it finish, or stop a confirmed stuck process, then retry. `--force` does not bypass this lock. |
 | Repository lock error | An incremental repository has an active or stale lock. | Confirm no backup is active, then use `bqckup backup unlock <site>` for a stale lock. |
 
 Exit codes:
@@ -401,6 +625,6 @@ Exit codes:
 - Keep credential-bearing YAML files at mode `0600`.
 - Do not use symbolic links for credential-bearing configuration files.
 - Use a dedicated operating-system user for scheduled backups.
-- Keep incremental repository passwords in environment variables.
+- Keep incremental repository passwords only in protected site YAML files.
 - Treat backup destinations and SQLite history as sensitive data.
 - Test restore regularly using an isolated destination.

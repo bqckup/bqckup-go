@@ -19,12 +19,13 @@ func newHistoryCommand(opts *options) *cobra.Command {
 	var limit int
 	var details bool
 	list := &cobra.Command{
-		Use:   "list",
-		Short: "List completed and running backup records",
-		Args:  cobra.NoArgs,
-		PreRunE: func(_ *cobra.Command, _ []string) error {
+		Use:     "list",
+		Short:   "List completed and running backup records",
+		Example: "  bqckup history list --site incremental-test --limit 10",
+		Args:    cobra.NoArgs,
+		PreRunE: func(cmd *cobra.Command, _ []string) error {
 			if limit < 1 {
-				return fmt.Errorf("%w: --limit must be at least 1", ErrInvalidInput)
+				return usageError(cmd, "--limit must be at least 1")
 			}
 			return nil
 		},
@@ -43,7 +44,7 @@ func newHistoryCommand(opts *options) *cobra.Command {
 	}
 	list.Flags().StringVar(&site, "site", "", "filter by site name")
 	list.Flags().IntVar(&limit, "limit", 20, "maximum records to return")
-	list.Flags().BoolVar(&details, "details", false, "show artifact details for every run")
+	list.Flags().BoolVar(&details, "details", false, "show package details for every run")
 	command.AddCommand(list)
 	return command
 }
@@ -55,16 +56,17 @@ func writeHistoryText(output io.Writer, runs []history.BackupRun, details bool) 
 	}
 
 	table := tabwriter.NewWriter(output, 0, 4, 2, ' ', 0)
-	if _, err := fmt.Fprintln(table, "STATUS\tSITE\tSTARTED\tDURATION\tARTIFACTS\tDESTINATIONS\tLOGICAL SIZE\tRUN ID"); err != nil {
+	color := ansiColor{on: isTerminalWriter(output)}
+	if _, err := fmt.Fprintln(table, "STATUS\tSITE\tSTARTED\tDURATION\tPACKAGES\tDESTINATIONS\tLOGICAL SIZE\tRUN ID"); err != nil {
 		return err
 	}
 
-	totalArtifacts := 0
+	totalPackages := 0
 	allDestinations := make(map[string]struct{})
 	var totalSize int64
 	for _, run := range runs {
-		summary := summarizeArtifacts(run.Artifacts)
-		totalArtifacts += summary.logicalCount
+		summary := summarizePackages(run.Packages)
+		totalPackages += summary.logicalCount
 		totalSize += summary.logicalSize
 		for destination := range summary.destinations {
 			allDestinations[destination] = struct{}{}
@@ -72,9 +74,9 @@ func writeHistoryText(output io.Writer, runs []history.BackupRun, details bool) 
 		if _, err := fmt.Fprintf(
 			table,
 			"%s\t%s\t%s\t%s\t%d\t%d\t%s\t%s\n",
-			safeHistoryField(strings.ToUpper(string(run.Status))),
+			color.statusLabel(safeHistoryField(string(run.Status))),
 			safeHistoryField(run.SiteName),
-			run.StartedAt.Local().Format("02 Jan 2006, 15:04 MST"),
+			formatCLITime(run.StartedAt),
 			formatRunDuration(run),
 			summary.logicalCount,
 			len(summary.destinations),
@@ -107,7 +109,7 @@ func writeHistoryText(output io.Writer, runs []history.BackupRun, details bool) 
 
 	if details {
 		for _, run := range runs {
-			if err := writeArtifactDetails(output, run); err != nil {
+			if err := writePackageDetails(output, run); err != nil {
 				return err
 			}
 		}
@@ -117,75 +119,76 @@ func writeHistoryText(output io.Writer, runs []history.BackupRun, details bool) 
 		output,
 		"\n%d %s, %d logical %s, %d %s, %s logical total\n",
 		len(runs), plural(len(runs), "run", "runs"),
-		totalArtifacts, plural(totalArtifacts, "artifact", "artifacts"),
+		totalPackages, plural(totalPackages, "package", "packages"),
 		len(allDestinations), plural(len(allDestinations), "destination", "destinations"),
 		humanBytes(totalSize),
 	)
 	return err
 }
 
-type artifactSummary struct {
+type packageSummary struct {
 	logicalCount int
 	logicalSize  int64
 	destinations map[string]struct{}
 }
 
-// summarizeArtifacts treats one source as one logical artifact. The runner
-// records one copy of that artifact per destination, so summing every history
-// row would inflate both artifact count and logical size.
-func summarizeArtifacts(artifacts []history.Artifact) artifactSummary {
+// summarizePackages treats one source as one logical pkg. The runner
+// records one copy of that package per destination, so summing every history
+// row would inflate both package count and logical size.
+func summarizePackages(packages []history.Package) packageSummary {
 	logicalSizes := make(map[string]int64)
 	destinations := make(map[string]struct{})
-	for _, artifact := range artifacts {
-		key := artifact.SourceKind + "\x00" + artifact.SourceName
-		if current, exists := logicalSizes[key]; !exists || artifact.Size > current {
-			logicalSizes[key] = artifact.Size
+	for _, pkg := range packages {
+		key := pkg.SourceKind + "\x00" + pkg.SourceName
+		if current, exists := logicalSizes[key]; !exists || pkg.Size > current {
+			logicalSizes[key] = pkg.Size
 		}
-		if artifact.Destination != "" {
-			destinations[artifact.Destination] = struct{}{}
+		if pkg.Destination != "" {
+			destinations[pkg.Destination] = struct{}{}
 		}
 	}
 	var logicalSize int64
 	for _, size := range logicalSizes {
 		logicalSize += size
 	}
-	return artifactSummary{
+	return packageSummary{
 		logicalCount: len(logicalSizes),
 		logicalSize:  logicalSize,
 		destinations: destinations,
 	}
 }
 
-func writeArtifactDetails(output io.Writer, run history.BackupRun) error {
-	if _, err := fmt.Fprintf(output, "\nArtifacts for run %s:\n", safeHistoryField(run.ID)); err != nil {
+func writePackageDetails(output io.Writer, run history.BackupRun) error {
+	if _, err := fmt.Fprintf(output, "\nPackages for run %s:\n", safeHistoryField(run.ID)); err != nil {
 		return err
 	}
-	if len(run.Artifacts) == 0 {
-		_, err := fmt.Fprintln(output, "  No artifacts recorded.")
+	if len(run.Packages) == 0 {
+		_, err := fmt.Fprintln(output, "  No packages recorded.")
 		return err
 	}
 
-	artifacts := append([]history.Artifact(nil), run.Artifacts...)
-	sort.SliceStable(artifacts, func(i, j int) bool {
-		left := artifacts[i].SourceKind + "\x00" + artifacts[i].SourceName + "\x00" + artifacts[i].Destination + "\x00" + artifacts[i].ObjectKey
-		right := artifacts[j].SourceKind + "\x00" + artifacts[j].SourceName + "\x00" + artifacts[j].Destination + "\x00" + artifacts[j].ObjectKey
+	packages := append([]history.Package(nil), run.Packages...)
+	sort.SliceStable(packages, func(i, j int) bool {
+		left := packages[i].SourceKind + "\x00" + packages[i].SourceName + "\x00" + packages[i].Destination + "\x00" + packages[i].ObjectKey
+		right := packages[j].SourceKind + "\x00" + packages[j].SourceName + "\x00" + packages[j].Destination + "\x00" + packages[j].ObjectKey
 		return left < right
 	})
 
 	table := tabwriter.NewWriter(output, 0, 4, 2, ' ', 0)
+	color := ansiColor{on: isTerminalWriter(output)}
 	if _, err := fmt.Fprintln(table, "  SOURCE\tDESTINATION\tSTATUS\tSIZE\tOBJECT KEY"); err != nil {
 		return err
 	}
-	for _, artifact := range artifacts {
-		source := safeHistoryField(artifact.SourceKind) + "/" + safeHistoryField(artifact.SourceName)
+	for _, pkg := range packages {
+		source := safeHistoryField(pkg.SourceKind) + "/" + safeHistoryField(pkg.SourceName)
 		if _, err := fmt.Fprintf(
 			table,
 			"  %s\t%s\t%s\t%s\t%s\n",
 			source,
-			safeHistoryField(artifact.Destination),
-			safeHistoryField(strings.ToUpper(string(artifact.Status))),
-			humanBytes(artifact.Size),
-			safeHistoryField(artifact.ObjectKey),
+			safeHistoryField(pkg.Destination),
+			color.statusLabel(safeHistoryField(string(pkg.Status))),
+			humanBytes(pkg.Size),
+			safeHistoryField(pkg.ObjectKey),
 		); err != nil {
 			return err
 		}

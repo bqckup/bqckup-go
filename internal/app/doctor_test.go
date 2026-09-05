@@ -94,8 +94,8 @@ func TestOpenDoctorResolvesRemoteStorage(t *testing.T) {
 }
 
 func TestOpenDoctorRemoteProviderUnavailable(t *testing.T) {
-	t.Run("empty URL", func(t *testing.T) {
-		configDir, _ := writeRemoteStorageFixture(t, "")
+	t.Run("unavailable provider", func(t *testing.T) {
+		configDir, _ := writeRemoteStorageFixture(t, "https://127.0.0.1:1/storage")
 
 		checker, err := OpenDoctor(t.Context(), configDir)
 		require.NoError(t, err)
@@ -108,7 +108,6 @@ func TestOpenDoctorRemoteProviderUnavailable(t *testing.T) {
 		checker, err := OpenDoctor(t.Context(), configDir)
 		require.NoError(t, err)
 		require.Error(t, checker.LoadErr)
-		assert.Contains(t, checker.LoadErr.Error(), "credentials.url")
 		assert.NotContains(t, checker.LoadErr.Error(), "bad url")
 	})
 }
@@ -140,7 +139,7 @@ func TestOpenDoctorMixedLocalAndRemote(t *testing.T) {
     type: s3
     credentials:
       source: remote
-      url: https://provider.example/credentials
+      url: https://127.0.0.1:1/storage
 `, backupRoot), 0o600))
 	sitePath := filepath.Join(configDir, "sites", "example.yaml")
 	siteBody, err := os.ReadFile(sitePath)

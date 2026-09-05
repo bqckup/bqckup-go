@@ -4,6 +4,8 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -20,19 +22,19 @@ type Archiver struct{}
 
 func New() *Archiver { return &Archiver{} }
 
-func (a *Archiver) Create(ctx context.Context, source backup.FileSource, destination string) (artifact backup.Artifact, err error) {
+func (a *Archiver) Create(ctx context.Context, source backup.FileSource, destination string) (backup.Package, error) {
 	if err := ctx.Err(); err != nil {
-		return backup.Artifact{}, err
+		return backup.Package{}, err
 	}
 	if len(source.Include) == 0 {
-		return backup.Artifact{}, errors.New("archive requires at least one source path")
+		return backup.Package{}, errors.New("archive requires at least one source path")
 	}
 	if err := os.MkdirAll(filepath.Dir(destination), 0o700); err != nil {
-		return backup.Artifact{}, fmt.Errorf("create archive directory: %w", err)
+		return backup.Package{}, fmt.Errorf("create archive directory: %w", err)
 	}
 	output, err := os.OpenFile(destination, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
-		return backup.Artifact{}, fmt.Errorf("create archive: %w", err)
+		return backup.Package{}, fmt.Errorf("create archive: %w", err)
 	}
 	success := false
 	defer func() {
@@ -42,46 +44,64 @@ func (a *Archiver) Create(ctx context.Context, source backup.FileSource, destina
 		}
 	}()
 
-	gz := gzip.NewWriter(output)
+	digest := sha256.New()
+	gz := gzip.NewWriter(io.MultiWriter(output, digest))
 	tw := tar.NewWriter(gz)
 	state := archiveState{ctx: ctx, writer: tw, source: source}
 	rootNames := map[string]struct{}{}
+	preserveSourcePaths := len(source.Include) > 1
 	for _, include := range source.Include {
 		clean := filepath.Clean(include)
 		rootName := filepath.Base(clean)
 		if rootName == "." || rootName == string(filepath.Separator) || rootName == "" {
-			return backup.Artifact{}, fmt.Errorf("cannot archive source root %q", include)
+			return backup.Package{}, fmt.Errorf("cannot archive source root %q", include)
 		}
-		if _, exists := rootNames[rootName]; exists {
-			return backup.Artifact{}, fmt.Errorf("source archive name %q is duplicated", rootName)
-		}
+		rootName = archiveRootName(include, rootName, rootNames, preserveSourcePaths)
 		rootNames[rootName] = struct{}{}
 		if err := state.add(clean, rootName, map[string]bool{}); err != nil {
-			return backup.Artifact{}, err
+			return backup.Package{}, err
 		}
 	}
 	if err := tw.Close(); err != nil {
-		return backup.Artifact{}, fmt.Errorf("finish tar archive: %w", err)
+		return backup.Package{}, fmt.Errorf("finish tar archive: %w", err)
 	}
 	if err := gz.Close(); err != nil {
-		return backup.Artifact{}, fmt.Errorf("finish gzip archive: %w", err)
+		return backup.Package{}, fmt.Errorf("finish gzip archive: %w", err)
 	}
 	if err := output.Sync(); err != nil {
-		return backup.Artifact{}, fmt.Errorf("sync archive: %w", err)
+		return backup.Package{}, fmt.Errorf("sync archive: %w", err)
+	}
+	info, err := output.Stat()
+	if err != nil {
+		return backup.Package{}, fmt.Errorf("stat archive: %w", err)
 	}
 	if err := output.Close(); err != nil {
-		return backup.Artifact{}, fmt.Errorf("close archive: %w", err)
+		return backup.Package{}, fmt.Errorf("close archive: %w", err)
 	}
 
-	checksum, size, err := backup.ChecksumFile(destination)
-	if err != nil {
-		return backup.Artifact{}, err
-	}
 	success = true
-	return backup.Artifact{
-		Path: destination, Size: size, SHA256: checksum,
+	return backup.Package{
+		Path: destination, Size: info.Size(), SHA256: hex.EncodeToString(digest.Sum(nil)),
 		SourceKind: "files", SourceName: "files",
 	}, nil
+}
+
+// archiveRootName gives multi-root archives descriptive, non-overlapping
+// names. A single source keeps its basename for compatibility; multiple
+// sources preserve their path below the filesystem root, e.g. etc/crowdsec.
+func archiveRootName(include, base string, used map[string]struct{}, preservePath bool) string {
+	if !preservePath {
+		return base
+	}
+	candidate := strings.TrimPrefix(filepath.ToSlash(filepath.Clean(include)), "/")
+	if candidate != "" && candidate != "." {
+		if _, exists := used[candidate]; !exists {
+			return candidate
+		}
+	}
+	// The exact same path was included more than once. Keep the archive
+	// valid without silently overwriting an earlier member.
+	return base + "-duplicate"
 }
 
 type archiveState struct {

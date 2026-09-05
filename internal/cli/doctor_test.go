@@ -13,7 +13,7 @@ import (
 )
 
 func TestDoctorCommand(t *testing.T) {
-	t.Run("passes on valid configuration and available secrets", func(t *testing.T) {
+	t.Run("passes with password in protected site config", func(t *testing.T) {
 		tempDir := t.TempDir()
 		sourceDir := filepath.Join(tempDir, "source")
 		backupDir := filepath.Join(tempDir, "backups")
@@ -26,7 +26,7 @@ site:
   enabled: true
   backup_mode: incremental
   incremental:
-    password_env: TEST_RESTIC_PASS
+    password: my-secret-password
   sources:
     files:
       include:
@@ -50,8 +50,6 @@ app:
     directory: %s
 `, backupDir), siteYAML)
 
-		t.Setenv("TEST_RESTIC_PASS", "my-secret-password")
-
 		var stdout, stderr bytes.Buffer
 		root := NewRoot(buildinfo.Info{})
 		root.SetOut(&stdout)
@@ -60,10 +58,10 @@ app:
 
 		_ = root.Execute()
 		assert.Contains(t, stdout.String(), `"name":"config"`)
-		assert.Contains(t, stdout.String(), `"secret:test-site:TEST_RESTIC_PASS"`)
+		assert.Contains(t, stdout.String(), `"secret:test-site:incremental"`)
 	})
 
-	t.Run("fails when password_env is missing for incremental site", func(t *testing.T) {
+	t.Run("does not interpret password as environment variable", func(t *testing.T) {
 		tempDir := t.TempDir()
 		sourceDir := filepath.Join(tempDir, "source")
 		backupDir := filepath.Join(tempDir, "backups")
@@ -76,7 +74,7 @@ site:
   enabled: true
   backup_mode: incremental
   incremental:
-    password_env: UNSET_DOCTOR_PASS_VAR
+    password: UNSET_DOCTOR_PASS_VAR
   sources:
     files:
       include:
@@ -108,10 +106,8 @@ app:
 		root.SetErr(&stderr)
 		root.SetArgs([]string{"doctor", "--config-dir", tempDir})
 
-		err := root.Execute()
-		require.Error(t, err)
-		assert.Contains(t, stdout.String(), "[✗]")
-		assert.Contains(t, stdout.String(), "secret:test-site:UNSET_DOCTOR_PASS_VAR")
+		require.NoError(t, root.Execute())
+		assert.Contains(t, stdout.String(), "[OK] secret:test-site:incremental")
 	})
 }
 
@@ -150,7 +146,7 @@ site:
   enabled: true
   backup_mode: incremental
   incremental:
-    password_env: TEST_RESTIC_PASS
+    password: TEST_RESTIC_PASS
   sources:
     files:
       include:
@@ -168,7 +164,7 @@ site:
 	root.SetErr(&bytes.Buffer{})
 	root.SetArgs([]string{"doctor", "--config-dir", filepath.Join(tempDir, "config")})
 	require.NoError(t, root.Execute())
-	// Incremental backups use the built-in engine and never probe for restic.
+	// Incremental backups use the built-in engine and never probe for incremental.
 	assert.NotContains(t, stdout.String(), `"name":"binary:restic"`)
 	assert.Contains(t, stdout.String(), "built-in incremental engine")
 }
@@ -191,7 +187,7 @@ site:
   enabled: true
   backup_mode: incremental
   incremental:
-    password_env: TEST_RESTIC_PASS
+    password: TEST_RESTIC_PASS
   sources:
     files:
       include:
@@ -264,7 +260,7 @@ site:
   enabled: true
   backup_mode: incremental
   incremental:
-    password_env: TEST_RESTIC_PASS
+    password: TEST_RESTIC_PASS
   sources:
     files:
       include:
@@ -349,7 +345,7 @@ site:
 
 	err := root.Execute()
 	assert.Equal(t, 3, ExitCode(err))
-	assert.Contains(t, stdout.String(), "[✗] storage:remote-x: remote storage configuration is unavailable")
+	assert.Contains(t, stdout.String(), "[FAIL] storage:remote-x: remote storage configuration is unavailable")
 	assert.NotContains(t, stdout.String(), "request failed")
 	assert.NotContains(t, stdout.String(), "http")
 }

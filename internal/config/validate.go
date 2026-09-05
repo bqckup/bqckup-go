@@ -21,9 +21,9 @@ const (
 
 var (
 	// SafeName matches names safe to use as site names, storage names,
-	// and file-system path segments.
-	SafeName     = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
-	validEnvName = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
+	// and file-system path segments. Uppercase letters are supported for
+	// compatibility with existing site names.
+	SafeName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 )
 
 func (c Config) Validate() error {
@@ -38,6 +38,12 @@ func (c Config) Validate() error {
 	}
 	if c.App.LockDirectory == "" {
 		return validationError("bqckup.yaml", "app.lock_directory", "is required")
+	}
+	if c.App.LogLevel != "debug" && c.App.LogLevel != "info" && c.App.LogLevel != "warn" && c.App.LogLevel != "error" {
+		return validationError("bqckup.yaml", "app.log_level", "must be debug, info, warn, or error")
+	}
+	if c.ServerID != "" && !SafeName.MatchString(c.ServerID) {
+		return validationError("bqckup.yaml", "server_id", "contains unsupported characters")
 	}
 	if len(c.Storages) == 0 {
 		return validationError("config/storages.yaml", "storages", "at least one storage is required")
@@ -65,6 +71,211 @@ func (c Config) Validate() error {
 		if err := c.validateSite(site, seen); err != nil {
 			return err
 		}
+	}
+	if err := c.validateNotifications(); err != nil {
+		return err
+	}
+	return c.validateReports()
+}
+
+// validateReports enforces the reports contract. An absent section (zero
+// value) is valid and means scheduled reports are off.
+func (c Config) validateReports() error {
+	if c.Reports.Daily.Enabled {
+		if err := validateReportConfig("reports.daily", c.Reports.Daily.Timezone, c.Reports.Daily.Schedule, false, c.Reports.Daily.NotificationRoute, c.Notifications); err != nil {
+			return err
+		}
+	}
+	if c.Reports.Monthly.Enabled {
+		if err := validateReportConfig("reports.monthly", c.Reports.Monthly.Timezone, c.Reports.Monthly.Schedule, true, c.Reports.Monthly.NotificationRoute, c.Notifications); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateReportConfig(field, timezone string, schedule ReportSchedule, requireDayOfMonth bool, notificationRoute string, notifications Notifications) error {
+	if timezone == "" {
+		return validationError("bqckup.yaml", field+".timezone", "is required")
+	}
+	if _, err := time.LoadLocation(timezone); err != nil {
+		return validationError("bqckup.yaml", field+".timezone", "is not a valid timezone: %v", err)
+	}
+	if requireDayOfMonth {
+		if schedule.DayOfMonth < 1 || schedule.DayOfMonth > 28 {
+			return validationError("bqckup.yaml", field+".schedule.day_of_month", "must be between 1 and 28")
+		}
+	}
+	if schedule.Time == "" {
+		return validationError("bqckup.yaml", field+".schedule.time", "is required")
+	}
+	if _, err := time.Parse("15:04", schedule.Time); err != nil {
+		return validationError("bqckup.yaml", field+".schedule.time", "must be in HH:MM format")
+	}
+	if notificationRoute == "" {
+		return validationError("bqckup.yaml", field+".notification_route", "is required")
+	}
+	route := findRouteByName(notificationRoute, notifications.Routes)
+	if route == nil {
+		return validationError("bqckup.yaml", field+".notification_route", "references unknown route %q", notificationRoute)
+	}
+	return nil
+}
+
+// findRouteByName returns the first route whose name matches, or nil.
+func findRouteByName(name string, routes []Route) *Route {
+	for i := range routes {
+		if routes[i].Name == name {
+			return &routes[i]
+		}
+	}
+	return nil
+}
+
+// validateNotifications enforces the notifications contract. An absent
+// section (zero value) is valid and means notifications are off.
+func (c Config) validateNotifications() error {
+	notifications := c.Notifications
+	if len(notifications.Channels) == 0 && len(notifications.Routes) == 0 {
+		return nil
+	}
+	if len(notifications.Channels) == 0 {
+		return validationError("bqckup.yaml", "notifications.channels", "at least one channel is required")
+	}
+	if len(notifications.Routes) == 0 {
+		return validationError("bqckup.yaml", "notifications.routes", "at least one route is required")
+	}
+	for name, channel := range notifications.Channels {
+		if err := validateNotificationChannel(name, channel); err != nil {
+			return err
+		}
+	}
+	for index, route := range notifications.Routes {
+		field := fmt.Sprintf("notifications.routes[%d]", index)
+		if len(route.Events) == 0 {
+			return validationError("bqckup.yaml", field+".events", "at least one event is required")
+		}
+		for _, event := range route.Events {
+			switch event {
+			case EventAll, EventBackupFailed, EventBackupCancelled, EventBackupNoChange,
+				EventDailyReport, EventMonthlyReport:
+			default:
+				return validationError("bqckup.yaml", field+".events", "must be one of all, backup_failed, backup_cancelled, backup_no_change, daily_report, or monthly_report")
+			}
+		}
+		for _, channelName := range route.Channels {
+			if _, ok := notifications.Channels[channelName]; !ok {
+				return validationError("bqckup.yaml", field+".channels", "references unknown channel %q", channelName)
+			}
+		}
+	}
+	return nil
+}
+
+func validateNotificationChannel(name string, channel Channel) error {
+	field := "notifications.channels." + name
+	if !SafeName.MatchString(name) {
+		return validationError("bqckup.yaml", field, "name contains unsupported characters")
+	}
+	switch channel.Type {
+	case "smtp":
+		return validateSMTPChannel(field, channel)
+	case "webhook":
+		return validateWebhookChannel(field, channel)
+	case "discord":
+		return validateDiscordChannel(field, channel)
+	default:
+		return validationError("bqckup.yaml", field+".type", "type must be one of smtp, webhook, or discord")
+	}
+}
+
+// channelField describes one present field for foreign-field checks.
+type channelField struct {
+	name    string
+	present bool
+}
+
+func presentChannelFields(channel Channel) []channelField {
+	return []channelField{
+		{"host", channel.Host != ""},
+		{"port", channel.Port != 0},
+		{"username", channel.Username != ""},
+		{"password", channel.Password != ""},
+		{"from", channel.From != ""},
+		{"to", len(channel.To) > 0},
+		{"url", channel.URL != ""},
+		{"webhook_url", channel.WebhookURL != ""},
+	}
+}
+
+func validateNoForeignFields(field, channelType string, channel Channel, allowed ...string) error {
+	allowedSet := make(map[string]struct{}, len(allowed))
+	for _, name := range allowed {
+		allowedSet[name] = struct{}{}
+	}
+	for _, candidate := range presentChannelFields(channel) {
+		if !candidate.present {
+			continue
+		}
+		if _, ok := allowedSet[candidate.name]; !ok {
+			return validationError("bqckup.yaml", field+"."+candidate.name, "%s is not valid for %s channels", candidate.name, channelType)
+		}
+	}
+	return nil
+}
+
+func validateSMTPChannel(field string, channel Channel) error {
+	if channel.Host == "" {
+		return validationError("bqckup.yaml", field+".host", "host is required")
+	}
+	if channel.Port == 0 {
+		return validationError("bqckup.yaml", field+".port", "port is required")
+	}
+	if channel.Port < 1 || channel.Port > 65535 {
+		return validationError("bqckup.yaml", field+".port", "must be between 1 and 65535")
+	}
+	if channel.From == "" {
+		return validationError("bqckup.yaml", field+".from", "from is required")
+	}
+	if len(channel.To) == 0 {
+		return validationError("bqckup.yaml", field+".to", "at least one recipient is required")
+	}
+	if (channel.Username == "") != (channel.Password == "") {
+		return validationError("bqckup.yaml", field, "username and password must be provided together")
+	}
+	return validateNoForeignFields(field, "smtp", channel, "host", "port", "username", "password", "from", "to")
+}
+
+func validateWebhookChannel(field string, channel Channel) error {
+	if channel.URL == "" {
+		return validationError("bqckup.yaml", field+".url", "url is required")
+	}
+	if err := validateNotificationURL(field+".url", channel.URL); err != nil {
+		return err
+	}
+	return validateNoForeignFields(field, "webhook", channel, "url")
+}
+
+func validateDiscordChannel(field string, channel Channel) error {
+	if channel.WebhookURL == "" {
+		return validationError("bqckup.yaml", field+".webhook_url", "webhook_url is required")
+	}
+	if err := validateNotificationURL(field+".webhook_url", channel.WebhookURL); err != nil {
+		return err
+	}
+	return validateNoForeignFields(field, "discord", channel, "webhook_url")
+}
+
+func validateNotificationURL(field, value string) error {
+	parsed, err := url.ParseRequestURI(value)
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "https" && parsed.Scheme != "http") {
+		return validationError("bqckup.yaml", field, "must be an absolute HTTP(S) URL")
+	}
+	if parsed.User != nil || parsed.Fragment != "" {
+		return validationError("bqckup.yaml", field, "must not contain user information or a fragment")
+	}
+	if parsed.Scheme == "http" && !isLoopbackHost(parsed.Hostname()) {
+		return validationError("bqckup.yaml", field, "must use HTTPS unless the host is loopback")
 	}
 	return nil
 }
@@ -316,11 +527,8 @@ func (c Config) validateSite(site Site, seen map[string]struct{}) error {
 		return validationError(file, baseField+".backup_mode", "must be 'full' or 'incremental'")
 	}
 	if site.BackupMode == "incremental" {
-		if site.Incremental.PasswordEnv == "" {
-			return validationError(file, baseField+".incremental.password_env", "is required")
-		}
-		if !validEnvName.MatchString(site.Incremental.PasswordEnv) {
-			return validationError(file, baseField+".incremental.password_env", "must be a valid environment variable name")
+		if site.Incremental.Password == "" {
+			return validationError(file, baseField+".incremental.password", "is required")
 		}
 	}
 	if len(site.Sources.Files.Include) == 0 {

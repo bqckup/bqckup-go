@@ -14,7 +14,7 @@ for arg in "$@"; do
             ;;
         --help|-h)
             echo "Usage: $0 [--skip-build]"
-            echo "Environment variables: GITHUB_REPO, BQCKUP_VERSION, BIN_DIR, CONFIG_DIR, DATA_DIR, BACKUP_DIR"
+            echo "Environment variables: GITHUB_REPO, BQCKUP_VERSION, BIN_DIR, CONFIG_DIR, DATA_DIR, BACKUP_DIR, LOG_DIR"
             exit 0
             ;;
     esac
@@ -29,6 +29,7 @@ DATA_DIR="${DATA_DIR:-/var/lib/bqckup}"
 BACKUP_DIR="${BACKUP_DIR:-/var/backups/bqckup}"
 TMP_DIR="${TMP_DIR:-${DATA_DIR}/tmp}"
 LOCK_DIR="${LOCK_DIR:-${DATA_DIR}/locks}"
+LOG_DIR="${LOG_DIR:-/var/log/bqckup}"
 
 # Colors if interactive terminal
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
@@ -215,9 +216,10 @@ fi
 
 # 2. Create system directory tree
 info "Creating system directories..."
-mkdir -p "${CONFIG_DIR}/config" "${CONFIG_DIR}/sites" "${DATA_DIR}/tmp" "${DATA_DIR}/locks" "${BACKUP_DIR}"
+mkdir -p "${CONFIG_DIR}/config" "${CONFIG_DIR}/sites" "${DATA_DIR}/tmp" "${DATA_DIR}/locks" "${BACKUP_DIR}" "${LOG_DIR}"
 chmod 0700 "${CONFIG_DIR}" "${CONFIG_DIR}/config" "${CONFIG_DIR}/sites" \
            "${DATA_DIR}" "${DATA_DIR}/tmp" "${DATA_DIR}/locks" "${BACKUP_DIR}" 2>/dev/null || true
+chmod 0750 "${LOG_DIR}" 2>/dev/null || true
 success "Directory tree created and secured (mode 0700)."
 
 # 3. Populate default configuration templates
@@ -231,6 +233,7 @@ app:
   temporary_directory: ${TMP_DIR}
   lock_directory: ${LOCK_DIR}
   log_level: info
+  log_file: ${LOG_DIR}/bqckup.log
 EOF
     chmod 0600 "${CONFIG_DIR}/bqckup.yaml"
     info "Created ${CONFIG_DIR}/bqckup.yaml"

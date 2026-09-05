@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"io"
 	"os"
@@ -40,22 +42,88 @@ func (e *ProcessExporter) Preflight() error {
 	return nil
 }
 
-func (e *ProcessExporter) Export(ctx context.Context, source config.DatabaseSource, destination string) (artifact backup.Artifact, err error) {
+func (e *ProcessExporter) EstimateSize(ctx context.Context, source config.DatabaseSource) (int64, bool, error) {
 	if err := ctx.Err(); err != nil {
-		return backup.Artifact{}, err
+		return 0, false, err
 	}
 	if source.Engine != e.engine {
-		return backup.Artifact{}, errors.New("database exporter does not match source engine")
+		return 0, false, errors.New("database exporter does not match source engine")
 	}
 	if err := e.Preflight(); err != nil {
-		return backup.Artifact{}, err
+		return 0, false, err
+	}
+
+	probeCommand := "mysql"
+	probeArgs := []string{
+		"--protocol=TCP",
+		"--host=" + source.Host,
+		"--port=" + strconv.Itoa(source.Port),
+		"--user=" + source.Username,
+		"--batch",
+		"--skip-column-names",
+		"-e",
+		"SELECT COALESCE(SUM(data_length + index_length), 0) FROM information_schema.tables WHERE table_schema = DATABASE();",
+	}
+	if e.engine == "postgres" {
+		probeCommand = "psql"
+		probeArgs = []string{
+			"--host=" + source.Host,
+			"--port=" + strconv.Itoa(source.Port),
+			"--username=" + source.Username,
+			"--tuples-only",
+			"--no-align",
+			"-c",
+			"SELECT pg_database_size(current_database());",
+			source.Database,
+		}
+	}
+
+	if _, err := e.process.LookPath(probeCommand); err != nil {
+		return 0, false, nil
+	}
+
+	var stdout, stderr bytes.Buffer
+	processErr := e.process.Run(ctx, process.ProcessSpec{
+		Command: probeCommand,
+		Args:    probeArgs,
+		Env:     []string{e.passwordEnv + "=" + source.Password},
+		Stdout:  &stdout,
+		Stderr:  &stderr,
+	})
+	if processErr != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return 0, false, ctxErr
+		}
+		return 0, false, nil
+	}
+
+	value := strings.TrimSpace(stdout.String())
+	if value == "" {
+		return 0, false, nil
+	}
+	size, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || size <= 0 {
+		return 0, false, nil
+	}
+	return size, true, nil
+}
+
+func (e *ProcessExporter) Export(ctx context.Context, source config.DatabaseSource, destination string) (backup.Package, error) {
+	if err := ctx.Err(); err != nil {
+		return backup.Package{}, err
+	}
+	if source.Engine != e.engine {
+		return backup.Package{}, errors.New("database exporter does not match source engine")
+	}
+	if err := e.Preflight(); err != nil {
+		return backup.Package{}, err
 	}
 	if err := os.MkdirAll(filepath.Dir(destination), 0o700); err != nil {
-		return backup.Artifact{}, apperror.Hide("could not prepare database export", err)
+		return backup.Package{}, apperror.Hide("could not prepare database export", err)
 	}
 	output, err := os.OpenFile(destination, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
-		return backup.Artifact{}, apperror.Hide("could not create database export", err)
+		return backup.Package{}, apperror.Hide("could not create database export", err)
 	}
 	success := false
 	defer func() {
@@ -65,7 +133,8 @@ func (e *ProcessExporter) Export(ctx context.Context, source config.DatabaseSour
 		}
 	}()
 
-	gzipWriter := gzip.NewWriter(output)
+	digest := sha256.New()
+	gzipWriter := gzip.NewWriter(io.MultiWriter(output, digest))
 	var stderr bytes.Buffer
 	processErr := e.process.Run(ctx, process.ProcessSpec{
 		Command: e.command,
@@ -77,29 +146,29 @@ func (e *ProcessExporter) Export(ctx context.Context, source config.DatabaseSour
 	gzipErr := gzipWriter.Close()
 	if processErr != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			return backup.Artifact{}, ctxErr
+			return backup.Package{}, ctxErr
 		}
-		return backup.Artifact{}, apperror.Hide("could not export database", processErr)
+		return backup.Package{}, apperror.Hide("could not export database", processErr)
 	}
 	if gzipErr != nil {
-		return backup.Artifact{}, apperror.Hide("could not finish database export", gzipErr)
+		return backup.Package{}, apperror.Hide("could not finish database export", gzipErr)
 	}
 	if err := output.Sync(); err != nil {
-		return backup.Artifact{}, apperror.Hide("could not sync database export", err)
+		return backup.Package{}, apperror.Hide("could not sync database export", err)
+	}
+	info, err := output.Stat()
+	if err != nil {
+		return backup.Package{}, apperror.Hide("could not stat database export", err)
 	}
 	if err := output.Close(); err != nil {
-		return backup.Artifact{}, apperror.Hide("could not close database export", err)
+		return backup.Package{}, apperror.Hide("could not close database export", err)
 	}
 
-	checksum, size, err := backup.ChecksumFile(destination)
-	if err != nil {
-		return backup.Artifact{}, err
-	}
 	success = true
-	return backup.Artifact{
+	return backup.Package{
 		Path:       destination,
-		Size:       size,
-		SHA256:     checksum,
+		Size:       info.Size(),
+		SHA256:     hex.EncodeToString(digest.Sum(nil)),
 		SourceKind: "database",
 		SourceName: source.Name,
 	}, nil
@@ -109,6 +178,7 @@ func (e *ProcessExporter) arguments(source config.DatabaseSource) []string {
 	port := strconv.Itoa(source.Port)
 	if e.engine == "mysql" {
 		return []string{
+			"--no-defaults",
 			"--host=" + source.Host,
 			"--port=" + port,
 			"--user=" + source.Username,
@@ -169,6 +239,7 @@ func (e *ProcessExporter) probeArguments(source config.DatabaseSource) []string 
 	port := strconv.Itoa(source.Port)
 	if e.engine == "mysql" {
 		return []string{
+			"--no-defaults",
 			"--host=" + source.Host,
 			"--port=" + port,
 			"--user=" + source.Username,

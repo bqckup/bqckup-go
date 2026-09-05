@@ -40,7 +40,18 @@ func New(root string) (*Store, error) {
 	return &Store{root: absolute}, nil
 }
 
-func (s *Store) Put(ctx context.Context, artifact storage.Artifact, key string) (stored storage.StoredArtifact, err error) {
+func (s *Store) Put(ctx context.Context, pkg storage.Package, key string) (stored storage.StoredPackage, err error) {
+	return s.put(ctx, pkg, key, nil)
+}
+
+// PutWithProgress is like Put but reports the number of bytes copied so far
+// through progress. It reports only bytes actually written to the staging
+// file (the archive/package payload), never the object key or SHA-256.
+func (s *Store) PutWithProgress(ctx context.Context, pkg storage.Package, key string, progress func(int64)) (stored storage.StoredPackage, err error) {
+	return s.put(ctx, pkg, key, progress)
+}
+
+func (s *Store) put(ctx context.Context, pkg storage.Package, key string, progress func(int64)) (stored storage.StoredPackage, err error) {
 	if err := ctx.Err(); err != nil {
 		return stored, err
 	}
@@ -48,11 +59,11 @@ func (s *Store) Put(ctx context.Context, artifact storage.Artifact, key string) 
 	if err != nil {
 		return stored, err
 	}
-	if artifact.Size < 0 || len(artifact.SHA256) != sha256.Size*2 {
-		return stored, errors.New("artifact size and SHA-256 are required")
+	if pkg.Size < 0 || len(pkg.SHA256) != sha256.Size*2 {
+		return stored, errors.New("package size and SHA-256 are required")
 	}
-	if _, err := hex.DecodeString(artifact.SHA256); err != nil {
-		return stored, fmt.Errorf("artifact SHA-256 is invalid: %w", err)
+	if _, err := hex.DecodeString(pkg.SHA256); err != nil {
+		return stored, fmt.Errorf("package SHA-256 is invalid: %w", err)
 	}
 	if _, err := os.Lstat(finalPath); err == nil {
 		return stored, fmt.Errorf("storage object %q already exists", key)
@@ -77,22 +88,26 @@ func (s *Store) Put(ctx context.Context, artifact storage.Artifact, key string) 
 		return stored, fmt.Errorf("secure storage staging file: %w", err)
 	}
 
-	source, err := os.Open(artifact.Path)
+	source, err := os.Open(pkg.Path)
 	if err != nil {
-		return stored, fmt.Errorf("open artifact: %w", err)
+		return stored, fmt.Errorf("open package: %w", err)
 	}
 	defer source.Close()
 	hash := sha256.New()
-	size, err := ctxcopy.Copy(ctx, io.MultiWriter(staging, hash), source)
+	destination := io.MultiWriter(staging, hash)
+	if progress != nil {
+		destination = countingWriter{next: destination, progress: progress}
+	}
+	size, err := ctxcopy.Copy(ctx, destination, source)
 	if err != nil {
 		return stored, err
 	}
 	if err := source.Close(); err != nil {
-		return stored, fmt.Errorf("close artifact: %w", err)
+		return stored, fmt.Errorf("close package: %w", err)
 	}
 	actualSHA := hex.EncodeToString(hash.Sum(nil))
-	if size != artifact.Size || !strings.EqualFold(actualSHA, artifact.SHA256) {
-		return stored, fmt.Errorf("artifact verification failed: expected size %d SHA-256 %s", artifact.Size, artifact.SHA256)
+	if size != pkg.Size || !strings.EqualFold(actualSHA, pkg.SHA256) {
+		return stored, fmt.Errorf("package verification failed: expected size %d SHA-256 %s", pkg.Size, pkg.SHA256)
 	}
 	if err := staging.Sync(); err != nil {
 		return stored, fmt.Errorf("sync storage staging file: %w", err)
@@ -112,7 +127,22 @@ func (s *Store) Put(ctx context.Context, artifact storage.Artifact, key string) 
 	if err := syncDirectory(parent); err != nil {
 		return stored, err
 	}
-	return storage.StoredArtifact{Key: key, Size: size, SHA256: actualSHA}, nil
+	return storage.StoredPackage{Key: key, Size: size, SHA256: actualSHA}, nil
+}
+
+// countingWriter reports every byte it forwards to next, once, so a progress
+// consumer sees the actual bytes written rather than the buffer size.
+type countingWriter struct {
+	next     io.Writer
+	progress func(int64)
+}
+
+func (w countingWriter) Write(p []byte) (int, error) {
+	n, err := w.next.Write(p)
+	if n > 0 {
+		w.progress(int64(n))
+	}
+	return n, err
 }
 
 func (s *Store) Delete(ctx context.Context, key string) error {
@@ -123,10 +153,34 @@ func (s *Store) Delete(ctx context.Context, key string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.RemoveAll(target); err != nil {
-		return fmt.Errorf("delete storage object %q: %w", key, err)
+	if info, statErr := os.Stat(target); statErr == nil && info.IsDir() {
+		if err := os.RemoveAll(target); err != nil {
+			return fmt.Errorf("delete storage object %q: %w", key, err)
+		}
+		return syncDirectory(filepath.Dir(target))
+	} else if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
+		return fmt.Errorf("inspect storage object %q: %w", key, statErr)
 	}
-	return syncDirectory(filepath.Dir(target))
+	// New full-backup keys use a logical set prefix (date/time) while the
+	// objects live directly below the date directory.
+	dateDirectory := filepath.Dir(target)
+	runPrefix := filepath.Base(target) + "-"
+	entries, err := os.ReadDir(dateDirectory)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("list storage objects %q: %w", key, err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasPrefix(entry.Name(), runPrefix) {
+			continue
+		}
+		if err := os.Remove(filepath.Join(dateDirectory, entry.Name())); err != nil {
+			return fmt.Errorf("delete storage object %q: %w", key, err)
+		}
+	}
+	return syncDirectory(dateDirectory)
 }
 
 // Probe verifies the destination is writable by creating and immediately
@@ -164,7 +218,7 @@ func (s *Store) ListBackupSets(ctx context.Context, sitePrefix string) ([]storag
 	if err != nil {
 		return nil, fmt.Errorf("list backup sets %q: %w", sitePrefix, err)
 	}
-	sets := make([]storage.BackupSet, 0, len(entries))
+	setsByKey := make(map[string]storage.BackupSet)
 	for _, entry := range entries {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -173,15 +227,15 @@ func (s *Store) ListBackupSets(ctx context.Context, sitePrefix string) ([]storag
 			continue
 		}
 		if createdAt, parseErr := storage.ParseBackupSet(entry.Name()); parseErr == nil {
-			sets = append(sets, storage.BackupSet{
-				Key:       path.Join(sitePrefix, entry.Name()),
-				CreatedAt: createdAt,
-			})
+			setKey := path.Join(sitePrefix, entry.Name())
+			setsByKey[setKey] = storage.BackupSet{Key: setKey, CreatedAt: createdAt}
 			continue
 		}
-
 		date, dateErr := time.Parse(storage.BackupDateLayout, entry.Name())
 		if dateErr != nil || date.Format(storage.BackupDateLayout) != entry.Name() {
+			date, dateErr = time.Parse("02-January-2006", entry.Name())
+		}
+		if dateErr != nil {
 			continue
 		}
 		runs, readErr := os.ReadDir(filepath.Join(directory, entry.Name()))
@@ -192,19 +246,26 @@ func (s *Store) ListBackupSets(ctx context.Context, sitePrefix string) ([]storag
 			if err := ctx.Err(); err != nil {
 				return nil, err
 			}
-			if !run.IsDir() {
+			if run.IsDir() {
+				setName := path.Join(entry.Name(), run.Name())
+				createdAt, parseErr := storage.ParseBackupSet(setName)
+				if parseErr == nil {
+					setKey := path.Join(sitePrefix, setName)
+					setsByKey[setKey] = storage.BackupSet{Key: setKey, CreatedAt: createdAt}
+				}
 				continue
 			}
-			setName := path.Join(entry.Name(), run.Name())
-			createdAt, parseErr := storage.ParseBackupSet(setName)
+			setName, createdAt, parseErr := storage.BackupSetForPackage(entry.Name(), run.Name())
 			if parseErr != nil {
 				continue
 			}
-			sets = append(sets, storage.BackupSet{
-				Key:       path.Join(sitePrefix, setName),
-				CreatedAt: createdAt,
-			})
+			setKey := path.Join(sitePrefix, setName)
+			setsByKey[setKey] = storage.BackupSet{Key: setKey, CreatedAt: createdAt}
 		}
+	}
+	sets := make([]storage.BackupSet, 0, len(setsByKey))
+	for _, set := range setsByKey {
+		sets = append(sets, set)
 	}
 	sort.Slice(sets, func(i, j int) bool { return sets[i].CreatedAt.Before(sets[j].CreatedAt) })
 	return sets, nil

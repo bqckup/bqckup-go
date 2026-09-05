@@ -81,7 +81,7 @@ func buildSummaries(cfg config.Config, runs []history.BackupRun, filter string) 
 			}
 			if runs[i].Status == history.StatusSuccess {
 				view.SuccessfulBackups++
-				view.TotalRecordedSize += summarizeArtifacts(runs[i].Artifacts).logicalSize
+				view.TotalRecordedSize += summarizePackages(runs[i].Packages).logicalSize
 			}
 		}
 		if latest != nil {
@@ -94,7 +94,7 @@ func buildSummaries(cfg config.Config, runs []history.BackupRun, filter string) 
 				view.LastBackupDurationMillis = &millis
 			}
 			if latest.Status == history.StatusSuccess {
-				size := summarizeArtifacts(latest.Artifacts).logicalSize
+				size := summarizePackages(latest.Packages).logicalSize
 				view.LastBackupSize = &size
 			}
 		}
@@ -111,7 +111,7 @@ func writeSummaryText(output io.Writer, views []summaryView) error {
 	}
 	color := ansiColor{on: isTerminalWriter(output)}
 	for index, view := range views {
-		if _, err := fmt.Fprintf(output, "%s\n", color.bold("Backup Summary for "+view.Name)); err != nil {
+		if _, err := fmt.Fprintf(output, "%s\n", color.bold(view.Name)); err != nil {
 			return err
 		}
 		lines := []struct {
@@ -152,16 +152,24 @@ func (c ansiColor) bold(value string) string   { return c.wrap("1", value) }
 func (c ansiColor) dim(value string) string    { return c.wrap("2", value) }
 func (c ansiColor) green(value string) string  { return c.wrap("32", value) }
 func (c ansiColor) yellow(value string) string { return c.wrap("33", value) }
+func (c ansiColor) red(value string) string    { return c.wrap("31", value) }
+func (c ansiColor) cyan(value string) string   { return c.wrap("36", value) }
 
 func (c ansiColor) status(value string) string {
 	switch value {
 	case "disabled":
 		return c.dim(value)
-	case "running":
+	case "running", "no_change":
 		return c.yellow(value)
+	case "failed", "cancelled":
+		return c.red(value)
 	default:
 		return c.green(value)
 	}
+}
+
+func (c ansiColor) statusLabel(value string) string {
+	return strings.ToUpper(c.status(strings.ToLower(value)))
 }
 
 func (c ansiColor) wrap(code, value string) string {
@@ -185,7 +193,7 @@ func (v summaryView) lastBackupText() string {
 	if v.LastBackupAt == nil {
 		return "-"
 	}
-	return v.LastBackupAt.Local().Format("02 Jan 2006, 15:04 MST")
+	return formatCLITime(*v.LastBackupAt)
 }
 
 func (v summaryView) lastStatusText() string {

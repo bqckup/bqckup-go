@@ -82,8 +82,45 @@ The default configuration directory is `/etc/bqckup`:
 Ready-to-edit examples are in [`configs/`](configs/). Use
 `--config-dir <directory>` to load a different configuration tree.
 
+Common options:
+
+| Field | Available values |
+| --- | --- |
+| `app.log_level` | `debug`, `info`, `warn`, `error` |
+| `storage.type` | `local`, `s3`, `r2` |
+| `site.backup_mode` | `full` (default), `incremental` |
+| `database.engine` | `mysql`, `postgres` |
+| `notifications.channels.<name>.type` | `smtp`, `webhook`, `discord` |
+| `notifications.routes[].events[]` | `all`, `backup_failed`, `backup_cancelled`, `backup_no_change` |
+
+In examples, replace placeholders such as `<site>`, `<password>`, `<bucket>`,
+and `<webhook-url>` with real values. Do not copy angle-bracket placeholders
+into a production configuration.
+
+The `configs/sites/failure-test.yaml` example is intentionally enabled and
+uses a missing source path so notification and failure-history behavior can be
+tested with `bqckup backup run failure-test --force`.
+
+The installer creates `/var/log/bqckup` and configures
+`/var/log/bqckup/bqckup.log` as the default operational log.
+
 Credential-bearing YAML files must be regular files, not symbolic links, and
 must have mode `0600`. Never commit real passwords or storage keys.
+
+To convert a legacy configuration tree, install PyYAML and run:
+
+```bash
+python3 -m pip install -r scripts/requirements-converter.txt
+sudo mv /etc/bqckup /etc/bqckup_old
+python3 scripts/convert_legacy_config.py
+sudo bqckup --config-dir /etc/bqckup config validate
+```
+
+Without arguments, it reads `/etc/bqckup_old` and writes `/etc/bqckup`. If old
+files are still in `/etc/bqckup`, they are preserved first. Use `--input-dir`
+and `--output-dir` for another layout. The converter never prints credentials,
+does not modify the preserved tree, skips existing schema-v2 files, and maps
+legacy database type `postgresql` to `postgres`.
 
 ## Backup modes
 
@@ -91,14 +128,14 @@ must have mode `0600`. Never commit real passwords or storage keys.
 
 Full mode is the default. It creates portable `.tar.gz` file archives and
 compressed `.sql.gz` database dumps below
-`bqckup/<site>/<UTC timestamp>/` in each destination.
+`bqckup/<server_id>/<site>/<YYYY-MM-DD>/<HH-mm-ss>-<package>.gz` in each destination.
 
 ### Incremental backup
 
 Incremental mode stores encrypted, deduplicated file snapshots below
-`restic/<site>/` in each destination. Set `backup_mode: incremental` and set
-`incremental.password_env` to the name of an environment variable containing
-the repository password. The built-in engine is always used.
+`bqckup/<server_id>/<site>/incremental-backup/` in each destination. Set `backup_mode: incremental` and set
+`incremental.password` directly to the repository password. Keep the site YAML
+as a regular, non-symlink file with mode `0600`. The built-in engine is always used.
 
 ## Commands
 
@@ -107,14 +144,59 @@ bqckup init
 bqckup config validate
 bqckup doctor [--site <name>]
 bqckup backup list
+bqckup backup summary [--site <name>]
 bqckup backup run <site> [--force]
 bqckup backup unlock <site>
+bqckup backup snapshots <site> --destination <name>
+bqckup backup restore <site> --destination <name> --target <directory>
+bqckup storage list <destination> --site <site>
+bqckup storage link <destination> --key <key>
 bqckup history list [--site <name>] [--limit <n>] [--details]
+bqckup update [--version <version>]
 bqckup version
 ```
 
 Use `--output json` for machine-readable output. Run `bqckup --help` or any
-subcommand with `--help` to see all available options.
+subcommand with `--help` to see all available options. In text mode,
+`backup run` reports each site as soon as it starts, shows a loading spinner in
+an interactive terminal (or a five-second heartbeat when redirected), and
+prints its result as soon as it finishes; JSON mode suppresses progress text.
+`update` likewise shows an interactive spinner (or a five-second heartbeat
+when redirected) while it downloads, verifies, and installs the release.
+
+`storage list` displays full-mode archives as stored objects. For incremental
+sites it displays file snapshots separately; when the site has enabled
+databases, a `DATABASE PACKAGES` section also lists the timestamped database
+exports.
+
+`backup run --force` ignores only the configured minimum backup interval. It
+does not bypass the per-site lock while another backup of that site is active.
+
+## Notifications
+
+Add an optional `notifications:` section to `bqckup.yaml`:
+
+```yaml
+notifications:
+  channels:
+    email:
+      type: smtp
+      host: <smtp-host>
+      port: 587
+      username: <smtp-user>
+      password: <smtp-password>
+      from: <sender-address>
+      to: [<recipient-address>]
+  routes:
+    # events: all | backup_failed | backup_cancelled | backup_no_change
+    - events: [backup_failed]
+      channels: [email]
+```
+
+Available channel types are `smtp`, `webhook`, and `discord`. Successful runs,
+skips, and preflight failures stay silent. Delivery is best effort and never
+changes the run result or history. Keep credential-bearing root YAML at mode
+`0600`; `config validate` checks URL format and permissions.
 
 ## Scheduling
 

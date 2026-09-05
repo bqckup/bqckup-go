@@ -1,0 +1,238 @@
+package backend
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"io/fs"
+	"os"
+	"path/filepath"
+
+	"github.com/bqckup/bqckup-go/internal/ctxcopy"
+	"github.com/bqckup/bqckup-go/internal/engine/incremental"
+)
+
+// Local stores repository files on the local filesystem with atomic writes:
+// stage in <repo>/tmp/, fsync, rename. Directories 0700, files 0600.
+type Local struct {
+	layout Layout
+}
+
+// NewLocal returns a backend for the repository at dir.
+func NewLocal(dir string) *Local {
+	return &Local{layout: Layout{Dir: dir}}
+}
+
+// DirPath returns the repository directory (test convenience).
+func (b *Local) DirPath() string { return b.layout.Dir }
+
+// CreateLayout creates all repository directories (0700), including all
+// 256 data/<xx> subdirectories, like restic does at init.
+func (b *Local) CreateLayout() error {
+	dirs := []string{".", "keys", "index", "snapshots", "locks", "tmp", "data"}
+	for i := 0; i < 256; i++ {
+		dirs = append(dirs, filepath.Join("data", fmt.Sprintf("%02x", i)))
+	}
+	for _, dir := range dirs {
+		if err := b.mkdirAll(dir); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// mkdirAll creates each missing component with mode 0700 (umask-proof).
+func (b *Local) mkdirAll(dir string) error {
+	path := filepath.Join(b.layout.Dir, filepath.FromSlash(dir))
+	missing := []string{}
+	for current := path; current != filepath.Dir(current); current = filepath.Dir(current) {
+		if _, err := os.Stat(current); os.IsNotExist(err) {
+			missing = append(missing, current)
+			continue
+		}
+		break
+	}
+	for i := len(missing) - 1; i >= 0; i-- {
+		if err := os.Mkdir(missing[i], 0o700); err != nil && !os.IsExist(err) {
+			return fmt.Errorf("create directory: %w", err)
+		}
+		if err := os.Chmod(missing[i], 0o700); err != nil {
+			return fmt.Errorf("secure directory: %w", err)
+		}
+	}
+	return nil
+}
+
+func (b *Local) Save(ctx context.Context, h incremental.Handle, rd io.Reader) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	dir, err := b.layout.Dirname(h)
+	if err != nil {
+		return err
+	}
+	if err := b.mkdirAll(dir); err != nil {
+		return err
+	}
+	if err := b.mkdirAll("tmp"); err != nil {
+		return err
+	}
+	finalPath, err := b.layout.Path(h)
+	if err != nil {
+		return err
+	}
+
+	tmp, err := os.CreateTemp(filepath.Join(b.layout.Dir, "tmp"), "save-*")
+	if err != nil {
+		return fmt.Errorf("create staging file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	if err := tmp.Chmod(0o600); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return fmt.Errorf("secure staging file: %w", err)
+	}
+	cleanup := func() {
+		tmp.Close()
+		os.Remove(tmpPath)
+	}
+
+	if _, err := ctxcopy.Copy(ctx, tmp, rd); err != nil {
+		cleanup()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		cleanup()
+		return fmt.Errorf("sync staging file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("close staging file: %w", err)
+	}
+	if err := os.Rename(tmpPath, finalPath); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("move staged file into place: %w", err)
+	}
+	return nil
+}
+
+// copyContext copies rd to w, checking ctx between chunks.
+
+func (b *Local) Load(ctx context.Context, h incremental.Handle, length int, offset int64, fn func(rd io.Reader) error) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	path, err := b.layout.Path(h)
+	if err != nil {
+		return err
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	if offset > 0 {
+		if _, err := file.Seek(offset, io.SeekStart); err != nil {
+			return err
+		}
+	}
+	var rd io.Reader = file
+	if length > 0 {
+		rd = io.LimitReader(file, int64(length))
+	}
+	return fn(rd)
+}
+
+func (b *Local) Stat(ctx context.Context, h incremental.Handle) (FileInfo, error) {
+	if err := ctx.Err(); err != nil {
+		return FileInfo{}, err
+	}
+	path, err := b.layout.Path(h)
+	if err != nil {
+		return FileInfo{}, err
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return FileInfo{}, err
+	}
+	if !info.Mode().IsRegular() {
+		return FileInfo{}, fmt.Errorf("%s is not a regular file", h.Name)
+	}
+	return FileInfo{Name: h.Name, Size: info.Size()}, nil
+}
+
+func (b *Local) List(ctx context.Context, t incremental.FileType, fn func(h incremental.Handle, size int64) error) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	var base string
+	switch t {
+	case incremental.ConfigFile:
+		base = b.layout.Dir
+	case incremental.DataFile:
+		base = filepath.Join(b.layout.Dir, "data")
+	case incremental.KeyFileType:
+		base = filepath.Join(b.layout.Dir, "keys")
+	case incremental.IndexFile:
+		base = filepath.Join(b.layout.Dir, "index")
+	case incremental.SnapshotFile:
+		base = filepath.Join(b.layout.Dir, "snapshots")
+	case incremental.LockFile:
+		base = filepath.Join(b.layout.Dir, "locks")
+	default:
+		return errors.New("backend: unknown file type")
+	}
+	if t == incremental.DataFile {
+		for i := 0; i < 256; i++ {
+			if err := b.listDir(ctx, filepath.Join(base, fmt.Sprintf("%02x", i)), t, fn); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	return b.listDir(ctx, base, t, fn)
+}
+
+func (b *Local) listDir(ctx context.Context, dir string, t incremental.FileType, fn func(h incremental.Handle, size int64) error) error {
+	entries, err := os.ReadDir(dir)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if err := fn(incremental.Handle{Type: t, Name: entry.Name()}, info.Size()); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (b *Local) Remove(ctx context.Context, h incremental.Handle) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	path, err := b.layout.Path(h)
+	if err != nil {
+		return err
+	}
+	err = os.Remove(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	return err
+}
+
+func (b *Local) IsNotExist(err error) bool { return errors.Is(err, fs.ErrNotExist) }

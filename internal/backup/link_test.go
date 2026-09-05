@@ -25,8 +25,8 @@ func (f *fakeLinkGenerator) PresignLink(_ context.Context, key string, expires t
 	return f.link, f.err
 }
 
-func (f *fakeLinkGenerator) Put(context.Context, storage.Artifact, string) (storage.StoredArtifact, error) {
-	return storage.StoredArtifact{}, errors.New("unused")
+func (f *fakeLinkGenerator) Put(context.Context, storage.Package, string) (storage.StoredPackage, error) {
+	return storage.StoredPackage{}, errors.New("unused")
 }
 func (f *fakeLinkGenerator) Delete(context.Context, string) error { return errors.New("unused") }
 func (f *fakeLinkGenerator) ListBackupSets(context.Context, string) ([]storage.BackupSet, error) {

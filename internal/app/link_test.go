@@ -37,6 +37,18 @@ func TestLinkResolvesSiteFromKeyAndReturnsTheLink(t *testing.T) {
 	assert.Equal(t, time.Hour, store.gotExp)
 }
 
+func TestLinkResolvesNamespacedSiteFromKey(t *testing.T) {
+	store := &appLinkStore{link: storage.DownloadLink{URL: "https://example.test/signed"}}
+	application := listingApp(t, remoteSite(), map[string]config.Storage{"s3-primary": {Type: "s3"}}, map[string]storage.Store{"s3-primary": store})
+	application.configuration.ServerID = "127.0.0.1"
+
+	key := "bqckup/127.0.0.1/site-a/30-August-2026/04-42-59/files.tar.gz"
+	link, err := application.Link(context.Background(), "s3-primary", key, time.Hour)
+	require.NoError(t, err)
+	assert.Equal(t, "https://example.test/signed", link.URL)
+	assert.Equal(t, key, store.gotKey)
+}
+
 func TestLinkRejectsMalformedKeys(t *testing.T) {
 	application := listingApp(t, remoteSite(), map[string]config.Storage{"s3-primary": {Type: "s3"}}, map[string]storage.Store{"s3-primary": &appLinkStore{}})
 	for _, key := range []string{

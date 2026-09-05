@@ -3,7 +3,7 @@ package backup
 import (
 	"context"
 
-	"github.com/bqckup/bqckup-go/internal/backup/restic"
+	"github.com/bqckup/bqckup-go/internal/backup/incremental"
 	"github.com/bqckup/bqckup-go/internal/config"
 )
 
@@ -13,7 +13,7 @@ type FileSource struct {
 	FollowSymlinks bool
 }
 
-type Artifact struct {
+type Package struct {
 	Path       string
 	Size       int64
 	SHA256     string
@@ -22,15 +22,17 @@ type Artifact struct {
 }
 
 type Exporter interface {
-	Export(ctx context.Context, source config.DatabaseSource, destination string) (Artifact, error)
+	Export(ctx context.Context, source config.DatabaseSource, destination string) (Package, error)
+}
+
+type EstimatedSizeProvider interface {
+	EstimateSize(ctx context.Context, source config.DatabaseSource) (int64, bool, error)
 }
 
 type IncrementalEngine interface {
-	EnsureRepository(ctx context.Context, repo restic.RepoConfig) error
-	BackupFiles(ctx context.Context, repo restic.RepoConfig, spec restic.BackupSpec) (restic.SnapshotSummary, error)
-	// ApplyRetention forgets snapshots beyond keepLast for the site and
-	// prunes unreachable data; it returns the reclaimed bytes.
-	ApplyRetention(ctx context.Context, repo restic.RepoConfig, keepLast int, siteName string) (int64, error)
+	EnsureRepository(ctx context.Context, repo incremental.RepoConfig) error
+	BackupFiles(ctx context.Context, repo incremental.RepoConfig, spec incremental.BackupSpec) (incremental.SnapshotSummary, error)
+	ApplyRetention(ctx context.Context, repo incremental.RepoConfig, keepLast int, siteName string) (int64, error)
 	// Unlock removes stale repository locks (never a live one).
-	Unlock(ctx context.Context, repo restic.RepoConfig) error
+	Unlock(ctx context.Context, repo incremental.RepoConfig) error
 }
