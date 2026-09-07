@@ -19,6 +19,23 @@ import (
 
 const defaultRepository = "bqckup/bqckup-go"
 
+// Progress reports update stages.
+type Progress interface {
+	StartStage(label string, total int64)
+	Add(units int64)
+	FinishStage()
+	FailStage()
+	Done()
+}
+
+type noopProgress struct{}
+
+func (noopProgress) StartStage(string, int64) {}
+func (noopProgress) Add(int64)                {}
+func (noopProgress) FinishStage()             {}
+func (noopProgress) FailStage()               {}
+func (noopProgress) Done()                    {}
+
 // Options controls a self-update from a GitHub release.
 type Options struct {
 	Version    string
@@ -26,6 +43,7 @@ type Options struct {
 	Target     string
 	HTTPClient *http.Client
 	Output     io.Writer
+	Progress   Progress
 }
 
 // Run downloads, verifies, and atomically installs the release binary.
@@ -33,6 +51,12 @@ func Run(ctx context.Context, options Options) error {
 	if runtime.GOOS != "linux" {
 		return fmt.Errorf("self-update is currently supported on Linux only")
 	}
+	progress := options.Progress
+	if progress == nil {
+		progress = noopProgress{}
+	}
+	defer progress.Done()
+
 	repository := options.Repository
 	if repository == "" {
 		repository = defaultRepository
@@ -65,7 +89,7 @@ func Run(ctx context.Context, options Options) error {
 	if client == nil {
 		client = http.DefaultClient
 	}
-	checksums, err := download(ctx, client, baseURL+"/checksums.txt")
+	checksums, err := download(ctx, client, baseURL+"/checksums.txt", nil)
 	if err != nil {
 		return fmt.Errorf("download release checksums: %w", err)
 	}
@@ -73,29 +97,81 @@ func Run(ctx context.Context, options Options) error {
 	if err != nil {
 		return err
 	}
-	archive, err := download(ctx, client, baseURL+"/"+assetName)
+
+	archive, err := downloadWithProgress(ctx, client, baseURL+"/"+assetName, progress)
 	if err != nil {
 		return fmt.Errorf("download release %s: %w", assetName, err)
 	}
+
+	progress.StartStage("verifying checksum", 1)
 	actual := sha256.Sum256(archive)
 	if !strings.EqualFold(hex.EncodeToString(actual[:]), expected) {
+		progress.FailStage()
 		return fmt.Errorf("release checksum mismatch: expected %s, got %x", expected, actual)
 	}
+	progress.Add(1)
+	progress.FinishStage()
 
+	progress.StartStage("installing update", 1)
 	installed, err := extractBinary(archive)
 	if err != nil {
+		progress.FailStage()
 		return err
 	}
 	if err := installAtomic(target, installed); err != nil {
+		progress.FailStage()
 		return err
 	}
+	progress.Add(1)
+	progress.FinishStage()
+
 	if options.Output != nil {
 		_, _ = fmt.Fprintf(options.Output, "updated bqckup at %s\n", target)
 	}
 	return nil
 }
 
-func download(ctx context.Context, client *http.Client, url string) ([]byte, error) {
+func downloadWithProgress(ctx context.Context, client *http.Client, url string, progress Progress) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	response, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("HTTP status %s", response.Status)
+	}
+	total := response.ContentLength
+	progress.StartStage("downloading release", total)
+	reader := response.Body
+	var buf bytes.Buffer
+	chunk := make([]byte, 32*1024)
+	for {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			progress.FailStage()
+			return nil, ctxErr
+		}
+		n, readErr := reader.Read(chunk)
+		if n > 0 {
+			buf.Write(chunk[:n])
+			progress.Add(int64(n))
+		}
+		if errors.Is(readErr, io.EOF) {
+			break
+		}
+		if readErr != nil {
+			progress.FailStage()
+			return nil, readErr
+		}
+	}
+	progress.FinishStage()
+	return buf.Bytes(), nil
+}
+
+func download(ctx context.Context, client *http.Client, url string, progress Progress) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
@@ -180,6 +256,9 @@ func installAtomic(target string, binary []byte) error {
 	directory := filepath.Dir(target)
 	temporary, err := os.CreateTemp(directory, ".bqckup-update-*")
 	if err != nil {
+		if os.IsPermission(err) {
+			return fmt.Errorf("update requires write access to %q; re-run with sudo or install bqckup into a user-writable directory: %w", directory, err)
+		}
 		return fmt.Errorf("create update file: %w", err)
 	}
 	temporaryPath := temporary.Name()

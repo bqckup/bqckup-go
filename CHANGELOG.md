@@ -2,12 +2,31 @@
 
 All notable changes to Bqckup are documented in this file.
 
+## Unreleased
+
 ## v0.0.9
 
-- Add shared progress reporting for backup, restore, check, and repair-index
-  commands.
 - Provide the S3 transfer manager with the package size so large multipart
   uploads automatically stay within the 10,000-part limit.
+
+## v0.0.8
+
+- Retry transient S3 upload failures up to ten times with the AWS SDK's
+  standard exponential backoff, including incremental repository uploads.
+- Show byte-level progress during backup and update operations, while retaining
+  a heartbeat for redirected output.
+- Add read-only incremental repository integrity checks, with optional
+  full blob authentication and machine-readable findings.
+- Add a locked `backup repair-index` operation that rebuilds indexes from pack
+  headers before removing the old index files.
+- Place batch backup spacing between site result blocks instead of between a
+  site's start and result lines.
+- Show immediate update progress, an interactive spinner, and a redirected
+  heartbeat while `bqckup update` downloads, verifies, and installs a release.
+- Simplify the operator documentation and list supported configuration values
+  beside examples, including notification route events and channel types.
+- Align command references with the delivered snapshot listing, restore,
+  summary, and notification features.
 
 ## v0.0.7
 
@@ -83,7 +102,6 @@ All notable changes to Bqckup are documented in this file.
   error detail with one concise batch-failure message.
 - Shorten run IDs in text output and wrap long failure reasons for narrow
   terminals; JSON keeps the complete run IDs.
-
 - Added global `server_id` namespacing under `bqckup/<server_id>/<site>/`.
 - Renamed internal incremental packages from `restic` to `incremental` while
   preserving official Restic repository compatibility.

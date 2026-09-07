@@ -334,7 +334,7 @@ func TestTryThis(t *testing.T) {
 
 	t.Run("execution", func(t *testing.T) {
 		p := Payload{Status: "failed", ErrorCategory: "execution", Site: site}
-		assert.Equal(t, "1. Check the site's data and logs. If the backup started but never finished, it likely timed out or crashed.\n2. Run `bqckup backup run example.org --force` and watch the output.", tryThis(p))
+		assert.Equal(t, "1. Check the site's data and logs. If the backup started but never finished, confirm that no backup process for the site is still running.\n2. Once no backup is active, run `bqckup backup run example.org --force` and watch the output.", tryThis(p))
 	})
 
 	t.Run("storage", func(t *testing.T) {

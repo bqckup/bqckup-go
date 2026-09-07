@@ -15,6 +15,7 @@ type Config struct {
 	Storages      map[string]Storage
 	Sites         []Site
 	Notifications Notifications
+	Reports       Reports
 }
 
 // Notification event names. These are the canonical values for the
@@ -24,6 +25,8 @@ const (
 	EventBackupFailed    = "backup_failed"
 	EventBackupCancelled = "backup_cancelled"
 	EventBackupNoChange  = "backup_no_change"
+	EventDailyReport     = "daily_report"
+	EventMonthlyReport   = "monthly_report"
 )
 
 // Notifications is the optional top-level notifications section. Absent in
@@ -52,8 +55,41 @@ type Channel struct {
 
 // Route maps one or more events to one or more channels.
 type Route struct {
+	Name     string   `mapstructure:"name" yaml:"name"`
 	Events   []string `mapstructure:"events" yaml:"events"`
 	Channels []string `mapstructure:"channels" yaml:"channels"`
+}
+
+// Reports is the optional top-level reports section. Absent in YAML it stays
+// the zero value and scheduled reports are off.
+type Reports struct {
+	Daily   DailyReport   `mapstructure:"daily" yaml:"daily"`
+	Monthly MonthlyReport `mapstructure:"monthly" yaml:"monthly"`
+}
+
+// DailyReport configures the daily backup summary report.
+type DailyReport struct {
+	Enabled           bool           `mapstructure:"enabled" yaml:"enabled"`
+	Timezone          string         `mapstructure:"timezone" yaml:"timezone"`
+	Schedule          ReportSchedule `mapstructure:"schedule" yaml:"schedule"`
+	NotificationRoute string         `mapstructure:"notification_route" yaml:"notification_route"`
+	IncludeEmptyDays  bool           `mapstructure:"include_empty_days" yaml:"include_empty_days"`
+}
+
+// MonthlyReport configures the monthly consolidated backup report.
+type MonthlyReport struct {
+	Enabled           bool           `mapstructure:"enabled" yaml:"enabled"`
+	Timezone          string         `mapstructure:"timezone" yaml:"timezone"`
+	Schedule          ReportSchedule `mapstructure:"schedule" yaml:"schedule"`
+	NotificationRoute string         `mapstructure:"notification_route" yaml:"notification_route"`
+	IncludeEmptyDays  bool           `mapstructure:"include_empty_days" yaml:"include_empty_days"`
+}
+
+// ReportSchedule defines when a report is sent.
+type ReportSchedule struct {
+	// DayOfMonth is only used by monthly reports (1–28).
+	DayOfMonth int    `mapstructure:"day_of_month" yaml:"day_of_month"`
+	Time       string `mapstructure:"time" yaml:"time"`
 }
 
 type App struct {

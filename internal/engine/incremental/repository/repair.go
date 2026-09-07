@@ -123,6 +123,17 @@ func (r *Repository) RepairIndex(ctx context.Context) (RepairResult, error) {
 		if err != nil {
 			return RepairResult{}, fmt.Errorf("repository: parse header of pack %s: %w", packID, err)
 		}
+		payloadSize := info.Size - int64(headerLength) - 4
+		var indexedPayloadSize int64
+		for _, entry := range entries {
+			if entry.Length < crypto.Extension {
+				return RepairResult{}, fmt.Errorf("repository: invalid blob length %d in pack %s", entry.Length, packID)
+			}
+			indexedPayloadSize += int64(entry.Length)
+		}
+		if indexedPayloadSize != payloadSize {
+			return RepairResult{}, fmt.Errorf("repository: header blob lengths %d do not match payload size %d in pack %s", indexedPayloadSize, payloadSize, packID)
+		}
 
 		docBlobs := make([]index.Blob, 0, len(entries))
 		for _, entry := range entries {

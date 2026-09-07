@@ -32,6 +32,10 @@ Read current package contracts and their tests before changing responsibilities.
 Add an abstraction only for a real consumer. Prefer extending an existing
 consumer-owned interface over creating a generic framework.
 
+Documentation should mirror these boundaries: README explains the operator
+flow, the user guide explains tasks, and the configuration reference explains
+strict fields and available values.
+
 ## Run invariants
 
 - Acquire one site lock before starting work.

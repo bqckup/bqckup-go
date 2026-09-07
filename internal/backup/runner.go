@@ -13,6 +13,7 @@ import (
 	"github.com/bqckup/bqckup-go/internal/backup/incremental"
 	"github.com/bqckup/bqckup-go/internal/clock"
 	"github.com/bqckup/bqckup-go/internal/config"
+	"github.com/bqckup/bqckup-go/internal/fileexclude"
 	"github.com/bqckup/bqckup-go/internal/history"
 	"github.com/bqckup/bqckup-go/internal/storage"
 )
@@ -112,9 +113,15 @@ type Dependencies struct {
 	Notifier           Notifier
 	Clock              clock.Clock
 	TemporaryDirectory string
+	// Progress reports stage progress. Optional; a nil value is treated as
+	// a no-op so library and test callers need not supply a renderer.
+	Progress Progress
 }
 
-type Runner struct{ dependencies Dependencies }
+type Runner struct {
+	dependencies Dependencies
+	progress     Progress
+}
 
 func backupSitePrefix(siteName, serverID string) string {
 	if serverID == "" {
@@ -123,7 +130,13 @@ func backupSitePrefix(siteName, serverID string) string {
 	return path.Join("bqckup", serverID, siteName)
 }
 
-func NewRunner(dependencies Dependencies) *Runner { return &Runner{dependencies: dependencies} }
+func NewRunner(dependencies Dependencies) *Runner {
+	return &Runner{dependencies: dependencies, progress: progressOrNoop(dependencies.Progress)}
+}
+
+func (r *Runner) SetProgress(progress Progress) {
+	r.progress = progressOrNoop(progress)
+}
 
 // buildRepo constructs the engine repository configuration for one
 // destination. requirePassword enforces a configured repository password.
@@ -159,6 +172,7 @@ func buildRepoConfig(site config.Site, storageConfig config.Storage, requirePass
 }
 
 func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result RunResult, returnedErr error) {
+	defer r.progress.Done()
 	result.SiteName = site.Name
 	if err := r.validateDependencies(); err != nil {
 		result.Status = StatusFailed
@@ -213,6 +227,7 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 	}
 	result.RunID = run.ID
 	result.StartedAt = now
+	defer r.progress.Done()
 
 	fail := func(operationErr error) (RunResult, error) {
 		category := apperror.CategoryOf(operationErr)
@@ -301,14 +316,19 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 		}
 		defer os.RemoveAll(workspace)
 
-		archive, err := r.dependencies.Archiver.Create(ctx, FileSource{
+		archiveSource := FileSource{
 			Include:        []string(site.Sources.Files.Include),
 			Exclude:        []string(site.Sources.Files.Exclude),
 			FollowSymlinks: site.Sources.Files.FollowSymlinks,
-		}, filepath.Join(workspace, "files.tar.gz"))
+		}
+		archiveTotal := estimateArchiveTotal(archiveSource)
+		r.progress.StartStage("compress files", archiveTotal)
+		archive, err := r.dependencies.Archiver.Create(ctx, archiveSource, filepath.Join(workspace, "files.tar.gz"))
 		if err != nil {
+			r.progress.FailStage()
 			return fail(apperror.Wrap(apperror.CategoryExecution, "could not create the file archive", err))
 		}
+		r.progress.FinishStage()
 
 		objectKey := path.Join(sitePrefix, storage.FormatPackageKey(now, "files.tar.gz", run.ID))
 		if err := r.storePackage(ctx, run.ID, archive, objectKey, site.Destinations); err != nil {
@@ -335,9 +355,17 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 			if err := os.MkdirAll(filepath.Dir(destination), 0o700); err != nil {
 				return fail(apperror.Wrap(apperror.CategoryExecution, "could not prepare database export workspace", err))
 			}
+			exportTotal := int64(-1)
+			if estimator, ok := exporter.(EstimatedSizeProvider); ok {
+				if size, known, estimateErr := estimator.EstimateSize(ctx, source); estimateErr == nil && known && size > 0 {
+					exportTotal = size
+				}
+			}
+			r.progress.StartStage("export "+source.Name, exportTotal)
 			databasePackage, exportErr := exporter.Export(ctx, source, destination)
 			databaseKey := path.Join(sitePrefix, storage.FormatPackageKey(now, source.Name+".sql.gz", run.ID))
 			if exportErr != nil {
+				r.progress.FailStage()
 				recordErr := r.recordFailedPackage(ctx, run.ID, Package{SourceKind: "database", SourceName: source.Name}, databaseKey, site.Destinations, "could not export database")
 				operationErr := apperror.Wrap(apperror.CategoryExecution, "could not export database", exportErr)
 				if recordErr != nil {
@@ -345,6 +373,7 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 				}
 				return fail(operationErr)
 			}
+			r.progress.FinishStage()
 			if err := r.storePackage(ctx, run.ID, databasePackage, databaseKey, site.Destinations); err != nil {
 				return fail(err)
 			}
@@ -486,6 +515,68 @@ func unchangedSizes(current, previous []history.Package) bool {
 	return true
 }
 
+func estimateArchiveTotal(source FileSource) int64 {
+	if len(source.Include) == 0 {
+		return -1
+	}
+	seen := map[string]struct{}{}
+	var total int64
+	for _, include := range source.Include {
+		if include == "" {
+			continue
+		}
+		if err := filepath.Walk(include, func(path string, info os.FileInfo, walkErr error) error {
+			if walkErr != nil || info == nil {
+				return nil
+			}
+			cleanPath := filepath.Clean(path)
+			if _, exists := seen[cleanPath]; exists {
+				return nil
+			}
+			if info.Mode()&os.ModeSymlink != 0 {
+				if !source.FollowSymlinks {
+					seen[cleanPath] = struct{}{}
+					return nil
+				}
+				resolved, err := filepath.EvalSymlinks(path)
+				if err != nil {
+					seen[cleanPath] = struct{}{}
+					return nil
+				}
+				resolvedInfo, err := os.Stat(resolved)
+				if err != nil || !resolvedInfo.Mode().IsRegular() {
+					seen[cleanPath] = struct{}{}
+					return nil
+				}
+				if fileexclude.MatchAny(source.Exclude, cleanPath, source.Include) {
+					seen[cleanPath] = struct{}{}
+					return nil
+				}
+				seen[cleanPath] = struct{}{}
+				total += resolvedInfo.Size()
+				return nil
+			}
+			if !info.Mode().IsRegular() {
+				seen[cleanPath] = struct{}{}
+				return nil
+			}
+			if fileexclude.MatchAny(source.Exclude, cleanPath, source.Include) {
+				seen[cleanPath] = struct{}{}
+				return nil
+			}
+			seen[cleanPath] = struct{}{}
+			total += info.Size()
+			return nil
+		}); err != nil {
+			return -1
+		}
+	}
+	if total <= 0 {
+		return -1
+	}
+	return total
+}
+
 func buildNotifyDestinations(site config.Site, storages map[string]config.Storage) []NotifyDestination {
 	destinations := make([]NotifyDestination, 0, len(site.Destinations))
 	for _, d := range site.Destinations {
@@ -573,8 +664,11 @@ func (r *Runner) storePackage(ctx context.Context, runID string, pkg Package, ob
 		if !ok || store == nil {
 			return apperror.Wrap(apperror.CategoryInternal, "a configured storage destination is unavailable", nil)
 		}
-		stored, putErr := store.Put(ctx, storage.Package{Path: pkg.Path, Size: pkg.Size, SHA256: pkg.SHA256}, objectKey)
+		r.progress.StartStage("upload "+destination.Storage, pkg.Size)
+		storagePackage := storage.Package{Path: pkg.Path, Size: pkg.Size, SHA256: pkg.SHA256}
+		stored, putErr := r.putPackage(ctx, store, storagePackage, objectKey)
 		if putErr != nil {
+			r.progress.FailStage()
 			recordErr := r.recordFailedPackage(ctx, runID, pkg, objectKey, []config.Destination{destination}, "could not store backup package")
 			operationErr := apperror.Wrap(apperror.CategoryStorage, "could not store backup package", putErr)
 			if recordErr != nil {
@@ -582,6 +676,7 @@ func (r *Runner) storePackage(ctx context.Context, runID string, pkg Package, ob
 			}
 			return operationErr
 		}
+		r.progress.FinishStage()
 		if err := r.dependencies.Repository.CreatePackage(ctx, &history.Package{
 			RunID: runID, SourceKind: pkg.SourceKind, SourceName: pkg.SourceName,
 			Destination: destination.Storage, ObjectKey: stored.Key, Size: stored.Size,
@@ -591,6 +686,21 @@ func (r *Runner) storePackage(ctx context.Context, runID string, pkg Package, ob
 		}
 	}
 	return nil
+}
+
+// progressStore is an optional interface a storage adapter may implement to
+// report how many bytes it has actually sent while storing a package. The
+// runner falls back to the plain Store.Put for adapters that do not support
+// byte counting, keeping the shared storage.Store interface untouched.
+type progressStore interface {
+	PutWithProgress(ctx context.Context, pkg storage.Package, key string, progress func(int64)) (storage.StoredPackage, error)
+}
+
+func (r *Runner) putPackage(ctx context.Context, store storage.Store, pkg storage.Package, key string) (storage.StoredPackage, error) {
+	if ps, ok := store.(progressStore); ok {
+		return ps.PutWithProgress(ctx, pkg, key, r.progress.Add)
+	}
+	return store.Put(ctx, pkg, key)
 }
 
 func (r *Runner) recordFailedPackage(ctx context.Context, runID string, pkg Package, objectKey string, destinations []config.Destination, message string) error {

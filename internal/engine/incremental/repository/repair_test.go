@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/binary"
 	"os"
 	"path/filepath"
 	"testing"
@@ -95,6 +96,46 @@ func TestRepairIndexAbortsOnCorruptPack(t *testing.T) {
 	// Verify old indexes were preserved (not deleted)
 	remainingIndexes := indexHandles(t, loc)
 	assert.Equal(t, len(origIndexes), len(remainingIndexes))
+}
+
+func TestRepairIndexAbortsWhenHeaderLengthsDoNotFillPayload(t *testing.T) {
+	ctx := context.Background()
+	locDir := t.TempDir()
+	loc := backend.NewLocal(locDir)
+	repo, err := Init(ctx, loc, prunePassword)
+	require.NoError(t, err)
+
+	backupTestFiles(t, repo, map[string]string{
+		"file1.txt": "valid pack content",
+	}, []string{"site1"})
+
+	origPacks := packHandles(t, loc)
+	require.NotEmpty(t, origPacks)
+	origIndexes := indexHandles(t, loc)
+	require.NotEmpty(t, origIndexes)
+
+	packPath := filepath.Join(locDir, "data", origPacks[0].Name[:2], origPacks[0].Name)
+	packData, err := os.ReadFile(packPath)
+	require.NoError(t, err)
+	headerLength := int(binary.LittleEndian.Uint32(packData[len(packData)-4:]))
+	headerOffset := len(packData) - 4 - headerLength
+	header, err := repo.MasterKey().Open(nil, packData[headerOffset:len(packData)-4])
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, len(header), 5)
+	binary.LittleEndian.PutUint32(header[1:5], binary.LittleEndian.Uint32(header[1:5])+1)
+	sealedHeader, err := repo.MasterKey().Seal(nil, header)
+	require.NoError(t, err)
+	require.Len(t, sealedHeader, headerLength)
+	copy(packData[headerOffset:len(packData)-4], sealedHeader)
+	require.NoError(t, os.WriteFile(packPath, packData, 0o600))
+
+	repairRepo, err := OpenForRepair(ctx, loc, prunePassword)
+	require.NoError(t, err)
+	_, err = repairRepo.RepairIndex(ctx)
+	require.Error(t, err)
+
+	// The failed validation must not replace the known-good index.
+	assert.Len(t, indexHandles(t, loc), len(origIndexes))
 }
 
 func TestRepairIndexEmptyRepository(t *testing.T) {

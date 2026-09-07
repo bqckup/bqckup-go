@@ -3,76 +3,136 @@ package cli
 import (
 	"bytes"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
-func TestWriteCheckStartText(t *testing.T) {
-	var out bytes.Buffer
-	require.NoError(t, writeCheckStartText(&out, "site-a", "s3-primary", false))
-	assert.Equal(t, "[>] check:site-a: checking repository on s3-primary\n", out.String())
+func TestCLIProgressNonTerminalOutput(t *testing.T) {
+	var buf bytes.Buffer
+	p := NewCLIProgress(&buf)
+	p.terminal = false // force non-terminal
 
-	out.Reset()
-	require.NoError(t, writeCheckStartText(&out, "site-a", "s3-primary", true))
-	assert.Equal(t, "[>] check:site-a: checking repository on s3-primary (read-data)\n", out.String())
+	p.StartStage("compress files", -1)
+	p.FinishStage()
+
+	p.StartStage("upload s3-main", 1024*1024*50)
+	p.Add(1024 * 1024 * 25)
+	p.FinishStage()
+	p.Done()
+
+	output := buf.String()
+	assert.Contains(t, output, "-> Compressing files...\n")
+	assert.Contains(t, output, "-> Uploading to s3-main (50.0 MiB)\n")
+	assert.NotContains(t, output, "\x1b[")
 }
 
-func TestWriteRepairIndexStartText(t *testing.T) {
-	var out bytes.Buffer
-	require.NoError(t, writeRepairIndexStartText(&out, "site-a", "s3-primary"))
-	assert.Equal(t, "[>] repair-index:site-a: repairing index on s3-primary\n", out.String())
+func TestCLIProgressTerminalFailAndCancelCleanup(t *testing.T) {
+	var buf bytes.Buffer
+	p := NewCLIProgress(&buf)
+	p.terminal = true
+
+	p.StartStage("upload s3-main", 1000)
+	p.Add(400)
+	p.FailStage()
+	p.StartStage("upload secondary", 1000)
+	p.Add(250)
+	p.Done()
+
+	output := buf.String()
+	assert.Contains(t, output, "Uploading to secondary")
+	assert.Contains(t, output, "\r\033[2K")
+	assert.NotContains(t, output, "Uploading to s3-main\n")
 }
 
-func TestWriteRestoreStartText(t *testing.T) {
-	var out bytes.Buffer
-	require.NoError(t, writeRestoreStartText(&out, "site-a", "s3-primary", "latest", "/var/restore"))
-	assert.Equal(t, "[>] restore:site-a: restoring snapshot latest from s3-primary to /var/restore\n", out.String())
+func TestCLIProgressTerminalDeterminate(t *testing.T) {
+	var buf bytes.Buffer
+	p := NewCLIProgress(&buf)
+	p.terminal = true // force terminal
+
+	p.StartStage("upload s3-main", 1000)
+	p.Add(500)
+	p.Add(500)
+	p.FinishStage()
+	p.Done()
+
+	output := buf.String()
+	assert.Contains(t, output, "Uploading to s3-main")
+	assert.Contains(t, output, "100%")
+	assert.Contains(t, output, "ETA")
 }
 
-func TestProgressHeartbeatLifecycle(t *testing.T) {
-	var out bytes.Buffer
-	hb := startProgressHeartbeat(&out, "check", "site-a", "checking")
-	require.NotNil(t, hb)
+func TestCLIProgressTerminalShowsPercentBytesSpeedAndETA(t *testing.T) {
+	var buf bytes.Buffer
+	p := NewCLIProgress(&buf)
+	p.terminal = true
 
-	// Pause and Resume should not block or panic
-	hb.Pause()
-	// Repeated pause should be a no-op
-	hb.Pause()
+	p.StartStage("upload s3-main", 1000)
+	p.Add(600)
+	p.renderTerminalLocked()
 
-	hb.Resume()
-	// Repeated resume should be a no-op
-	hb.Resume()
-
-	// Stop cleanly
-	hb.Stop()
-	// Repeated stop should be safe
-	hb.Stop()
+	output := buf.String()
+	assert.Contains(t, output, "Uploading to s3-main")
+	assert.Contains(t, output, "60%")
+	assert.Contains(t, output, "600")
+	assert.Contains(t, output, "ETA")
 }
 
-func TestProgressHeartbeatStopWhilePaused(t *testing.T) {
-	var out bytes.Buffer
-	hb := startProgressHeartbeat(&out, "restore", "site-a", "restoring")
-	hb.Pause()
-	hb.Stop()
+func TestCLIProgressTerminalClearsLineBeforeRedraw(t *testing.T) {
+	var buf bytes.Buffer
+	p := NewCLIProgress(&buf)
+	p.terminal = true
+
+	p.StartStage("upload s3-main", 1000)
+	p.Add(400)
+	p.renderTerminalLocked()
+	p.Add(200)
+	p.renderTerminalLocked()
+
+	output := buf.String()
+	assert.Contains(t, output, "\r\033[2K")
+	assert.Contains(t, output, "Uploading to s3-main")
+	assert.NotContains(t, output, "ETA --TA --")
 }
 
-func TestProgressHeartbeatNilSafe(t *testing.T) {
-	var hb *progressHeartbeat
-	hb.Pause()
-	hb.Resume()
-	hb.Stop()
+func TestCLIProgressResetsPreviousStageBeforeStartingNextDestination(t *testing.T) {
+	var buf bytes.Buffer
+	p := NewCLIProgress(&buf)
+	p.terminal = true
+
+	p.StartStage("upload primary", 100)
+	p.Add(40)
+	p.StartStage("upload secondary", 100)
+
+	output := buf.String()
+	assert.Contains(t, output, "Uploading to secondary")
+	assert.NotContains(t, output, "100%")
 }
 
-type syncBuffer struct {
-	bytes.Buffer
+func TestCLIProgressFailStageCleanup(t *testing.T) {
+	var buf bytes.Buffer
+	p := NewCLIProgress(&buf)
+	p.terminal = true
+
+	p.StartStage("export test-db", -1)
+	p.FailStage()
+	p.Done()
+
+	// Should have cleared line with \r\033[2K
+	assert.Contains(t, buf.String(), "\r\033[2K")
 }
 
-func TestProgressHeartbeatNonTTYTicker(t *testing.T) {
-	// Heartbeat runs for short time without error
-	var out syncBuffer
-	hb := startProgressHeartbeat(&out, "check", "site-a", "checking")
-	time.Sleep(10 * time.Millisecond)
-	hb.Stop()
+func TestWriteProgressCleanupDoesNotAddBlankLine(t *testing.T) {
+	var output bytes.Buffer
+
+	writeProgressCleanup(&output, true)
+
+	assert.Equal(t, "\r\033[2K", output.String())
+}
+
+func TestWriteProgressCleanupSkipsOutputWithoutRenderedFrame(t *testing.T) {
+	var output bytes.Buffer
+
+	writeProgressCleanup(&output, false)
+
+	assert.Empty(t, output.String())
 }

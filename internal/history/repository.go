@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type Repository struct {
@@ -141,4 +142,50 @@ func (r *Repository) ListRuns(ctx context.Context, filter RunFilter) ([]BackupRu
 		return nil, fmt.Errorf("list backup runs: %w", err)
 	}
 	return runs, nil
+}
+
+// ListRunsInRange returns all backup runs whose started_at falls within
+// [from, to), ordered by started_at ASC. Packages are not preloaded because
+// report aggregation only needs run-level fields.
+func (r *Repository) ListRunsInRange(ctx context.Context, from, to time.Time) ([]BackupRun, error) {
+	var runs []BackupRun
+	err := r.db.WithContext(ctx).
+		Where("started_at >= ? AND started_at < ?", from.UTC(), to.UTC()).
+		Order("started_at ASC").
+		Find(&runs).Error
+	if err != nil {
+		return nil, fmt.Errorf("list runs in range: %w", err)
+	}
+	return runs, nil
+}
+
+// ReportDelivered reports whether a report of the given type and period has
+// already been delivered. reportType is "daily" or "monthly"; period is
+// "2006-01-02" for daily and "2006-01" for monthly.
+func (r *Repository) ReportDelivered(ctx context.Context, reportType, period string) (bool, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Model(&ReportDelivery{}).
+		Where("report_type = ? AND period = ?", reportType, period).
+		Count(&count).Error
+	if err != nil {
+		return false, fmt.Errorf("check report delivery %s/%s: %w", reportType, period, err)
+	}
+	return count > 0, nil
+}
+
+// RecordDelivery marks a report as delivered so the scheduler cannot send it
+// again. It is a no-op when the record already exists.
+func (r *Repository) RecordDelivery(ctx context.Context, reportType, period string, deliveredAt time.Time) error {
+	delivery := &ReportDelivery{
+		ID:          uuid.NewString(),
+		ReportType:  reportType,
+		Period:      period,
+		DeliveredAt: deliveredAt.UTC(),
+	}
+	if err := r.db.WithContext(ctx).
+		Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "report_type"}, {Name: "period"}}, DoNothing: true}).
+		Create(delivery).Error; err != nil {
+		return fmt.Errorf("record report delivery %s/%s: %w", reportType, period, err)
+	}
+	return nil
 }

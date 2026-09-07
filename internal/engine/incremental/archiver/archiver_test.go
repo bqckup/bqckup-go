@@ -13,6 +13,7 @@ import (
 	"github.com/bqckup/bqckup-go/internal/engine/incremental"
 	"github.com/bqckup/bqckup-go/internal/engine/incremental/backend"
 	"github.com/bqckup/bqckup-go/internal/engine/incremental/repository"
+	"github.com/bqckup/bqckup-go/internal/engine/incremental/tree"
 )
 
 const testPassword = "archiver-test-password"
@@ -203,6 +204,14 @@ func TestSecondBackupReusesUnmodifiedFiles(t *testing.T) {
 	}
 	if !parentFound {
 		t.Fatalf("second snapshot parent = %#v, want previous snapshot", snapshots)
+	}
+}
+
+func TestCloneNodePreservesEmptyFileBlobList(t *testing.T) {
+	original := &tree.Node{Content: []incremental.ID{}}
+	clone := cloneNode(original)
+	if clone.Content == nil {
+		t.Fatal("cloned empty file has nil blob list")
 	}
 }
 

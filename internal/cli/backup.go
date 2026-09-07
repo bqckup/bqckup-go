@@ -105,20 +105,21 @@ func newBackupCommand(opts *options) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return withApplication(cmd, opts.configDir, func(application *app.App) error {
 				if len(args) == 1 {
-					var heartbeat *progressHeartbeat
+					var progress *CLIProgress
 					if opts.output != "json" {
 						site, ok := application.Configuration().Site(args[0])
 						if ok {
-							progress := backupProgressForSite(site)
-							if err := writeBackupStartText(cmd.ErrOrStderr(), progress); err != nil {
+							runProgress := backupProgressForSite(site)
+							if err := writeBackupStartText(cmd.ErrOrStderr(), runProgress); err != nil {
 								return err
 							}
-							heartbeat = startProgressHeartbeat(cmd.ErrOrStderr(), "backup", progress.SiteName, "running")
+							progress = NewCLIProgress(cmd.ErrOrStderr())
+							application.SetBackupProgress(progress)
 						}
 					}
 					result, err := application.RunBackup(cmd.Context(), args[0], force)
-					if heartbeat != nil {
-						heartbeat.Stop()
+					if progress != nil {
+						progress.Done()
 					}
 					if err != nil {
 						return err
@@ -137,32 +138,33 @@ func newBackupCommand(opts *options) *cobra.Command {
 
 				var progressErr error
 				var observer app.BackupRunObserver
-				var heartbeat *progressHeartbeat
+				var progress *CLIProgress
 				if opts.output != "json" {
-					observer = func(progress app.BackupRunProgress) {
+					progress = NewCLIProgress(cmd.ErrOrStderr())
+					application.SetBackupProgress(progress)
+					observer = func(runProgress app.BackupRunProgress) {
 						if progressErr != nil {
 							return
 						}
-						if progress.Result == nil {
-							progressErr = writeBackupStartText(cmd.ErrOrStderr(), progress)
-							if progressErr == nil {
-								heartbeat = startProgressHeartbeat(cmd.ErrOrStderr(), "backup", progress.SiteName, "running")
-							}
+						if runProgress.Result == nil {
+							progressErr = writeBackupStartText(cmd.ErrOrStderr(), runProgress)
 							return
 						}
-						if heartbeat != nil {
-							heartbeat.Stop()
-							heartbeat = nil
+						if progress != nil {
+							progress.Done()
 						}
-						progressErr = writeRunResultText(cmd.OutOrStdout(), *progress.Result)
-						if progressErr == nil && progress.Error != nil {
-							progressErr = writeFailureReason(cmd.ErrOrStderr(), progress.Error)
+						progressErr = writeRunResultText(cmd.OutOrStdout(), *runProgress.Result)
+						if progressErr == nil && runProgress.Error != nil {
+							progressErr = writeFailureReason(cmd.ErrOrStderr(), runProgress.Error)
+						}
+						if progressErr == nil {
+							_, progressErr = fmt.Fprintln(cmd.OutOrStdout())
 						}
 					}
 				}
 				results, runErr := application.RunEnabledBackups(cmd.Context(), force, observer)
-				if progressErr != nil {
-					return progressErr
+				if progress != nil {
+					progress.Done()
 				}
 				if progressErr != nil {
 					return progressErr
@@ -254,29 +256,8 @@ func newBackupCommand(opts *options) *cobra.Command {
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return withApplication(cmd, opts.configDir, func(application *app.App) error {
-				var heartbeat *progressHeartbeat
-				if opts.output != "json" && !quiet {
-					if err := writeRestoreStartText(cmd.ErrOrStderr(), args[0], destination, snapshot, target); err != nil {
-						return err
-					}
-					heartbeat = startProgressHeartbeat(cmd.ErrOrStderr(), "restore", args[0], "restoring")
-				}
-				var onPrompt, onAnswer func()
-				if heartbeat != nil {
-					onPrompt = heartbeat.Pause
-					onAnswer = heartbeat.Resume
-				}
-				confirm := resticRestoreOverwrite{
-					force:    force,
-					in:       cmd.InOrStdin(),
-					out:      cmd.ErrOrStderr(),
-					onPrompt: onPrompt,
-					onAnswer: onAnswer,
-				}.confirm
+				confirm := resticRestoreOverwrite{force: force, in: cmd.InOrStdin(), out: cmd.ErrOrStderr()}.confirm
 				result, err := application.RestoreSnapshot(cmd.Context(), args[0], destination, snapshot, target, confirm)
-				if heartbeat != nil {
-					heartbeat.Stop()
-				}
 				if err != nil {
 					return err
 				}
@@ -442,25 +423,65 @@ func writeBackupStartText(out io.Writer, progress app.BackupRunProgress) error {
 	return err
 }
 
+type backupProgressHeartbeat struct {
+	stop     chan struct{}
+	done     chan struct{}
+	terminal bool
+}
+
+func startBackupProgressHeartbeat(out io.Writer, siteName string) *backupProgressHeartbeat {
+	heartbeat := &backupProgressHeartbeat{stop: make(chan struct{}), done: make(chan struct{}), terminal: isTerminalWriter(out)}
+	go func() {
+		defer close(heartbeat.done)
+		interval := 5 * time.Second
+		if heartbeat.terminal {
+			interval = 250 * time.Millisecond
+		}
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		started := time.Now()
+		frame := 0
+		for {
+			select {
+			case <-ticker.C:
+				elapsed := time.Since(started).Round(time.Second)
+				if heartbeat.terminal {
+					frames := "|/-\\"
+					_, _ = fmt.Fprintf(out, "\r[%c] backup:%s: running (%s elapsed)", frames[frame%len(frames)], siteName, elapsed)
+					frame++
+				} else {
+					_, _ = fmt.Fprintf(out, "[...] backup:%s: still running (%s elapsed)\n", siteName, elapsed)
+				}
+			case <-heartbeat.stop:
+				if heartbeat.terminal {
+					_, _ = fmt.Fprint(out, "\r\033[2K\n")
+				}
+				return
+			}
+		}
+	}()
+	return heartbeat
+}
+
+func (h *backupProgressHeartbeat) Stop() {
+	close(h.stop)
+	<-h.done
+}
+
 // resticRestoreOverwrite implements the engine's conflict confirmation: it
 // lists every conflict, prompts once on stderr, and maps the outcome to
 // the established error categories (preflight for non-terminal stdin,
 // cancellation for a declined prompt).
 type resticRestoreOverwrite struct {
-	force    bool
-	in       io.Reader
-	out      io.Writer
-	tty      func(io.Reader) bool // injectable for tests; defaults to isTerminalReader
-	onPrompt func()
-	onAnswer func()
+	force bool
+	in    io.Reader
+	out   io.Writer
+	tty   func(io.Reader) bool // injectable for tests; defaults to isTerminalReader
 }
 
 func (c resticRestoreOverwrite) confirm(conflicts []string) error {
 	if c.force {
 		return nil
-	}
-	if c.onPrompt != nil {
-		c.onPrompt()
 	}
 	for _, path := range conflicts {
 		fmt.Fprintf(c.out, "  %s\n", path)
@@ -474,9 +495,6 @@ func (c resticRestoreOverwrite) confirm(conflicts []string) error {
 		return apperror.Wrap(apperror.CategoryPreflight, fmt.Sprintf("restore would overwrite %d files; re-run with --force to overwrite them", len(conflicts)), nil)
 	}
 	line, _ := bufio.NewReader(c.in).ReadString('\n')
-	if c.onAnswer != nil {
-		c.onAnswer()
-	}
 	if answer := strings.TrimSpace(line); answer != "y" && answer != "Y" {
 		return apperror.Wrap(apperror.CategoryCancellation, "restore cancelled by user", nil)
 	}

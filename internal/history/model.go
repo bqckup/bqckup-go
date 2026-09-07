@@ -9,6 +9,7 @@ const (
 	StatusSuccess   RunStatus = "success"
 	StatusFailed    RunStatus = "failed"
 	StatusCancelled RunStatus = "cancelled"
+	StatusSkipped   RunStatus = "skipped"
 	StatusNoChange  RunStatus = "no_change"
 )
 
@@ -56,4 +57,14 @@ func (Package) TableName() string { return "artifacts" }
 type RunFilter struct {
 	Site  string
 	Limit int
+}
+
+// ReportDelivery records that a scheduled report has been sent for a given
+// period, preventing duplicate delivery when the scheduler retries.
+type ReportDelivery struct {
+	ID          string    `gorm:"type:text;primaryKey" json:"id"`
+	ReportType  string    `gorm:"type:text;not null;uniqueIndex:idx_report_delivery_type_period" json:"report_type"`
+	Period      string    `gorm:"type:text;not null;uniqueIndex:idx_report_delivery_type_period" json:"period"`
+	DeliveredAt time.Time `gorm:"not null" json:"delivered_at"`
+	CreatedAt   time.Time `gorm:"not null" json:"created_at"`
 }

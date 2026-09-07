@@ -14,9 +14,10 @@ strict configuration contract, and backup safety invariants.
    branch, `git status`, and recent commits. Preserve unrelated user changes.
 2. Trace the requested behavior through current code and tests. Treat tests as
    executable contracts; do not rely on deleted plans or historical reports.
-3. Read `README.md`, `USER-GUIDE.md`, and the current changelog entry for
-   public behavior. Check `configs/`, `bqckup --help`, and the `bqckup init`
-   templates before changing commands or configuration examples.
+3. Read the short operator path in `README.md`, then use `USER-GUIDE.md` and
+   the configuration reference for field details. Check `configs/`,
+   `bqckup --help`, and the `bqckup init` templates before changing commands
+   or configuration examples.
 4. State the smallest observable scope and acceptance criteria. Do not combine
    unrelated features.
 
@@ -55,8 +56,8 @@ Read these references only when relevant:
   `bqckup/<server_id>/<site>/incremental-backup/`. Preserve the tested legacy
   fallback only when `server_id` is empty.
 - Record terminal history before best-effort notifications. Notification
-  failures warn but never alter backup status or history; `events: [all]`
-  matches every supported terminal notification event.
+  failures warn but never alter backup status or history. Route events are
+  `all`, `backup_failed`, `backup_cancelled`, or `backup_no_change`.
 - Full archive mode and the built-in Restic-compatible incremental mode are
   both supported. Do not reintroduce Rustic, an engine selector, or an external
   Restic backup process.
@@ -72,3 +73,8 @@ storage, providers, SMTP, or webhooks. Run focused tests, `make verify`, and
 `sh scripts/check-docs.sh`. Report the behavior changed, exact verification
 results, docs/config impact, security and cancellation considerations, and
 intentionally deferred work.
+
+Documentation rules: keep the README task-oriented, keep detailed fields in
+the user guide/configuration reference, and use `<placeholder>` values for
+credentials, URLs, IDs, and names. List finite option sets beside YAML
+examples; comments must not introduce a value that strict validation rejects.

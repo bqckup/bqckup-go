@@ -19,6 +19,7 @@ type rootDocument struct {
 	ServerID      string        `mapstructure:"server_id"`
 	App           App           `mapstructure:"app"`
 	Notifications Notifications `mapstructure:"notifications"`
+	Reports       Reports       `mapstructure:"reports"`
 }
 
 type storageDocument struct {
@@ -44,9 +45,6 @@ func Load(ctx context.Context, dir string) (Config, error) {
 	rootPath := filepath.Join(dir, "bqckup.yaml")
 	var root rootDocument
 	if err := decode(rootPath, &root, nil); err != nil {
-		return Config{}, err
-	}
-	if err := validateNotificationCredentialFile(rootPath, root.Notifications); err != nil {
 		return Config{}, err
 	}
 	if err := validateNotificationCredentialFile(rootPath, root.Notifications); err != nil {
@@ -123,6 +121,7 @@ func Load(ctx context.Context, dir string) (Config, error) {
 		Storages:      stores.Storages,
 		Sites:         sites,
 		Notifications: root.Notifications,
+		Reports:       root.Reports,
 	}
 	if primary, ok := cfg.PrimaryStorage(); ok {
 		for index := range cfg.Sites {
