@@ -4,6 +4,11 @@ All notable changes to Bqckup are documented in this file.
 
 ## Unreleased
 
+## v0.0.9
+
+- Provide the S3 transfer manager with the package size so large multipart
+  uploads automatically stay within the 10,000-part limit.
+
 ## v0.0.8
 
 - Retry transient S3 upload failures up to ten times with the AWS SDK's

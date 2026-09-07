@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bqckup/bqckup-go/internal/apperror"
 	"github.com/bqckup/bqckup-go/internal/backup/incremental"
 	"github.com/bqckup/bqckup-go/internal/config"
 	"github.com/bqckup/bqckup-go/internal/history"
@@ -104,6 +105,8 @@ func TestRunnerDoesNotApplyRetentionAfterStorageFailure(t *testing.T) {
 	assert.Equal(t, history.StatusFailed, deps.repository.finishedStatus)
 	assert.Equal(t, 0, deps.retainer.calls)
 	assert.Equal(t, "storage", deps.repository.errorCategory)
+	assert.Contains(t, apperror.DiagnosticMessage(err), `destination="local-primary"`)
+	assert.Contains(t, apperror.DiagnosticMessage(err), "size=")
 }
 
 func TestRunnerMarksCancellation(t *testing.T) {

@@ -34,12 +34,25 @@ func TestPutUploadsConditionallyAndVerifiesMetadata(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, uploader.input)
 	assert.Equal(t, "*", aws.ToString(uploader.input.IfNoneMatch))
+	assert.Equal(t, pkg.Size, aws.ToInt64(uploader.input.ContentLength))
 	assert.Equal(t, "company/bqckup/site/2026-08-05T00-00-00Z/files.tar.gz", aws.ToString(uploader.input.Key))
 	assert.Equal(t, pkg.Size, aws.ToInt64(uploader.input.MpuObjectSize))
 	assert.Equal(t, pkg.SHA256, uploader.input.Metadata[checksumMetadata])
 	assert.Equal(t, strconv.FormatInt(pkg.Size, 10), uploader.input.Metadata[sizeMetadata])
 	assert.Equal(t, pkg.SHA256, stored.SHA256)
 	assert.Equal(t, pkg.Size, stored.Size)
+}
+
+func TestMultipartPlanFitsMaximumPartCount(t *testing.T) {
+	partSize, parts, err := multipartPlan(90*1024*1024*1024 + 900*1024*1024)
+	require.NoError(t, err)
+	assert.Greater(t, partSize, int64(defaultUploadPartSize))
+	assert.LessOrEqual(t, parts, int64(maxUploadParts))
+}
+
+func TestMultipartPlanRejectsObjectsAboveS3Maximum(t *testing.T) {
+	_, _, err := multipartPlan(maxObjectSize + 1)
+	assert.EqualError(t, err, "package exceeds S3 maximum object size")
 }
 
 func TestPutRejectsLocalPackageMismatchBeforeUpload(t *testing.T) {

@@ -17,3 +17,8 @@ func TestErrorPreservesCauseAndExposesRedactedMessage(t *testing.T) {
 	assert.Equal(t, "could not store backup package", UserMessage(err))
 	assert.NotContains(t, UserMessage(err), "secret")
 }
+
+func TestDiagnosticMessageIncludesRedactedCauseChain(t *testing.T) {
+	err := Wrap(CategoryStorage, "could not store backup package", errors.New("upload failed: exceeded total allowed MaxUploadParts; endpoint=https://s3.example.test/bucket?secret=topsecret"))
+	assert.Equal(t, "could not store backup package: upload failed: exceeded total allowed MaxUploadParts; endpoint=<redacted-url>", DiagnosticMessage(err))
+}

@@ -1,6 +1,10 @@
 package apperror
 
-import "errors"
+import (
+	"errors"
+	"regexp"
+	"strings"
+)
 
 type Category string
 
@@ -44,6 +48,46 @@ func UserMessage(err error) string {
 		return applicationError.Message
 	}
 	return "an internal error occurred"
+}
+
+var (
+	diagnosticURL    = regexp.MustCompile(`https?://[^\s]+`)
+	diagnosticSecret = regexp.MustCompile(`(?i)(password|secret|access[_-]?key|webhook[_-]?url)=([^\s,;]+)`)
+)
+
+// DiagnosticMessage returns a deduplicated, redacted error chain suitable for
+// operational logs. User-facing messages remain controlled by UserMessage.
+func DiagnosticMessage(err error) string {
+	if err == nil {
+		return ""
+	}
+	parts := make([]string, 0, 3)
+	seen := make(map[string]struct{})
+	var walk func(error)
+	walk = func(current error) {
+		if current == nil {
+			return
+		}
+		message := strings.TrimSpace(current.Error())
+		if message != "" {
+			message = diagnosticURL.ReplaceAllString(message, "<redacted-url>")
+			message = diagnosticSecret.ReplaceAllString(message, "$1=<redacted>")
+			if _, ok := seen[message]; !ok {
+				seen[message] = struct{}{}
+				parts = append(parts, message)
+			}
+		}
+		switch unwrapped := current.(type) {
+		case interface{ Unwrap() []error }:
+			for _, cause := range unwrapped.Unwrap() {
+				walk(cause)
+			}
+		case interface{ Unwrap() error }:
+			walk(unwrapped.Unwrap())
+		}
+	}
+	walk(err)
+	return strings.Join(parts, ": ")
 }
 
 // Hidden wraps an error with a public message. The cause is never shown
