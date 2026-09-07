@@ -262,7 +262,7 @@ func TestRestoreReportsTextProgress(t *testing.T) {
 	targetDir := filepath.Join(t.TempDir(), "restored")
 	root, stdout, stderr := commandForTest(t, "--config-dir", configDir, "backup", "restore", "site-b", "--destination", "local-primary", "--target", targetDir)
 	require.NoError(t, root.Execute())
-	assert.Equal(t, "[>] restore:site-b: restoring snapshot latest from local-primary to "+targetDir+"\n", stderr.String())
+	assert.Contains(t, stderr.String(), "[>] restore:site-b: restoring snapshot latest from local-primary to "+targetDir+"\n")
 	assert.Contains(t, stdout.String(), "restored snapshot")
 }
 

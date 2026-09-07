@@ -2,6 +2,13 @@
 
 All notable changes to Bqckup are documented in this file.
 
+## v0.0.9
+
+- Add shared progress reporting for backup, restore, check, and repair-index
+  commands.
+- Provide the S3 transfer manager with the package size so large multipart
+  uploads automatically stay within the 10,000-part limit.
+
 ## v0.0.7
 
 - Reuse unchanged files and directory trees from the previous matching

@@ -81,6 +81,7 @@ func (s *Store) Put(ctx context.Context, pkg storage.Package, key string) (stora
 		Bucket:        aws.String(s.bucket),
 		Key:           aws.String(finalKey),
 		Body:          file,
+		ContentLength: aws.Int64(size),
 		IfNoneMatch:   aws.String("*"),
 		MpuObjectSize: aws.Int64(size),
 		Metadata: map[string]string{
