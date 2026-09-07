@@ -256,7 +256,7 @@ func (a *App) RunBackup(ctx context.Context, siteName string, force bool) (backu
 	}
 	result, err := a.runner.Run(ctx, site, force)
 	if err != nil {
-		a.logger.write(logError, fmt.Sprintf("event=backup_finished site=%q status=%q error=%q", siteName, result.Status, apperror.UserMessage(err)))
+		a.logger.write(logError, fmt.Sprintf("event=backup_finished site=%q status=%q category=%q error=%q", siteName, result.Status, apperror.CategoryOf(err), apperror.DiagnosticMessage(err)))
 	} else {
 		a.logger.write(logInfo, fmt.Sprintf("event=backup_finished site=%q status=%q run_id=%q", siteName, result.Status, result.RunID))
 	}
