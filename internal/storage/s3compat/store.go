@@ -27,8 +27,11 @@ import (
 )
 
 const (
-	checksumMetadata = "bqckup-sha256"
-	sizeMetadata     = "bqckup-size"
+	checksumMetadata            = "bqckup-sha256"
+	sizeMetadata                = "bqckup-size"
+	defaultUploadPartSize int64 = 8 * 1024 * 1024
+	maxUploadParts        int64 = 10000
+	maxObjectSize         int64 = 5 * 1024 * 1024 * 1024 * 1024
 )
 
 var ErrObjectExists = errors.New("storage object already exists")
@@ -83,6 +86,9 @@ func (s *Store) put(ctx context.Context, pkg storage.Package, key string, progre
 	if err != nil {
 		return storage.StoredPackage{}, err
 	}
+	if _, _, err := multipartPlan(size); err != nil {
+		return storage.StoredPackage{}, err
+	}
 
 	file, err := os.Open(pkg.Path)
 	if err != nil {
@@ -134,6 +140,24 @@ func (s *Store) put(ctx context.Context, pkg storage.Package, key string, progre
 	}
 
 	return storage.StoredPackage{Key: finalKey, Size: size, SHA256: checksum}, nil
+}
+
+// multipartPlan calculates a safe part size and count before opening an
+// upload. The SDK can apply the same adjustment when ContentLength is known,
+// but this guard fails oversized objects before any network transfer starts.
+func multipartPlan(size int64) (partSize, parts int64, err error) {
+	if size < 0 || size > maxObjectSize {
+		return 0, 0, errors.New("package exceeds S3 maximum object size")
+	}
+	partSize = int64(defaultUploadPartSize)
+	if size/partSize >= maxUploadParts {
+		partSize = size/maxUploadParts + 1
+	}
+	parts = (size + partSize - 1) / partSize
+	if parts == 0 {
+		parts = 1
+	}
+	return partSize, parts, nil
 }
 
 func inspectPackage(ctx context.Context, pkg storage.Package) (string, int64, error) {

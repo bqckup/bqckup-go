@@ -3,6 +3,7 @@ package s3compat
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
@@ -63,6 +64,9 @@ func New(ctx context.Context, options Options) (*Store, error) {
 			clientOptions.UsePathStyle = true
 		}
 	})
-	uploader := transfermanager.New(client)
+	uploader := transfermanager.New(client, func(options *transfermanager.Options) {
+		// Keep AbortMultipartUpload possible after caller cancellation.
+		options.FailTimeout = 30 * time.Second
+	})
 	return newWithClients(options, uploader, client, s3.NewPresignClient(client)), nil
 }

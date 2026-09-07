@@ -43,6 +43,18 @@ func TestPutUploadsConditionallyAndVerifiesMetadata(t *testing.T) {
 	assert.Equal(t, pkg.Size, stored.Size)
 }
 
+func TestMultipartPlanFitsMaximumPartCount(t *testing.T) {
+	partSize, parts, err := multipartPlan(90*1024*1024*1024 + 900*1024*1024)
+	require.NoError(t, err)
+	assert.Greater(t, partSize, int64(defaultUploadPartSize))
+	assert.LessOrEqual(t, parts, int64(maxUploadParts))
+}
+
+func TestMultipartPlanRejectsObjectsAboveS3Maximum(t *testing.T) {
+	_, _, err := multipartPlan(maxObjectSize + 1)
+	assert.EqualError(t, err, "package exceeds S3 maximum object size")
+}
+
 func TestPutRejectsLocalPackageMismatchBeforeUpload(t *testing.T) {
 	pkg := sourcePackage(t, []byte("actual"))
 	pkg.SHA256 = hex.EncodeToString(make([]byte, sha256.Size))

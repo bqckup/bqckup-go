@@ -670,7 +670,8 @@ func (r *Runner) storePackage(ctx context.Context, runID string, pkg Package, ob
 		if putErr != nil {
 			r.progress.FailStage()
 			recordErr := r.recordFailedPackage(ctx, runID, pkg, objectKey, []config.Destination{destination}, "could not store backup package")
-			operationErr := apperror.Wrap(apperror.CategoryStorage, "could not store backup package", putErr)
+			contextErr := fmt.Errorf("destination=%q size=%d bytes: %w", destination.Storage, pkg.Size, putErr)
+			operationErr := apperror.Wrap(apperror.CategoryStorage, "could not store backup package", contextErr)
 			if recordErr != nil {
 				operationErr = errors.Join(operationErr, recordErr)
 			}
