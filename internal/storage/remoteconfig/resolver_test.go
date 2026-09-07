@@ -2,7 +2,9 @@ package remoteconfig
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,10 +16,36 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestRemoteDialerPrefersIPv4ThenFallsBackToIPv6(t *testing.T) {
+	var addresses []string
+	server, client := net.Pipe()
+	t.Cleanup(func() { _ = server.Close() })
+	t.Cleanup(func() { _ = client.Close() })
+	dialer := remoteDialer{
+		lookupIPAddr: func(context.Context, string) ([]net.IPAddr, error) {
+			return []net.IPAddr{{IP: net.ParseIP("2001:db8::1")}, {IP: net.ParseIP("192.0.2.10")}}, nil
+		},
+		dialContext: func(_ context.Context, _ string, address string) (net.Conn, error) {
+			addresses = append(addresses, address)
+			if address == "192.0.2.10:443" {
+				return nil, errors.New("IPv4 unavailable")
+			}
+			return client, nil
+		},
+	}
+
+	connection, err := dialer.DialContext(t.Context(), "tcp", "provider.example:443")
+	require.NoError(t, err)
+	require.Same(t, client, connection)
+	assert.Equal(t, []string{"192.0.2.10:443", "[2001:db8::1]:443"}, addresses)
+}
+
 func TestResolverLoadsRemoteStorageConfigurationIntoMemory(t *testing.T) {
-	var method, accept string
+	var method, accept, acceptEncoding, userAgent string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		method, accept = r.Method, r.Header.Get("Accept")
+		acceptEncoding = r.Header.Get("Accept-Encoding")
+		userAgent = r.Header.Get("User-Agent")
 		_, _ = w.Write([]byte(`{"bucket":"remote-bucket","access_key_id":"remote-key","secret_access_key":"remote-secret","endpoint":"https://objects.example.invalid","region":"us-east-1"}`))
 	}))
 	t.Cleanup(server.Close)
@@ -30,6 +58,8 @@ func TestResolverLoadsRemoteStorageConfigurationIntoMemory(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, http.MethodGet, method)
 	assert.Equal(t, "application/json", accept)
+	assert.Equal(t, "identity", acceptEncoding)
+	assert.Equal(t, "bqckup/remote-config", userAgent)
 	assert.Equal(t, "remote-bucket", resolved["remote"].Bucket)
 	assert.Equal(t, "remote-key", resolved["remote"].AccessKeyID)
 	assert.Equal(t, "remote-secret", resolved["remote"].SecretAccessKey)
