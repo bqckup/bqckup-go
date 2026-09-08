@@ -47,7 +47,8 @@ sudo make setup
 ```
 
 `make setup` builds or downloads the application, installs it in
-`/usr/local/bin`, and prepares the default configuration directories.
+`/usr/bin`, and prepares the default configuration directories. Set `BIN_DIR`
+to override the binary installation directory.
 
 ### Install from a release
 
@@ -433,10 +434,10 @@ Add cron entries to trigger reports after your daily backup window:
 
 ```cron
 # Send daily report at 08:00
-0 8 * * * root /usr/local/bin/bqckup report send daily
+0 8 * * * root /usr/bin/bqckup report send daily
 
 # Send monthly report on the 1st of each month at 08:00
-0 8 1 * * root /usr/local/bin/bqckup report send monthly
+0 8 1 * * root /usr/bin/bqckup report send monthly
 ```
 
 The `schedule.time` and `schedule.day_of_month` fields in `bqckup.yaml` are
@@ -520,15 +521,15 @@ Bqckup does not include a scheduler. Use cron or a systemd timer.
 Example cron entry for a daily run at 02:30:
 
 ```cron
-30 2 * * * /usr/local/bin/bqckup backup run website
+30 2 * * * /usr/bin/bqckup backup run website
 ```
 
 To also send a daily report at 08:00 and a monthly report on the 1st:
 
 ```cron
-30 2 * * * root /usr/local/bin/bqckup backup run website
-0  8 * * * root /usr/local/bin/bqckup report send daily
-0  8 1 * * root /usr/local/bin/bqckup report send monthly
+30 2 * * * root /usr/bin/bqckup backup run website
+0  8 * * * root /usr/bin/bqckup report send daily
+0  8 1 * * root /usr/bin/bqckup report send monthly
 ```
 
 Use the same operating-system user for scheduled and manual runs. Mixing root

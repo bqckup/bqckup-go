@@ -23,7 +23,7 @@ done
 # Configurable paths & repository options
 GITHUB_REPO="${GITHUB_REPO:-bqckup/bqckup-go}"
 BQCKUP_VERSION="${BQCKUP_VERSION:-latest}"
-BIN_DIR="${BIN_DIR:-/usr/local/bin}"
+BIN_DIR="${BIN_DIR:-/usr/bin}"
 CONFIG_DIR="${CONFIG_DIR:-/etc/bqckup}"
 DATA_DIR="${DATA_DIR:-/var/lib/bqckup}"
 BACKUP_DIR="${BACKUP_DIR:-/var/backups/bqckup}"

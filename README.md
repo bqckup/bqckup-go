@@ -204,7 +204,7 @@ Run Bqckup with cron, systemd timers, or another scheduler. A daily cron job
 for one site could look like this:
 
 ```cron
-0 2 * * * root /usr/local/bin/bqckup backup run example
+0 2 * * * root /usr/bin/bqckup backup run example
 ```
 
 ## Help and contributing

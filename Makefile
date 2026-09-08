@@ -13,8 +13,8 @@ build:
 	go build -o bqckup ./cmd/bqckup
 
 install: build
-	install -d -m 0755 /usr/local/bin
-	install -m 0755 bqckup /usr/local/bin/bqckup
+	install -d -m 0755 /usr/bin
+	install -m 0755 bqckup /usr/bin/bqckup
 
 setup:
 	./scripts/install.sh
