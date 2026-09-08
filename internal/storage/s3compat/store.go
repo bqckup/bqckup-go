@@ -86,7 +86,8 @@ func (s *Store) put(ctx context.Context, pkg storage.Package, key string, progre
 	if err != nil {
 		return storage.StoredPackage{}, err
 	}
-	if _, _, err := multipartPlan(size); err != nil {
+	partSize, _, err := multipartPlan(size)
+	if err != nil {
 		return storage.StoredPackage{}, err
 	}
 
@@ -110,6 +111,8 @@ func (s *Store) put(ctx context.Context, pkg storage.Package, key string, progre
 			checksumMetadata: checksum,
 			sizeMetadata:     strconv.FormatInt(size, 10),
 		},
+	}, func(options *transfermanager.Options) {
+		options.PartSizeBytes = partSize
 	})
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
