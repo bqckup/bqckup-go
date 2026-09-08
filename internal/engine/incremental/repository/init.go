@@ -80,6 +80,17 @@ func rollbackInit(ctx context.Context, b backend.Backend, key incremental.Handle
 // decrypts and validates the config with that key, and loads every index
 // file into the master index.
 func Open(ctx context.Context, b backend.Backend, password string) (*Repository, error) {
+	return open(ctx, b, password, true)
+}
+
+// OpenForLockMaintenance opens the repository key and config without loading
+// its indexes. Lock cleanup only needs the master key, and must remain usable
+// when an index object is slow or unavailable.
+func OpenForLockMaintenance(ctx context.Context, b backend.Backend, password string) (*Repository, error) {
+	return open(ctx, b, password, false)
+}
+
+func open(ctx context.Context, b backend.Backend, password string, loadIndexes bool) (*Repository, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -100,8 +111,10 @@ func Open(ctx context.Context, b backend.Backend, password string) (*Repository,
 	if err != nil {
 		return nil, err
 	}
-	if err := repo.index.LoadAll(ctx, b, master); err != nil {
-		return nil, fmt.Errorf("repository: load indexes: %w", err)
+	if loadIndexes {
+		if err := repo.index.LoadAll(ctx, b, master); err != nil {
+			return nil, fmt.Errorf("repository: load indexes: %w", err)
+		}
 	}
 	return repo, nil
 }

@@ -171,6 +171,26 @@ func TestOpenMissingRepo(t *testing.T) {
 	}
 }
 
+type rejectIndexListBackend struct {
+	backend.Backend
+}
+
+func (b *rejectIndexListBackend) List(ctx context.Context, fileType incremental.FileType, fn func(incremental.Handle, int64) error) error {
+	if fileType == incremental.IndexFile {
+		return errors.New("index listing must not be needed for lock maintenance")
+	}
+	return b.Backend.List(ctx, fileType, fn)
+}
+
+func TestOpenForLockMaintenanceSkipsIndexes(t *testing.T) {
+	ctx := context.Background()
+	_, local := newRepo(t, ctx)
+	_, err := OpenForLockMaintenance(ctx, &rejectIndexListBackend{Backend: local}, testPassword)
+	if err != nil {
+		t.Fatalf("lock-maintenance open should not load indexes: %v", err)
+	}
+}
+
 func TestSaveBlobDedup(t *testing.T) {
 	ctx := context.Background()
 	repo, local := newRepo(t, ctx)

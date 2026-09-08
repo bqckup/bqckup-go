@@ -337,7 +337,7 @@ func (e *Engine) Unlock(ctx context.Context, repo backupincremental.RepoConfig) 
 	if err != nil {
 		return err
 	}
-	r, err := repository.Open(ctx, b, repo.Password)
+	r, err := repository.OpenForLockMaintenance(ctx, b, repo.Password)
 	if err != nil {
 		return &incremental.RedactedError{Category: "repository", Message: "could not open the repository to unlock it", Err: err}
 	}
