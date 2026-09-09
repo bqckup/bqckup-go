@@ -184,6 +184,9 @@ type recordingProgress struct {
 		label string
 		total int64
 	}
+	active   string
+	finished []string
+	failed   []string
 }
 
 func (p *recordingProgress) StartStage(label string, total int64) {
@@ -191,12 +194,19 @@ func (p *recordingProgress) StartStage(label string, total int64) {
 		label string
 		total int64
 	}{label: label, total: total})
+	p.active = label
 }
 
-func (*recordingProgress) Add(int64)    {}
-func (*recordingProgress) FinishStage() {}
-func (*recordingProgress) FailStage()   {}
-func (*recordingProgress) Done()        {}
+func (*recordingProgress) Add(int64) {}
+func (p *recordingProgress) FinishStage() {
+	p.finished = append(p.finished, p.active)
+	p.active = ""
+}
+func (p *recordingProgress) FailStage() {
+	p.failed = append(p.failed, p.active)
+	p.active = ""
+}
+func (*recordingProgress) Done() {}
 
 func TestRunnerUsesKnownTotalsForLargeStages(t *testing.T) {
 	deps := successfulDependencies(t)
@@ -613,7 +623,10 @@ func TestRunnerIncrementalPackageRecordsSnapshotSize(t *testing.T) {
 
 func TestRunnerIncrementalBackupSuccess(t *testing.T) {
 	deps := successfulDependencies(t)
-	runner := NewRunner(deps.dependencies())
+	progress := &recordingProgress{}
+	dependencies := deps.dependencies()
+	dependencies.Progress = progress
+	runner := NewRunner(dependencies)
 
 	site := validSite()
 	site.BackupMode = "incremental"
@@ -628,6 +641,20 @@ func TestRunnerIncrementalBackupSuccess(t *testing.T) {
 	assert.Equal(t, 1, deps.incremental.backupCalls)
 	assert.Equal(t, 1, deps.incremental.retentionCalls)
 	assert.Equal(t, 0, deps.archiver.calls) // classic archiver not called
+	assert.Equal(t, []string{
+		"preparing repository local-primary",
+		"backing up to local-primary",
+		"applying retention to local-primary",
+	}, progress.labelNames())
+	assert.Equal(t, []string{
+		"preparing repository local-primary",
+		"backing up to local-primary",
+		"applying retention to local-primary",
+	}, progress.finished)
+	assert.Empty(t, progress.failed)
+	for _, stage := range progress.stages {
+		assert.Equal(t, int64(-1), stage.total)
+	}
 
 	require.Len(t, deps.repository.packages, 1)
 	assert.Equal(t, "snap-001", deps.repository.packages[0].ObjectKey)
@@ -695,7 +722,10 @@ func TestRunnerIncrementalBackupMissingPassword(t *testing.T) {
 func TestRunnerIncrementalBackupFailureDoesNotRetain(t *testing.T) {
 	deps := successfulDependencies(t)
 	deps.incremental.backupErr = errors.New("restic failed to snapshot")
-	runner := NewRunner(deps.dependencies())
+	progress := &recordingProgress{}
+	dependencies := deps.dependencies()
+	dependencies.Progress = progress
+	runner := NewRunner(dependencies)
 
 	site := validSite()
 	site.BackupMode = "incremental"
@@ -708,6 +738,7 @@ func TestRunnerIncrementalBackupFailureDoesNotRetain(t *testing.T) {
 	assert.Equal(t, StatusFailed, result.Status)
 	assert.Equal(t, 1, deps.incremental.backupCalls)
 	assert.Equal(t, 0, deps.incremental.retentionCalls) // retention must NOT run
+	assert.Equal(t, []string{"backing up to local-primary"}, progress.failed)
 }
 
 // TestRunnerIncrementalFailureNotifiesCleanMessage: the top-level apperror
