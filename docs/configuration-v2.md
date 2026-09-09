@@ -19,7 +19,7 @@ Use these exact values; configuration decoding is strict.
 | `site.backup_mode` | `full` (default), `incremental` |
 | database `engine` | `mysql`, `postgres` |
 | notification channel `type` | `smtp`, `webhook`, `discord` |
-| notification route `events` | `all`, `backup_failed`, `backup_cancelled`, `backup_no_change` |
+| notification route `events` | `all`, `backup_failed`, `backup_partial`, `backup_cancelled`, `backup_no_change` |
 
 Values shown as `<placeholder>` are documentation placeholders. Replace them
 with real values before use.
@@ -220,7 +220,7 @@ notifications:
       webhook_url: <discord-webhook-url>
 
   routes:
-    # events options: all | backup_failed | backup_cancelled | backup_no_change
+    # events options: all | backup_failed | backup_partial | backup_cancelled | backup_no_change
     - events: [backup_failed]
       channels: [email, discord]
 ```
@@ -236,11 +236,11 @@ notifications:
   `0600`. Webhook URLs must be absolute HTTP(S) URLs; non-loopback endpoints
   require HTTPS.
 - **Routes** map events to channels. Events are `backup_failed`,
-  `backup_cancelled`, and `backup_no_change` (successful runs stay silent); a
-  route needs at least one event and may fan out to several channels. A channel
-  matched through several routes is sent once per event. Duplicate channel
-  names in the YAML map are not detected: the last definition wins (yaml map
-  semantics).
+  `backup_partial`, `backup_cancelled`, and `backup_no_change` (successful runs
+  stay silent); a route needs at least one event and may fan out to several
+  channels. A channel matched through several routes is sent once per event.
+  Duplicate channel names in the YAML map are not detected: the last definition
+  wins (yaml map semantics).
 - **Per-event notifications are opt-in**. For a quiet installation, leave the
   `notifications` block unset and rely on the scheduled daily/monthly report
   routes instead. This keeps operational monitoring in aggregate reports rather

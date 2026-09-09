@@ -174,14 +174,14 @@ func TestValidateNotificationsRejectsInvalidForms(t *testing.T) {
 			mutate: func(n *Notifications) {
 				n.Routes[0].Events = []string{"backup_started"}
 			},
-			wantErr: "must be one of all, backup_failed, backup_cancelled, backup_no_change, daily_report, or monthly_report",
+			wantErr: "must be one of all, backup_failed, backup_partial, backup_cancelled, backup_no_change, daily_report, or monthly_report",
 		},
 		{
 			name: "route with backup_succeeded rejected",
 			mutate: func(n *Notifications) {
 				n.Routes[0].Events = []string{"backup_succeeded"}
 			},
-			wantErr: "must be one of all, backup_failed, backup_cancelled, backup_no_change, daily_report, or monthly_report",
+			wantErr: "must be one of all, backup_failed, backup_partial, backup_cancelled, backup_no_change, daily_report, or monthly_report",
 		},
 	}
 	for _, test := range tests {
@@ -206,6 +206,13 @@ func TestValidateNotificationsAcceptsValidForms(t *testing.T) {
 	// Route with backup_no_change is valid.
 	cfg.Notifications.Routes = append(cfg.Notifications.Routes, Route{
 		Events:   []string{EventBackupNoChange},
+		Channels: []string{"email"},
+	})
+	require.NoError(t, cfg.Validate())
+
+	// Partial snapshots are actionable and can be routed independently.
+	cfg.Notifications.Routes = append(cfg.Notifications.Routes, Route{
+		Events:   []string{EventBackupPartial},
 		Channels: []string{"email"},
 	})
 	require.NoError(t, cfg.Validate())

@@ -222,7 +222,7 @@ func (s *SMTP) renderHTML(subject string, payload Payload, logoSrc ...string) st
 	}
 
 	var label, message string
-	if payload.Status == string(backup.StatusFailed) || payload.Status == string(backup.StatusNoChange) {
+	if payload.Status == string(backup.StatusFailed) || payload.Status == string(backup.StatusPartial) || payload.Status == string(backup.StatusNoChange) {
 		label, message = failureBlock(payload)
 		rows = append(rows,
 			struct{ name, value string }{"Consecutive Failures", fmt.Sprintf("%d", payload.FailureStreak)},
@@ -288,14 +288,7 @@ func (s *SMTP) renderReportHTML(subject string, payload Payload, logoSrc ...stri
 	r := payload.ReportData
 	var body strings.Builder
 
-	// Menghitung jumlah sukses secara eksplisit
 	totalDomains := len(r.Sites)
-	successfulDomainsCount := 0
-	for _, site := range r.Sites {
-		if site.Failed == 0 && site.Successful > 0 {
-			successfulDomainsCount++
-		}
-	}
 
 	fmt.Fprintf(&body, `<!DOCTYPE html>
 <html>
@@ -318,24 +311,25 @@ Bqckup
 <div style="height:3px;background:#%06X;"></div>
 <h2 style="margin:0;padding:24px 24px 12px;font-size:22px;font-weight:700;color:#1f2328;line-height:1.3;">%s</h2>
 <p style="padding:0 24px 16px;margin:0;font-size:14px;color:#586069;line-height:1.5;">%s</p>
-<p style="padding:0 24px 16px;margin:0;font-size:14px;color:#24292e;font-weight:600;">Summary: %d Successful, %d Failed (Total Domains: %d)</p>
+<p style="padding:0 24px 16px;margin:0;font-size:14px;color:#24292e;font-weight:600;">Summary: %d Successful, %d Partial, %d Failed (Total Domains: %d)</p>
 <table style="width:100%%;border-collapse:collapse;font-size:14px;">
 <tr style="background:#f6f8fa;">
 <th style="padding:8px 24px;text-align:left;color:#586069;font-weight:600;border-top:1px solid #e1e4e8;">Domain</th>
 <th style="padding:8px 12px;text-align:center;color:#586069;font-weight:600;border-top:1px solid #e1e4e8;">Success</th>
+<th style="padding:8px 12px;text-align:center;color:#586069;font-weight:600;border-top:1px solid #e1e4e8;">Partial</th>
 <th style="padding:8px 12px;text-align:center;color:#586069;font-weight:600;border-top:1px solid #e1e4e8;">Failed</th>
 </tr>
-`, src, reportColor(), html.EscapeString(subject), html.EscapeString(serverLine(payload.Hostname, payload.ServerIP)), r.Overall.Successful, r.Overall.Failed, totalDomains)
+`, src, reportColor(), html.EscapeString(subject), html.EscapeString(serverLine(payload.Hostname, payload.ServerIP)), r.Overall.Successful, r.Overall.Partial, r.Overall.Failed, totalDomains)
 
 	for _, site := range r.Sites {
 		fmt.Fprintf(&body,
-			`<tr><td style="padding:8px 24px;border-top:1px solid #e1e4e8;">%s</td><td style="padding:8px 12px;text-align:center;border-top:1px solid #e1e4e8;">%d</td><td style="padding:8px 12px;text-align:center;border-top:1px solid #e1e4e8;">%d</td></tr>
+			`<tr><td style="padding:8px 24px;border-top:1px solid #e1e4e8;">%s</td><td style="padding:8px 12px;text-align:center;border-top:1px solid #e1e4e8;">%d</td><td style="padding:8px 12px;text-align:center;border-top:1px solid #e1e4e8;">%d</td><td style="padding:8px 12px;text-align:center;border-top:1px solid #e1e4e8;">%d</td></tr>
 `,
-			html.EscapeString(site.SiteName), site.Successful, site.Failed,
+			html.EscapeString(site.SiteName), site.Successful, site.Partial, site.Failed,
 		)
 	}
 	if len(r.Sites) == 0 {
-		body.WriteString(`<tr><td colspan="3" style="padding:16px 24px;border-top:1px solid #e1e4e8;color:#586069;text-align:center;">No backup runs recorded for this period.</td></tr>
+		body.WriteString(`<tr><td colspan="4" style="padding:16px 24px;border-top:1px solid #e1e4e8;color:#586069;text-align:center;">No backup runs recorded for this period.</td></tr>
 `)
 	}
 	body.WriteString(`</table>

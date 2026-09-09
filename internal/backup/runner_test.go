@@ -635,6 +635,46 @@ func TestRunnerIncrementalBackupSuccess(t *testing.T) {
 	assert.Empty(t, deps.repository.packages[0].SHA256)
 }
 
+func TestRunnerIncrementalSourceErrorsProducePartialResult(t *testing.T) {
+	deps := successfulDependencies(t)
+	deps.notifier = &fakeNotifier{}
+	deps.incremental.summary = incremental.SnapshotSummary{
+		SnapshotID:          "snap-partial",
+		TotalBytesProcessed: 4096,
+		FilesSkipped:        2,
+	}
+
+	site := validSite()
+	site.BackupMode = "incremental"
+	site.Incremental = config.Incremental{Password: "test-secret-password"}
+
+	result, err := NewRunner(deps.dependencies()).Run(context.Background(), site, false)
+	require.NoError(t, err)
+	assert.Equal(t, Status("partial"), result.Status)
+	assert.Equal(t, history.RunStatus("partial"), deps.repository.finishedStatus)
+	assert.Equal(t, 1, deps.incremental.retentionCalls, "a usable partial snapshot still receives normal retention")
+	require.Len(t, deps.notifier.calls, 1)
+	assert.Equal(t, "backup_partial", deps.notifier.calls[0].Event)
+}
+
+func TestRunnerPartialFinalizationFailureNotifiesAsFailed(t *testing.T) {
+	deps := successfulDependencies(t)
+	deps.notifier = &fakeNotifier{}
+	deps.repository.finishErr = errors.New("database unavailable")
+	deps.incremental.summary = incremental.SnapshotSummary{SnapshotID: "snap-partial", FilesSkipped: 1}
+
+	site := validSite()
+	site.BackupMode = "incremental"
+	site.Incremental = config.Incremental{Password: "test-secret-password"}
+
+	result, err := NewRunner(deps.dependencies()).Run(context.Background(), site, false)
+	require.ErrorIs(t, err, deps.repository.finishErr)
+	assert.Equal(t, StatusFailed, result.Status)
+	require.Len(t, deps.notifier.calls, 1)
+	assert.Equal(t, config.EventBackupFailed, deps.notifier.calls[0].Event)
+	assert.Equal(t, "persistence", deps.notifier.calls[0].ErrorCategory)
+}
+
 func TestRunnerIncrementalBackupMissingPassword(t *testing.T) {
 	deps := successfulDependencies(t)
 	runner := NewRunner(deps.dependencies())

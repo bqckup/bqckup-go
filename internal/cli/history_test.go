@@ -115,6 +115,19 @@ func TestWriteHistoryTextHidesDetailsByDefault(t *testing.T) {
 	assert.NotContains(t, output.String(), "Packages for run")
 }
 
+func TestWriteHistoryTextExplainsPartialRun(t *testing.T) {
+	runs := []history.BackupRun{{
+		ID: "partial-run", SiteName: "example", Status: history.StatusPartial,
+		StartedAt:     time.Date(2026, 9, 9, 12, 0, 0, 0, time.UTC),
+		ErrorCategory: "source", ErrorMessage: "2 source entries could not be read; an incomplete snapshot was saved",
+	}}
+
+	var output bytes.Buffer
+	require.NoError(t, writeHistoryText(&output, runs, false))
+	assert.Contains(t, output.String(), "PARTIAL")
+	assert.Contains(t, output.String(), "Run partial-run warning [source]: 2 source entries could not be read; an incomplete snapshot was saved")
+}
+
 func TestWriteHistoryTextRedactsSensitiveHistoryFields(t *testing.T) {
 	privateURL := strings.Join([]string{"https", "://", "storage.invalid", "/private"}, "")
 	privatePath := strings.Join([]string{"/srv", "/customer-data"}, "")

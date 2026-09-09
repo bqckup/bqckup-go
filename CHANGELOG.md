@@ -4,6 +4,18 @@ All notable changes to Bqckup are documented in this file.
 
 ## Unreleased
 
+## v0.0.10
+
+- Save a usable `partial` incremental snapshot when individual source entries
+  disappear or cannot be read, while keeping root, repository, and storage
+  errors fatal and cancellation non-partial.
+- Remove automatic ephemeral detection based on directory names such as
+  `tmp`, `cache`, and `sessions`; configured excludes remain the explicit
+  definition of data outside the backup scope.
+- Show partial status and skipped-entry counts in CLI and JSON results,
+  history, notifications, and scheduled reports, with a dedicated
+  `backup_partial` notification event.
+
 ## v0.0.9
 
 - Provide the S3 transfer manager with the package size so large multipart

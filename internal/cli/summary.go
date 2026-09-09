@@ -159,7 +159,7 @@ func (c ansiColor) status(value string) string {
 	switch value {
 	case "disabled":
 		return c.dim(value)
-	case "running", "no_change":
+	case "running", "partial", "no_change":
 		return c.yellow(value)
 	case "failed", "cancelled":
 		return c.red(value)

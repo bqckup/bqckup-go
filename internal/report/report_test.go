@@ -2,6 +2,7 @@ package report
 
 import (
 	"context"
+	"reflect"
 	"testing"
 	"time"
 
@@ -9,6 +10,15 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestAggregatePeriodCountsPartialRunsSeparately(t *testing.T) {
+	summary := aggregatePeriod([]history.BackupRun{{Status: history.StatusPartial}})
+	field := reflect.ValueOf(summary).FieldByName("Partial")
+	require.True(t, field.IsValid(), "period reports must expose a partial count")
+	assert.EqualValues(t, 1, field.Int())
+	assert.Equal(t, 0, summary.Successful)
+	assert.Equal(t, 0, summary.Failed)
+}
 
 type fakeHistoryRepository struct {
 	runs []history.BackupRun

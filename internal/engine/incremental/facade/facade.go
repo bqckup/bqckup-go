@@ -129,6 +129,7 @@ func (e *Engine) BackupFiles(ctx context.Context, repo backupincremental.RepoCon
 		TotalFilesProcessed: summary.TotalFilesProcessed,
 		TotalBytesProcessed: summary.TotalBytesProcessed,
 		DataAdded:           summary.DataAdded,
+		FilesSkipped:        summary.FilesSkipped,
 		TotalDuration:       summary.TotalDuration,
 	}, nil
 }

@@ -91,7 +91,7 @@ Common options:
 | `site.backup_mode` | `full` (default), `incremental` |
 | `database.engine` | `mysql`, `postgres` |
 | `notifications.channels.<name>.type` | `smtp`, `webhook`, `discord` |
-| `notifications.routes[].events[]` | `all`, `backup_failed`, `backup_cancelled`, `backup_no_change` |
+| `notifications.routes[].events[]` | `all`, `backup_failed`, `backup_partial`, `backup_cancelled`, `backup_no_change` |
 
 In examples, replace placeholders such as `<site>`, `<password>`, `<bucket>`,
 and `<webhook-url>` with real values. Do not copy angle-bracket placeholders
@@ -135,7 +135,12 @@ compressed `.sql.gz` database dumps below
 Incremental mode stores encrypted, deduplicated file snapshots below
 `bqckup/<server_id>/<site>/incremental-backup/` in each destination. Set `backup_mode: incremental` and set
 `incremental.password` directly to the repository password. Keep the site YAML
-as a regular, non-symlink file with mode `0600`. The built-in engine is always used.
+as a regular, non-symlink file with mode `0600`. The built-in engine is always
+used. A run is `success` when every source entry in the configured scope was
+read, `partial` when an incomplete but usable snapshot was saved, and `failed`
+when a root source, repository, destination, or database operation could not
+complete. A cancelled run remains `cancelled`. Excluded paths are outside the
+configured scope and do not make a run partial.
 
 ## Commands
 
@@ -188,15 +193,16 @@ notifications:
       from: <sender-address>
       to: [<recipient-address>]
   routes:
-    # events: all | backup_failed | backup_cancelled | backup_no_change
+    # events: all | backup_failed | backup_partial | backup_cancelled | backup_no_change
     - events: [backup_failed]
       channels: [email]
 ```
 
-Available channel types are `smtp`, `webhook`, and `discord`. Successful runs,
-skips, and preflight failures stay silent. Delivery is best effort and never
-changes the run result or history. Keep credential-bearing root YAML at mode
-`0600`; `config validate` checks URL format and permissions.
+Available channel types are `smtp`, `webhook`, and `discord`. Partial runs use
+the `backup_partial` event. Successful runs, skips, and preflight failures stay
+silent. Delivery is best effort and never changes the run result or history.
+Keep credential-bearing root YAML at mode `0600`; `config validate` checks URL
+format and permissions.
 
 ## Scheduling
 

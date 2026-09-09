@@ -269,5 +269,6 @@ func TestAnsiColorWrap(t *testing.T) {
 	assert.Equal(t, "\x1b[1mweb\x1b[0m", on.bold("web"))
 	assert.Equal(t, "\x1b[2mdisabled\x1b[0m", on.status("disabled"))
 	assert.Equal(t, "\x1b[33mrunning\x1b[0m", on.status("running"))
+	assert.Equal(t, "\x1b[33mpartial\x1b[0m", on.status("partial"))
 	assert.Equal(t, "\x1b[32midle\x1b[0m", on.status("idle"))
 }

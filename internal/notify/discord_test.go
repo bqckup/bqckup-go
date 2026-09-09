@@ -299,7 +299,7 @@ func TestDiscordReportEmbedUsesOperationalSummary(t *testing.T) {
 				TotalBytes:   1536,
 				Destinations: []ReportDestinationSummary{{Name: "local-primary"}},
 			},
-			Sites: []SiteReportSummary{{SiteName: "example", TotalRuns: 2, Successful: 1, Failed: 1, LastStatus: "success"}},
+			Sites: []SiteReportSummary{{SiteName: "example", TotalRuns: 3, Successful: 1, Partial: 1, Failed: 1, LastStatus: "partial"}},
 		},
 	}
 	require.NoError(t, discord.Send(context.Background(), payload))
@@ -312,5 +312,16 @@ func TestDiscordReportEmbedUsesOperationalSummary(t *testing.T) {
 	assert.Contains(t, body.Embeds[0].Description, "local-primary")
 	assert.Contains(t, body.Embeds[0].Description, "attempt to force a backup")
 	assert.NotContains(t, body.Embeds[0].Description, "Operational Summary")
+	assert.Contains(t, body.Embeds[0].Fields[2].Value, "Partial")
 	assert.Empty(t, body.Content)
+}
+
+func TestReportDescriptionDoesNotCallPartialRunsSuccessful(t *testing.T) {
+	report := &ReportData{
+		Overall: ReportPeriodSummary{TotalRuns: 1, Partial: 1},
+	}
+	description := reportDescription(report, "local-primary", "example")
+	assert.Contains(t, description, "1 incomplete run")
+	assert.Contains(t, description, "bqckup backup run example --force")
+	assert.NotContains(t, description, "successfully")
 }
