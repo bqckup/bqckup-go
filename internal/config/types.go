@@ -23,6 +23,7 @@ type Config struct {
 const (
 	EventAll             = "all"
 	EventBackupFailed    = "backup_failed"
+	EventBackupPartial   = "backup_partial"
 	EventBackupCancelled = "backup_cancelled"
 	EventBackupNoChange  = "backup_no_change"
 	EventDailyReport     = "daily_report"

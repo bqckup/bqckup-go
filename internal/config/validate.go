@@ -157,10 +157,10 @@ func (c Config) validateNotifications() error {
 		}
 		for _, event := range route.Events {
 			switch event {
-			case EventAll, EventBackupFailed, EventBackupCancelled, EventBackupNoChange,
+			case EventAll, EventBackupFailed, EventBackupPartial, EventBackupCancelled, EventBackupNoChange,
 				EventDailyReport, EventMonthlyReport:
 			default:
-				return validationError("bqckup.yaml", field+".events", "must be one of all, backup_failed, backup_cancelled, backup_no_change, daily_report, or monthly_report")
+				return validationError("bqckup.yaml", field+".events", "must be one of all, backup_failed, backup_partial, backup_cancelled, backup_no_change, daily_report, or monthly_report")
 			}
 		}
 		for _, channelName := range route.Channels {

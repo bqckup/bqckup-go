@@ -215,17 +215,81 @@ func TestCloneNodePreservesEmptyFileBlobList(t *testing.T) {
 	}
 }
 
-func TestEphemeralOnlyAllowsTransientPaths(t *testing.T) {
-	state := &backupState{spec: BackupSpec{Paths: []string{"/srv"}}}
-	for _, path := range []string{"/srv/app/tmp/sess_123", "/srv/cache/item", "/srv/sessions/id"} {
-		if !state.ephemeral(path) {
-			t.Errorf("ephemeral(%q) = false, want true", path)
-		}
+type failingLstatFilesystem struct {
+	filesystem
+	path string
+	err  error
+}
+
+type failingOpenFilesystem struct {
+	filesystem
+	path string
+	err  error
+}
+
+func (f failingOpenFilesystem) Open(path string) (*os.File, error) {
+	if path == f.path {
+		return nil, f.err
 	}
-	for _, path := range []string{"/srv/home/user/data.db", "/srv/var/lib/mysql/table.ibd"} {
-		if state.ephemeral(path) {
-			t.Errorf("ephemeral(%q) = true, want false", path)
-		}
+	return f.filesystem.Open(path)
+}
+
+func (f failingLstatFilesystem) Lstat(path string) (os.FileInfo, error) {
+	if path == f.path {
+		return nil, f.err
+	}
+	return f.filesystem.Lstat(path)
+}
+
+func TestBackupContinuesAfterUnreadableChild(t *testing.T) {
+	ctx := context.Background()
+	arch, local, source := newArchiver(t, ctx)
+	writeFile(t, filepath.Join(source, "keep.txt"), []byte("keep"))
+	unreadablePath := filepath.Join(source, "durable.db")
+	writeFile(t, unreadablePath, []byte("unreadable"))
+	arch.fs = failingOpenFilesystem{filesystem: osFilesystem{}, path: unreadablePath, err: os.ErrPermission}
+
+	_, summary, err := arch.Backup(ctx, BackupSpec{Paths: []string{source}})
+	if err != nil {
+		t.Fatalf("unreadable child should produce a partial snapshot: %v", err)
+	}
+	if summary.FilesSkipped != 1 || summary.TotalFilesProcessed != 1 {
+		t.Fatalf("partial summary = %#v, want one processed and one skipped file", summary)
+	}
+
+	repo := openRepo(t, ctx, local)
+	snapshots, err := repo.ListSnapshots(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshots) != 1 {
+		t.Fatalf("snapshot count = %d, want 1", len(snapshots))
+	}
+}
+
+func TestBackupSavesPartialSnapshotAndRetriesSkippedFileOnNextRun(t *testing.T) {
+	ctx := context.Background()
+	arch, local, source := newArchiver(t, ctx)
+	writeFile(t, filepath.Join(source, "keep.txt"), []byte("keep"))
+	skippedPath := filepath.Join(source, "changing.txt")
+	writeFile(t, skippedPath, []byte("retry me"))
+	arch.fs = failingLstatFilesystem{filesystem: osFilesystem{}, path: skippedPath, err: os.ErrNotExist}
+
+	_, partial, err := arch.Backup(ctx, BackupSpec{Paths: []string{source}})
+	if err != nil {
+		t.Fatalf("source entry error should produce a partial snapshot: %v", err)
+	}
+	if partial.FilesSkipped != 1 || partial.TotalFilesProcessed != 1 {
+		t.Fatalf("partial summary = %#v, want one processed and one skipped file", partial)
+	}
+
+	repo := openRepo(t, ctx, local)
+	_, next, err := New(repo).Backup(ctx, BackupSpec{Paths: []string{source}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next.FilesNew != 1 || next.FilesUnmodified != 1 {
+		t.Fatalf("next summary = %#v, want skipped file retried as new", next)
 	}
 }
 

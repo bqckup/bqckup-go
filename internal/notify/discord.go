@@ -76,7 +76,7 @@ func (d *Discord) Send(ctx context.Context, payload Payload) error {
 		{Name: "Duration", Value: durationHuman(payload.DurationSeconds), Inline: true},
 	}
 
-	if payload.Status == string(backup.StatusFailed) || payload.Status == string(backup.StatusNoChange) {
+	if payload.Status == string(backup.StatusFailed) || payload.Status == string(backup.StatusPartial) || payload.Status == string(backup.StatusNoChange) {
 		label, message := failureBlock(payload)
 		fields = append(fields,
 			discordField{Name: "Consecutive Failures", Value: fmt.Sprintf("%d", payload.FailureStreak), Inline: true},
@@ -126,27 +126,14 @@ func (d *Discord) sendReport(ctx context.Context, payload Payload) error {
 		firstSite = r.Sites[0].SiteName
 	}
 
-	var description string
-	switch {
-	case r.Overall.TotalRuns == 0:
-		description = "We have not detected any backup runs for this period.\n\n**Recommended steps:**\n1. Verify that your application schedule or cron job is actively running.\n2. Ensure the Bqckup history database is accessible."
-	case r.Overall.Failed > 0:
-		description = fmt.Sprintf(
-			"Backup activity was recorded, but we detected **%d failed run(s)** during this period.\n\n**Recommended steps:**\n1. Check your storage configuration destination (`%s`).\n2. Inspect the failed backup logs and attempt to force a backup by running `bqckup backup run %s --force` to ensure the backup process is functioning correctly.",
-			r.Overall.Failed,
-			storageName,
-			firstSite,
-		)
-	default:
-		description = "All scheduled backup activities were recorded successfully for this period. No further action is required."
-	}
+	description := reportDescription(r, storageName, firstSite)
 
 	siteBlock := "```text\n"
 	if len(r.Sites) == 0 {
 		siteBlock += "No sites available in storage.\n"
 	} else {
-		siteBlock += fmt.Sprintf("%-21s | %-11s | %-6s | %-5s\n", "Site", "Last Status", "Status", "False")
-		siteBlock += strings.Repeat("-", 52) + "\n"
+		siteBlock += fmt.Sprintf("%-21s | %-11s | %-7s | %-7s | %-6s\n", "Site", "Last Status", "Success", "Partial", "Failed")
+		siteBlock += strings.Repeat("-", 67) + "\n"
 
 		for _, site := range r.Sites {
 			status := site.LastStatus
@@ -154,10 +141,11 @@ func (d *Discord) sendReport(ctx context.Context, payload Payload) error {
 				status = "N/A"
 			}
 
-			siteBlock += fmt.Sprintf("%-21s | %-11s | %-6d | %-5d\n",
+			siteBlock += fmt.Sprintf("%-21s | %-11s | %-7d | %-7d | %-6d\n",
 				site.SiteName,
 				status,
 				site.Successful,
+				site.Partial,
 				site.Failed,
 			)
 		}
@@ -186,6 +174,28 @@ func (d *Discord) sendReport(ctx context.Context, payload Payload) error {
 		return fmt.Errorf("encode report embed: %w", err)
 	}
 	return postJSON(ctx, d.client, d.webhookURL, raw)
+}
+
+func reportDescription(r *ReportData, storageName, firstSite string) string {
+	switch {
+	case r.Overall.TotalRuns == 0:
+		return "We have not detected any backup runs for this period.\n\n**Recommended steps:**\n1. Verify that your application schedule or cron job is actively running.\n2. Ensure the Bqckup history database is accessible."
+	case r.Overall.Failed > 0:
+		return fmt.Sprintf(
+			"Backup activity was recorded, but we detected **%d failed run(s)** during this period.\n\n**Recommended steps:**\n1. Check your storage configuration destination (`%s`).\n2. Inspect the failed backup logs and attempt to force a backup by running `bqckup backup run %s --force` to ensure the backup process is functioning correctly.",
+			r.Overall.Failed,
+			storageName,
+			firstSite,
+		)
+	case r.Overall.Partial > 0:
+		return fmt.Sprintf(
+			"Backup activity was recorded, but we detected **%d incomplete run(s)** during this period. Some source entries were not included.\n\n**Recommended steps:**\n1. Check the source data and local backup logs.\n2. Run `bqckup backup run %s --force` to complete the snapshot.",
+			r.Overall.Partial,
+			firstSite,
+		)
+	default:
+		return "All scheduled backup activities were recorded successfully for this period. No further action is required."
+	}
 }
 func reportStorageLine(destinations []ReportDestinationSummary) string {
 	if len(destinations) == 0 {

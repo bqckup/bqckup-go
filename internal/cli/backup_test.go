@@ -149,6 +149,18 @@ func TestRestoreUnknownSnapshotFails(t *testing.T) {
 	assert.NotContains(t, apperror.UserMessage(err), "supersecret")
 }
 
+func TestWriteRunResultTextShowsIncompleteSnapshotCount(t *testing.T) {
+	var output bytes.Buffer
+	err := writeRunResultText(&output, backup.RunResult{
+		RunID:        "12345678-abcd",
+		SiteName:     "example",
+		Status:       backup.StatusPartial,
+		FilesSkipped: 2,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "[WARN] example: partial (run 12345678)\nexample: 2 source entries could not be read\n", output.String())
+}
+
 func TestRestoreSummaryText(t *testing.T) {
 	var out bytes.Buffer
 	result := backup.RestoreResult{

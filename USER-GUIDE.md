@@ -13,7 +13,7 @@ scheduling, restore, and common failures. It is written for operators of the
 | `backup_mode` | `full` (default), `incremental` |
 | database `engine` | `mysql`, `postgres` |
 | notification channel `type` | `smtp`, `webhook`, `discord` |
-| notification route `events` | `all`, `backup_failed`, `backup_cancelled`, `backup_no_change`, `daily_report`, `monthly_report` |
+| notification route `events` | `all`, `backup_failed`, `backup_partial`, `backup_cancelled`, `backup_no_change`, `daily_report`, `monthly_report` |
 | `reports.daily.enabled` | `true`, `false` |
 | `reports.monthly.enabled` | `true`, `false` |
 
@@ -287,6 +287,24 @@ packages are stored below `bqckup/<server_id>/<site>/<YYYY-MM-DD>/` and use
 `<HH-mm-ss>-<package>.gz` names. Packages from one run share the same time
 prefix.
 
+Incremental results follow Restic's incomplete-snapshot model:
+
+- `success` means every source entry inside the configured include/exclude
+  scope was read.
+- `partial` means one or more child entries disappeared or could not be read;
+  the remaining data was saved in a usable snapshot. The next run processes a
+  previously skipped entry when it becomes available.
+- `failed` means a root source, repository, destination, or database export
+  prevented the run from completing normally.
+- `cancelled` means the run was stopped before it could complete.
+
+Directory names such as `tmp`, `cache`, and `sessions` are not treated as
+ephemeral automatically. Add disposable data to `sources.files.exclude`
+explicitly. Excluded paths are outside the backup scope and do not make the
+result partial. For a point-in-time view of files that are actively changing,
+back up an LVM, ZFS, or Btrfs filesystem snapshot. Continue using database
+dumps instead of backing up live database data directories.
+
 ## 6. Validate before running
 
 ```bash
@@ -320,17 +338,18 @@ notifications:
       from: <sender-address>
       to: [<recipient-address>]
   routes:
-    # events options: all | backup_failed | backup_cancelled | backup_no_change
+    # events options: all | backup_failed | backup_partial | backup_cancelled | backup_no_change
     - events: [backup_failed]
       channels: [email]
 ```
 
 Channel `type` options are `smtp`, `webhook`, and `discord`. Route `events`
-options are `all`, `backup_failed`, `backup_cancelled`, `backup_no_change`,
-`daily_report`, and `monthly_report`. Successful runs, skipped runs, and
-preflight failures send no notification. Delivery is best effort and never
-changes backup history or the run result. Keep the root file at mode `0600`
-when it contains credentials or URLs.
+options are `all`, `backup_failed`, `backup_partial`, `backup_cancelled`,
+`backup_no_change`, `daily_report`, and `monthly_report`. Partial snapshots
+send `backup_partial`; successful runs, skipped runs, and preflight failures
+send no notification. Delivery is best effort and never changes backup
+history or the run result. Keep the root file at mode `0600` when it contains
+credentials or URLs.
 
 ## Scheduled reports
 
@@ -468,6 +487,11 @@ loading spinner in an interactive terminal (or a heartbeat every five seconds
 when redirected), then prints that site's result when it finishes. `--output
 json` suppresses these progress lines so stdout remains valid machine-readable
 JSON.
+
+For a partial incremental run, text output also reports how many source
+entries could not be read. `history list` records the `partial` terminal status
+and its sanitized aggregate warning. Bqckup never stores skipped absolute
+paths in history or notification payloads.
 
 Storage listing follows the backup mode: full sites show archive objects,
 while incremental sites show file snapshots. If an incremental site has an
