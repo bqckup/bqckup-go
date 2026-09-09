@@ -286,19 +286,25 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 			if err != nil {
 				return fail(err)
 			}
+			r.progress.StartStage("preparing repository "+destination.Storage, -1)
 			if err := engine.EnsureRepository(ctx, repo); err != nil {
+				r.progress.FailStage()
 				return fail(apperror.Wrap(apperror.CategoryStorage, "could not ensure incremental repository", err))
 			}
+			r.progress.FinishStage()
 			spec := incremental.BackupSpec{
 				SiteName: site.Name,
 				Include:  []string(site.Sources.Files.Include),
 				Exclude:  []string(site.Sources.Files.Exclude),
 				Tags:     []string{"bqckup", "site:" + site.Name},
 			}
+			r.progress.StartStage("backing up to "+destination.Storage, -1)
 			summary, err := engine.BackupFiles(ctx, repo, spec)
 			if err != nil {
+				r.progress.FailStage()
 				return fail(apperror.Wrap(apperror.CategoryExecution, "could not create incremental file backup", err))
 			}
+			r.progress.FinishStage()
 			if err := r.dependencies.Repository.CreatePackage(ctx, &history.Package{
 				RunID:       run.ID,
 				SourceKind:  "files",
@@ -406,8 +412,10 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 			if err != nil {
 				return fail(err)
 			}
+			r.progress.StartStage("applying retention to "+destination.Storage, -1)
 			reclaimed, err := engine.ApplyRetention(ctx, repo, site.Policy.KeepLast, site.Name)
 			if err != nil {
+				r.progress.FailStage()
 				return fail(apperror.Wrap(apperror.CategoryStorage, "backup completed but incremental retention could not be applied", err))
 			}
 			result.ReclaimedBytes += reclaimed
@@ -416,7 +424,13 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 		// packages here, and incremental sites store their database dumps
 		// here. Without this, package objects would grow without bound.
 		if err := r.dependencies.Retainer.Apply(ctx, store, sitePrefix, site.Policy.KeepLast); err != nil {
+			if site.BackupMode == "incremental" {
+				r.progress.FailStage()
+			}
 			return fail(apperror.Wrap(apperror.CategoryStorage, "backup completed but retention could not be applied", err))
+		}
+		if site.BackupMode == "incremental" {
+			r.progress.FinishStage()
 		}
 	}
 
