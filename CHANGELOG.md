@@ -4,8 +4,10 @@ All notable changes to Bqckup are documented in this file.
 
 ## Unreleased
 
-## v0.0.10
+## v1.0.0
 
+- Show an elapsed-time spinner while incremental backups prepare the
+  repository, back up each destination, and apply retention.
 - Save a usable `partial` incremental snapshot when individual source entries
   disappear or cannot be read, while keeping root, repository, and storage
   errors fatal and cancellation non-partial.
