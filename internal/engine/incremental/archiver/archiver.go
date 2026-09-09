@@ -8,6 +8,7 @@ package archiver
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -27,9 +28,26 @@ import (
 // Archiver performs backups into an opened repository.
 type Archiver struct {
 	repo *repository.Repository
+	fs   filesystem
 }
 
-func New(repo *repository.Repository) *Archiver { return &Archiver{repo: repo} }
+type filesystem interface {
+	Lstat(string) (os.FileInfo, error)
+	ReadDir(string) ([]os.DirEntry, error)
+	Readlink(string) (string, error)
+	Open(string) (*os.File, error)
+}
+
+type osFilesystem struct{}
+
+func (osFilesystem) Lstat(path string) (os.FileInfo, error)     { return os.Lstat(path) }
+func (osFilesystem) ReadDir(path string) ([]os.DirEntry, error) { return os.ReadDir(path) }
+func (osFilesystem) Readlink(path string) (string, error)       { return os.Readlink(path) }
+func (osFilesystem) Open(path string) (*os.File, error)         { return os.Open(path) }
+
+func New(repo *repository.Repository) *Archiver {
+	return &Archiver{repo: repo, fs: osFilesystem{}}
+}
 
 // BackupSpec describes one backup run.
 type BackupSpec struct {
@@ -49,6 +67,7 @@ type Summary struct {
 	TotalFilesProcessed int
 	TotalBytesProcessed int64
 	DataAdded           int64
+	FilesSkipped        int
 	TotalDuration       float64
 	// Missed reports each blob re-stored because its ID was not in the
 	// repository index (the dedup misses that make up DataAdded).
@@ -59,6 +78,28 @@ type Summary struct {
 type MissedBlob struct {
 	Type incremental.BlobType
 	Size int
+}
+
+// sourceError marks an error caused by reading one source entry. A parent
+// directory may omit that entry and still produce an incomplete snapshot;
+// repository, storage, and cancellation errors remain fatal.
+type sourceError struct {
+	phase string
+	path  string
+	err   error
+}
+
+func (e *sourceError) Error() string {
+	return fmt.Sprintf("archiver: %s %s: %v", e.phase, e.path, e.err)
+}
+
+func (e *sourceError) Unwrap() error { return e.err }
+
+func sourceReadError(ctx context.Context, phase, path string, err error) error {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return ctxErr
+	}
+	return &sourceError{phase: phase, path: path, err: err}
 }
 
 // Backup walks the paths, stores all data, and writes one snapshot.
@@ -145,6 +186,7 @@ func (a *Archiver) Backup(ctx context.Context, spec BackupSpec) (incremental.ID,
 		TotalFilesProcessed: state.filesNew + state.filesChanged + state.filesUnmodified,
 		TotalBytesProcessed: state.bytesProcessed,
 		DataAdded:           state.dataAdded,
+		FilesSkipped:        state.filesSkipped,
 		Missed:              state.missed,
 		TotalDuration:       duration,
 	}
@@ -161,6 +203,7 @@ type backupState struct {
 	filesUnmodified int
 	bytesProcessed  int64
 	dataAdded       int64
+	filesSkipped    int
 	missed          []MissedBlob
 	parent          *parentState
 }
@@ -286,7 +329,7 @@ func (s *backupState) backupPath(ctx context.Context, path string) error {
 }
 
 func (s *backupState) backupPathAt(ctx context.Context, path, key string) error {
-	info, err := os.Lstat(path)
+	info, err := s.archiver.fs.Lstat(path)
 	if err != nil {
 		return fmt.Errorf("archiver: stat %s: %w", path, err)
 	}
@@ -338,9 +381,9 @@ func (s *backupState) nodeForAt(ctx context.Context, path string, info os.FileIn
 
 	switch {
 	case info.Mode()&os.ModeSymlink != 0:
-		target, err := os.Readlink(path)
+		target, err := s.archiver.fs.Readlink(path)
 		if err != nil {
-			return nil, false, fmt.Errorf("archiver: readlink %s: %w", path, err)
+			return nil, false, sourceReadError(ctx, "readlink", path, err)
 		}
 		node.Type = tree.TypeSymlink
 		node.LinkTarget = target
@@ -408,9 +451,9 @@ func (s *backupState) dirTree(ctx context.Context, dir string) (*incremental.ID,
 }
 
 func (s *backupState) dirTreeAt(ctx context.Context, dir, key string, old *tree.Node) (*incremental.ID, bool, error) {
-	entries, err := os.ReadDir(dir)
+	entries, err := s.archiver.fs.ReadDir(dir)
 	if err != nil {
-		return nil, false, fmt.Errorf("archiver: read dir %s: %w", dir, err)
+		return nil, false, sourceReadError(ctx, "read dir", dir, err)
 	}
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
 
@@ -441,15 +484,26 @@ func (s *backupState) dirTreeAt(ctx context.Context, dir, key string, old *tree.
 		if s.excluded(path) {
 			continue
 		}
-		seen[entry.Name()] = struct{}{}
-		info, err := os.Lstat(path)
+		info, err := s.archiver.fs.Lstat(path)
 		if err != nil {
-			return nil, false, fmt.Errorf("archiver: stat %s: %w", path, err)
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return nil, false, ctxErr
+			}
+			s.filesSkipped++
+			allUnmodified = false
+			continue
 		}
 		node, unchanged, err := s.nodeForAt(ctx, path, info, key+"/"+entry.Name(), oldChildren[entry.Name()])
 		if err != nil {
+			var sourceErr *sourceError
+			if errors.As(err, &sourceErr) {
+				s.filesSkipped++
+				allUnmodified = false
+				continue
+			}
 			return nil, false, err
 		}
+		seen[entry.Name()] = struct{}{}
 		allUnmodified = allUnmodified && unchanged
 		if err := tr.Add(node); err != nil {
 			return nil, false, err
@@ -516,9 +570,9 @@ func sameMetadata(a, b *tree.Node) bool {
 
 // saveFile chunks a regular file and returns its content blob IDs.
 func (s *backupState) saveFile(ctx context.Context, path string) ([]incremental.ID, error) {
-	file, err := os.Open(path)
+	file, err := s.archiver.fs.Open(path)
 	if err != nil {
-		return nil, fmt.Errorf("archiver: open %s: %w", path, err)
+		return nil, sourceReadError(ctx, "open", path, err)
 	}
 	defer file.Close()
 
@@ -536,7 +590,7 @@ func (s *backupState) saveFile(ctx context.Context, path string) ([]incremental.
 			break
 		}
 		if err != nil {
-			return nil, fmt.Errorf("archiver: chunk %s: %w", path, err)
+			return nil, sourceReadError(ctx, "read", path, err)
 		}
 		id, err := s.saveBlob(ctx, incremental.DataBlob, chunk.Data)
 		if err != nil {

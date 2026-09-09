@@ -91,7 +91,7 @@ func writeHistoryText(output io.Writer, runs []history.BackupRun, details bool) 
 	}
 
 	for _, run := range runs {
-		if run.Status != history.StatusFailed && run.Status != history.StatusCancelled {
+		if run.Status != history.StatusFailed && run.Status != history.StatusPartial && run.Status != history.StatusCancelled {
 			continue
 		}
 		category := safeHistoryField(run.ErrorCategory)
@@ -102,7 +102,11 @@ func writeHistoryText(output io.Writer, runs []history.BackupRun, details bool) 
 		if run.ErrorMessage == "" {
 			message = "message unavailable"
 		}
-		if _, err := fmt.Fprintf(output, "Run %s error [%s]: %s\n", safeHistoryField(run.ID), category, message); err != nil {
+		kind := "error"
+		if run.Status == history.StatusPartial {
+			kind = "warning"
+		}
+		if _, err := fmt.Fprintf(output, "Run %s %s [%s]: %s\n", safeHistoryField(run.ID), kind, category, message); err != nil {
 			return err
 		}
 	}

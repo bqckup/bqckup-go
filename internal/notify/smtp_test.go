@@ -365,6 +365,17 @@ func TestSMTPImplicitTLSFlagSetForPort465(t *testing.T) {
 	assert.True(t, channel.implicitTLS)
 }
 
+func TestSMTPReportShowsPartialRuns(t *testing.T) {
+	payload := Payload{ReportData: &ReportData{
+		Overall: ReportPeriodSummary{TotalRuns: 1, Partial: 1},
+		Sites:   []SiteReportSummary{{SiteName: "example", TotalRuns: 1, Partial: 1, LastStatus: "partial"}},
+	}}
+	html := (&SMTP{}).renderReportHTML("Daily Backup Report", payload)
+	assert.Contains(t, html, "1 Partial")
+	assert.Contains(t, html, ">Partial</th>")
+	assert.NotContains(t, html, "Summary: 0 Successful, 0 Failed")
+}
+
 func TestSMTPRendersCancelledSubset(t *testing.T) {
 	server := newFakeSMTPServer(t, false, false)
 	channel := smtpChannel(t, config.Channel{

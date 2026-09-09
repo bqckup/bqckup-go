@@ -345,6 +345,13 @@ func writeRunResultText(out io.Writer, result backup.RunResult) error {
 	if result.ReclaimedBytes > 0 {
 		_, err = fmt.Fprintf(out, "%s: reclaimed %s\n", result.SiteName, humanBytes(result.ReclaimedBytes))
 	}
+	if err == nil && result.FilesSkipped > 0 {
+		label := "source entries"
+		if result.FilesSkipped == 1 {
+			label = "source entry"
+		}
+		_, err = fmt.Fprintf(out, "%s: %d %s could not be read\n", result.SiteName, result.FilesSkipped, label)
+	}
 	return err
 }
 
@@ -359,7 +366,7 @@ func resultSymbol(status backup.Status) string {
 	switch status {
 	case backup.StatusSuccess:
 		return "[OK]"
-	case backup.StatusNoChange, backup.StatusCancelled:
+	case backup.StatusPartial, backup.StatusNoChange, backup.StatusCancelled:
 		return "[WARN]"
 	case backup.StatusFailed:
 		return "[FAIL]"
@@ -373,7 +380,7 @@ func colorResultSymbol(color ansiColor, status backup.Status) string {
 	switch status {
 	case backup.StatusSuccess:
 		return color.green(symbol)
-	case backup.StatusNoChange, backup.StatusCancelled:
+	case backup.StatusPartial, backup.StatusNoChange, backup.StatusCancelled:
 		return color.yellow(symbol)
 	case backup.StatusFailed:
 		return color.red(symbol)

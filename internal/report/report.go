@@ -25,6 +25,7 @@ type DestinationSummary struct {
 type PeriodSummary struct {
 	TotalRuns              int
 	Successful             int
+	Partial                int
 	Failed                 int
 	Cancelled              int
 	Skipped                int
@@ -41,6 +42,7 @@ type SiteSummary struct {
 	SiteName               string
 	TotalRuns              int
 	Successful             int
+	Partial                int
 	Failed                 int
 	Cancelled              int
 	Skipped                int
@@ -187,7 +189,7 @@ func aggregateSites(runs []history.BackupRun, includeEmpty bool) []SiteSummary {
 			s = index[run.SiteName]
 		}
 		s.TotalRuns++
-		addStatus(&s.Successful, &s.Failed, &s.Cancelled, &s.Skipped, &s.NoChange, run.Status)
+		addStatus(&s.Successful, &s.Partial, &s.Failed, &s.Cancelled, &s.Skipped, &s.NoChange, run.Status)
 		s.DurationSeconds += run.DurationMillis / 1000
 		if s.TotalRuns > 0 {
 			s.AverageDurationSeconds = s.DurationSeconds / int64(s.TotalRuns)
@@ -216,7 +218,7 @@ func aggregatePeriod(runs []history.BackupRun) PeriodSummary {
 	for i := range runs {
 		run := &runs[i]
 		summary.TotalRuns++
-		addStatus(&summary.Successful, &summary.Failed, &summary.Cancelled, &summary.Skipped, &summary.NoChange, run.Status)
+		addStatus(&summary.Successful, &summary.Partial, &summary.Failed, &summary.Cancelled, &summary.Skipped, &summary.NoChange, run.Status)
 		summary.DurationSeconds += run.DurationMillis / 1000
 		summary.TotalBytes += logicalPackageBytes(*run)
 	}
@@ -227,10 +229,12 @@ func aggregatePeriod(runs []history.BackupRun) PeriodSummary {
 	return summary
 }
 
-func addStatus(successful, failed, cancelled, skipped, noChange *int, status history.RunStatus) {
+func addStatus(successful, partial, failed, cancelled, skipped, noChange *int, status history.RunStatus) {
 	switch status {
 	case history.StatusSuccess:
 		(*successful)++
+	case history.StatusPartial:
+		(*partial)++
 	case history.StatusFailed:
 		(*failed)++
 	case history.StatusCancelled:

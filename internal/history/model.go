@@ -7,6 +7,7 @@ type RunStatus string
 const (
 	StatusRunning   RunStatus = "running"
 	StatusSuccess   RunStatus = "success"
+	StatusPartial   RunStatus = "partial"
 	StatusFailed    RunStatus = "failed"
 	StatusCancelled RunStatus = "cancelled"
 	StatusSkipped   RunStatus = "skipped"

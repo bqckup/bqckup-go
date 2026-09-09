@@ -22,6 +22,7 @@ type Status string
 
 const (
 	StatusSuccess   Status = "success"
+	StatusPartial   Status = "partial"
 	StatusFailed    Status = "failed"
 	StatusCancelled Status = "cancelled"
 	StatusSkipped   Status = "skipped"
@@ -42,6 +43,10 @@ type RunResult struct {
 	SkipReason SkipReason `json:"skip_reason,omitempty"`
 	StartedAt  time.Time  `json:"started_at,omitempty"`
 	FinishedAt time.Time  `json:"finished_at,omitempty"`
+	// FilesSkipped is the number of source entries omitted from an incomplete
+	// incremental snapshot. With multiple destinations, it is the largest
+	// count reported by any destination rather than a duplicate sum.
+	FilesSkipped int `json:"files_skipped,omitempty"`
 	// ReclaimedBytes is the space freed by incremental retention (prune).
 	ReclaimedBytes int64 `json:"reclaimed_bytes,omitempty"`
 }
@@ -83,6 +88,7 @@ type NotifyInput struct {
 	Packages           []history.Package
 	Destinations       []NotifyDestination
 	HasDatabaseSources bool
+	FilesSkipped       int
 }
 
 // Notifier delivers terminal run notifications. It is consumer-owned: the
@@ -270,6 +276,7 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 		if site.Incremental.Password == "" {
 			return fail(apperror.Wrap(apperror.CategoryPreflight, "incremental repository password is not configured", nil))
 		}
+		partialFiles := 0
 		for _, destination := range site.Destinations {
 			storageConfig, ok := r.dependencies.Storages[destination.Storage]
 			if !ok {
@@ -308,7 +315,11 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 			}); err != nil {
 				return fail(apperror.Wrap(apperror.CategoryPersistence, "could not record incremental backup package", err))
 			}
+			if summary.FilesSkipped > partialFiles {
+				partialFiles = summary.FilesSkipped
+			}
 		}
+		result.FilesSkipped = partialFiles
 	} else {
 		workspace, err := os.MkdirTemp(r.dependencies.TemporaryDirectory, site.Name+"-*")
 		if err != nil {
@@ -463,6 +474,34 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 				return result, nil
 			}
 		}
+	}
+
+	if result.FilesSkipped > 0 {
+		finished := r.dependencies.Clock.Now().UTC()
+		message := fmt.Sprintf("%d source entries could not be read; an incomplete snapshot was saved", result.FilesSkipped)
+		if err := r.dependencies.Repository.FinishRun(context.WithoutCancel(ctx), run.ID, history.StatusPartial, finished, "source", message); err != nil {
+			result.Status = StatusFailed
+			result.FinishedAt = finished
+			r.notify(context.WithoutCancel(ctx), NotifyInput{
+				Event: config.EventBackupFailed, RunID: run.ID, SiteName: site.Name, Status: result.Status,
+				StartedAt: now, FinishedAt: finished,
+				ErrorCategory: string(apperror.CategoryPersistence), ErrorMessage: "could not finalize backup history",
+				Destinations:       buildNotifyDestinations(site, r.dependencies.Storages),
+				HasDatabaseSources: hasEnabledDatabaseSources(site),
+			})
+			return result, apperror.Wrap(apperror.CategoryPersistence, "could not finalize backup history", err)
+		}
+		result.Status = StatusPartial
+		result.FinishedAt = finished
+		r.notify(context.WithoutCancel(ctx), NotifyInput{
+			Event: config.EventBackupPartial, RunID: run.ID, SiteName: site.Name, Status: result.Status,
+			StartedAt: now, FinishedAt: finished,
+			ErrorCategory: "source", ErrorMessage: message,
+			Destinations:       buildNotifyDestinations(site, r.dependencies.Storages),
+			HasDatabaseSources: hasEnabledDatabaseSources(site),
+			FilesSkipped:       result.FilesSkipped,
+		})
+		return result, nil
 	}
 
 	finished := r.dependencies.Clock.Now().UTC()

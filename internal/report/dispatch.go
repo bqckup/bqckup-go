@@ -145,6 +145,7 @@ func siteSummariesToPayload(sites []SiteSummary) []notify.SiteReportSummary {
 			SiteName:               s.SiteName,
 			TotalRuns:              s.TotalRuns,
 			Successful:             s.Successful,
+			Partial:                s.Partial,
 			Failed:                 s.Failed,
 			Cancelled:              s.Cancelled,
 			Skipped:                s.Skipped,
@@ -177,6 +178,7 @@ func periodSummaryToPayload(summary PeriodSummary) notify.ReportPeriodSummary {
 	return notify.ReportPeriodSummary{
 		TotalRuns:              summary.TotalRuns,
 		Successful:             summary.Successful,
+		Partial:                summary.Partial,
 		Failed:                 summary.Failed,
 		Cancelled:              summary.Cancelled,
 		Skipped:                summary.Skipped,

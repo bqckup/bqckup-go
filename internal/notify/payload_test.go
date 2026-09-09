@@ -118,7 +118,27 @@ func TestNewPayloadOmitsPackagesWhenRunHasNone(t *testing.T) {
 	assert.Contains(t, string(raw), `"package_count":0`)
 }
 
-func TestNewPayloadAddsErrorFieldsOnlyForFailedAndCancelled(t *testing.T) {
+func TestPartialPayloadReportsIncompleteSnapshotWithoutPaths(t *testing.T) {
+	input := backup.NotifyInput{
+		Event:         "backup_partial",
+		SiteName:      "example.org",
+		Status:        backup.Status("partial"),
+		FilesSkipped:  2,
+		ErrorCategory: "source",
+		ErrorMessage:  "2 source entries could not be read; an incomplete snapshot was saved",
+	}
+	payload := NewPayload(input)
+	raw, err := json.Marshal(payload)
+	require.NoError(t, err)
+
+	assert.Contains(t, string(raw), `"files_skipped":2`)
+	assert.NotContains(t, string(raw), "/srv/")
+	assert.Equal(t, "Backup incomplete for example.org", headline(payload))
+	assert.Contains(t, description(payload), "2 source entries")
+	assert.Equal(t, 0xF1C40F, statusColor(payload.Status))
+}
+
+func TestNewPayloadAddsDiagnosticFieldsForTerminalWarningsAndFailures(t *testing.T) {
 	for _, test := range []struct {
 		event    string
 		status   backup.Status

@@ -79,10 +79,10 @@ func TestDispatcherAllEventMatchesEveryNotification(t *testing.T) {
 		{Events: []string{config.EventAll}, Channels: []string{"discord"}},
 	})
 
-	for _, event := range []string{config.EventBackupFailed, config.EventBackupCancelled, config.EventBackupNoChange} {
+	for _, event := range []string{config.EventBackupFailed, config.EventBackupPartial, config.EventBackupCancelled, config.EventBackupNoChange} {
 		require.NoError(t, dispatcher.Notify(context.Background(), notifyInput(event)))
 	}
-	assert.Len(t, discord.payloads, 3)
+	assert.Len(t, discord.payloads, 4)
 }
 
 func TestDispatcherSendsChannelOnceAcrossRoutes(t *testing.T) {

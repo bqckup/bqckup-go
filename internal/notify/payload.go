@@ -23,6 +23,7 @@ type Event string
 
 const (
 	EventBackupFailed    Event = config.EventBackupFailed
+	EventBackupPartial   Event = config.EventBackupPartial
 	EventBackupCancelled Event = config.EventBackupCancelled
 	EventBackupNoChange  Event = config.EventBackupNoChange
 )
@@ -43,6 +44,7 @@ type SiteReportSummary struct {
 	SiteName               string                     `json:"site_name"`
 	TotalRuns              int                        `json:"total_runs"`
 	Successful             int                        `json:"successful"`
+	Partial                int                        `json:"partial"`
 	Failed                 int                        `json:"failed"`
 	Cancelled              int                        `json:"cancelled"`
 	Skipped                int                        `json:"skipped"`
@@ -68,6 +70,7 @@ type ReportDestinationSummary struct {
 type ReportPeriodSummary struct {
 	TotalRuns              int                        `json:"total_runs"`
 	Successful             int                        `json:"successful"`
+	Partial                int                        `json:"partial"`
 	Failed                 int                        `json:"failed"`
 	Cancelled              int                        `json:"cancelled"`
 	Skipped                int                        `json:"skipped"`
@@ -97,9 +100,9 @@ type ReportData struct {
 }
 
 // Payload is the shared notification payload for every channel. The JSON
-// shape is the spec contract; error fields appear only for failed and
-// cancelled runs. Hostname and ServerIP identify the machine that ran the
-// backup and are filled by the dispatcher when it is built.
+// shape is the spec contract; diagnostic fields appear only for failed,
+// partial, cancelled, and no-change runs. Hostname and ServerIP identify the
+// machine that ran the backup and are filled by the dispatcher when it is built.
 type Payload struct {
 	Event              Event             `json:"event"`
 	RunID              string            `json:"run_id"`
@@ -114,6 +117,7 @@ type Payload struct {
 	FailureStreak      int               `json:"failure_streak"`
 	PackageCount       int               `json:"package_count"`
 	SizeBytes          int64             `json:"size_bytes"`
+	FilesSkipped       int               `json:"files_skipped,omitempty"`
 	Packages           []string          `json:"packages,omitempty"`
 	Destinations       []DestinationInfo `json:"destinations,omitempty"`
 	HasDatabaseSources bool              `json:"-"`
@@ -145,6 +149,7 @@ func NewPayload(input backup.NotifyInput) Payload {
 		DurationSeconds:    int64(duration.Seconds()),
 		LastSuccessfulAt:   lastSuccessfulAt,
 		FailureStreak:      input.FailureStreak,
+		FilesSkipped:       input.FilesSkipped,
 		HasDatabaseSources: input.HasDatabaseSources,
 		ErrorCategory:      input.ErrorCategory,
 		ErrorMessage:       input.ErrorMessage,
@@ -212,7 +217,7 @@ func serverIdentity() (hostname, serverIP string) {
 // statusColor returns the channel color for a payload status.
 func statusColor(status string) int {
 	switch status {
-	case string(backup.StatusCancelled), string(backup.StatusNoChange):
+	case string(backup.StatusPartial), string(backup.StatusCancelled), string(backup.StatusNoChange):
 		return 0xF1C40F
 	default:
 		return 0xE74C3C
@@ -238,6 +243,8 @@ func humanStatus(status string) string {
 	switch backup.Status(status) {
 	case backup.StatusFailed:
 		return "Backup failed"
+	case backup.StatusPartial:
+		return "Backup incomplete"
 	case backup.StatusCancelled:
 		return "Backup cancelled"
 	case backup.StatusNoChange:
@@ -325,6 +332,9 @@ func itemsSizeLine(count int, size int64) string {
 
 // description returns the human explanation paragraph for the run.
 func description(payload Payload) string {
+	if payload.Status == string(backup.StatusPartial) {
+		return fmt.Sprintf("The snapshot was saved, but %d source entries could not be read. Run the backup again to complete it.", payload.FilesSkipped)
+	}
 	if payload.Status == string(backup.StatusNoChange) {
 		var anchorPart string
 		if payload.LastSuccessfulAt != "" {
@@ -401,6 +411,8 @@ func tryThis(payload Payload) string {
 
 	var template string
 	switch {
+	case payload.Status == string(backup.StatusPartial):
+		template = "1. Check the source data and local logs for unreadable entries.\n2. Run `bqckup backup run {site} --force` to complete the snapshot."
 	case payload.Status == string(backup.StatusNoChange) || payload.ErrorCategory == "no_change":
 		if payload.HasDatabaseSources {
 			template = "1. Check the storage bucket {bucket}. If the database size is less than 1 KB or looks unusual, the backup likely did not finish correctly.\n2. Run `bqckup backup run {site} --force` to make sure the backup process works."
@@ -437,6 +449,8 @@ func monitoringFooter(now time.Time) string {
 // can act on. Unknown or empty categories fall back to a non-empty phrase.
 func categoryPhrase(category string) string {
 	switch category {
+	case "source":
+		return "Some source data was not backed up"
 	case "no_change":
 		return "No changes detected"
 	case string(apperror.CategoryConfig):
@@ -456,11 +470,11 @@ func categoryPhrase(category string) string {
 	}
 }
 
-// failureBlock returns the failure block's label and text: the category
-// phrase as label and the sanitized message as body. Success and cancelled
-// runs get "" for both.
+// failureBlock returns the warning or failure block's label and text: the
+// category phrase as label and the sanitized message as body. Success and
+// cancelled runs get "" for both.
 func failureBlock(payload Payload) (label, message string) {
-	if payload.Status != string(backup.StatusFailed) && payload.Status != string(backup.StatusNoChange) {
+	if payload.Status != string(backup.StatusFailed) && payload.Status != string(backup.StatusPartial) && payload.Status != string(backup.StatusNoChange) {
 		return "", ""
 	}
 	return categoryPhrase(payload.ErrorCategory), payload.ErrorMessage
