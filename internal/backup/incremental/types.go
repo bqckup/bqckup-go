@@ -31,6 +31,7 @@ type SnapshotSummary struct {
 	TotalFilesProcessed int     `json:"total_files_processed"`
 	TotalBytesProcessed int64   `json:"total_bytes_processed"`
 	DataAdded           int64   `json:"data_added"`
+	FilesSkipped        int     `json:"files_skipped"`
 	TotalDuration       float64 `json:"total_duration"`
 }
 

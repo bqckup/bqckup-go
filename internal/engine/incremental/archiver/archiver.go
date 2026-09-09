@@ -24,6 +24,11 @@ import (
 	"github.com/bqckup/bqckup-go/internal/fileexclude"
 )
 
+const (
+	metadataRetries    = 3
+	metadataRetryDelay = 20 * time.Millisecond
+)
+
 // Archiver performs backups into an opened repository.
 type Archiver struct {
 	repo *repository.Repository
@@ -49,6 +54,7 @@ type Summary struct {
 	TotalFilesProcessed int
 	TotalBytesProcessed int64
 	DataAdded           int64
+	FilesSkipped        int
 	TotalDuration       float64
 	// Missed reports each blob re-stored because its ID was not in the
 	// repository index (the dedup misses that make up DataAdded).
@@ -145,6 +151,7 @@ func (a *Archiver) Backup(ctx context.Context, spec BackupSpec) (incremental.ID,
 		TotalFilesProcessed: state.filesNew + state.filesChanged + state.filesUnmodified,
 		TotalBytesProcessed: state.bytesProcessed,
 		DataAdded:           state.dataAdded,
+		FilesSkipped:        state.filesSkipped,
 		Missed:              state.missed,
 		TotalDuration:       duration,
 	}
@@ -161,6 +168,7 @@ type backupState struct {
 	filesUnmodified int
 	bytesProcessed  int64
 	dataAdded       int64
+	filesSkipped    int
 	missed          []MissedBlob
 	parent          *parentState
 }
@@ -286,7 +294,7 @@ func (s *backupState) backupPath(ctx context.Context, path string) error {
 }
 
 func (s *backupState) backupPathAt(ctx context.Context, path, key string) error {
-	info, err := os.Lstat(path)
+	info, err := lstatWithRetry(ctx, path)
 	if err != nil {
 		return fmt.Errorf("archiver: stat %s: %w", path, err)
 	}
@@ -408,7 +416,7 @@ func (s *backupState) dirTree(ctx context.Context, dir string) (*incremental.ID,
 }
 
 func (s *backupState) dirTreeAt(ctx context.Context, dir, key string, old *tree.Node) (*incremental.ID, bool, error) {
-	entries, err := os.ReadDir(dir)
+	entries, err := readDirWithRetry(ctx, dir)
 	if err != nil {
 		return nil, false, fmt.Errorf("archiver: read dir %s: %w", dir, err)
 	}
@@ -442,12 +450,20 @@ func (s *backupState) dirTreeAt(ctx context.Context, dir, key string, old *tree.
 			continue
 		}
 		seen[entry.Name()] = struct{}{}
-		info, err := os.Lstat(path)
+		info, err := lstatWithRetry(ctx, path)
 		if err != nil {
+			if os.IsNotExist(err) {
+				s.filesSkipped++
+				continue
+			}
 			return nil, false, fmt.Errorf("archiver: stat %s: %w", path, err)
 		}
 		node, unchanged, err := s.nodeForAt(ctx, path, info, key+"/"+entry.Name(), oldChildren[entry.Name()])
 		if err != nil {
+			if os.IsNotExist(err) {
+				s.filesSkipped++
+				continue
+			}
 			return nil, false, err
 		}
 		allUnmodified = allUnmodified && unchanged
@@ -516,7 +532,7 @@ func sameMetadata(a, b *tree.Node) bool {
 
 // saveFile chunks a regular file and returns its content blob IDs.
 func (s *backupState) saveFile(ctx context.Context, path string) ([]incremental.ID, error) {
-	file, err := os.Open(path)
+	file, err := openWithRetry(ctx, path)
 	if err != nil {
 		return nil, fmt.Errorf("archiver: open %s: %w", path, err)
 	}
@@ -589,4 +605,69 @@ func (s *backupState) saveBlob(ctx context.Context, blobType incremental.BlobTyp
 // relative pattern, or an absolute path/pattern.
 func (s *backupState) excluded(path string) bool {
 	return fileexclude.MatchAny(s.spec.Excludes, path, s.spec.Paths)
+}
+
+func lstatWithRetry(ctx context.Context, path string) (os.FileInfo, error) {
+	var err error
+	for attempt := 0; attempt < metadataRetries; attempt++ {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
+		info, statErr := os.Lstat(path)
+		if statErr == nil || !os.IsNotExist(statErr) || attempt == metadataRetries-1 {
+			return info, statErr
+		}
+		err = sleepRetry(ctx)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return nil, err
+}
+
+func readDirWithRetry(ctx context.Context, path string) ([]os.DirEntry, error) {
+	var err error
+	for attempt := 0; attempt < metadataRetries; attempt++ {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
+		entries, readErr := os.ReadDir(path)
+		if readErr == nil || !os.IsNotExist(readErr) || attempt == metadataRetries-1 {
+			return entries, readErr
+		}
+		err = sleepRetry(ctx)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return nil, err
+}
+
+func openWithRetry(ctx context.Context, path string) (*os.File, error) {
+	var err error
+	for attempt := 0; attempt < metadataRetries; attempt++ {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
+		file, openErr := os.Open(path)
+		if openErr == nil || !os.IsNotExist(openErr) || attempt == metadataRetries-1 {
+			return file, openErr
+		}
+		err = sleepRetry(ctx)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return nil, err
+}
+
+func sleepRetry(ctx context.Context) error {
+	timer := time.NewTimer(metadataRetryDelay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
