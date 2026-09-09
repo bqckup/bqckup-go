@@ -215,6 +215,20 @@ func TestCloneNodePreservesEmptyFileBlobList(t *testing.T) {
 	}
 }
 
+func TestEphemeralOnlyAllowsTransientPaths(t *testing.T) {
+	state := &backupState{spec: BackupSpec{Paths: []string{"/srv"}}}
+	for _, path := range []string{"/srv/app/tmp/sess_123", "/srv/cache/item", "/srv/sessions/id"} {
+		if !state.ephemeral(path) {
+			t.Errorf("ephemeral(%q) = false, want true", path)
+		}
+	}
+	for _, path := range []string{"/srv/home/user/data.db", "/srv/var/lib/mysql/table.ibd"} {
+		if state.ephemeral(path) {
+			t.Errorf("ephemeral(%q) = true, want false", path)
+		}
+	}
+}
+
 func TestNodeForDoesNotRecordAtime(t *testing.T) {
 	// atime changes when a backup reads the file (relatime filesystems), so
 	// recording it would make every tree differ on the next run and break

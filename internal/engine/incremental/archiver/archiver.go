@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"syscall"
 	"time"
 
@@ -452,7 +453,7 @@ func (s *backupState) dirTreeAt(ctx context.Context, dir, key string, old *tree.
 		seen[entry.Name()] = struct{}{}
 		info, err := lstatWithRetry(ctx, path)
 		if err != nil {
-			if os.IsNotExist(err) {
+			if os.IsNotExist(err) && s.ephemeral(path) {
 				s.filesSkipped++
 				continue
 			}
@@ -460,7 +461,7 @@ func (s *backupState) dirTreeAt(ctx context.Context, dir, key string, old *tree.
 		}
 		node, unchanged, err := s.nodeForAt(ctx, path, info, key+"/"+entry.Name(), oldChildren[entry.Name()])
 		if err != nil {
-			if os.IsNotExist(err) {
+			if os.IsNotExist(err) && s.ephemeral(path) {
 				s.filesSkipped++
 				continue
 			}
@@ -605,6 +606,22 @@ func (s *backupState) saveBlob(ctx context.Context, blobType incremental.BlobTyp
 // relative pattern, or an absolute path/pattern.
 func (s *backupState) excluded(path string) bool {
 	return fileexclude.MatchAny(s.spec.Excludes, path, s.spec.Paths)
+}
+
+// ephemeral reports whether a missing path is safe to tolerate. These are
+// transient application/system areas; missing files elsewhere are fatal so a
+// successful snapshot never silently omits durable data.
+func (s *backupState) ephemeral(path string) bool {
+	if s.excluded(path) {
+		return true
+	}
+	for current := filepath.Clean(path); current != string(filepath.Separator) && current != "."; current = filepath.Dir(current) {
+		base := strings.ToLower(filepath.Base(current))
+		if base == "tmp" || base == "cache" || base == "sessions" || strings.HasPrefix(base, "sess_") {
+			return true
+		}
+	}
+	return false
 }
 
 func lstatWithRetry(ctx context.Context, path string) (os.FileInfo, error) {
