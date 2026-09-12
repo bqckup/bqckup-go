@@ -662,6 +662,43 @@ func TestRunnerIncrementalBackupSuccess(t *testing.T) {
 	assert.Empty(t, deps.repository.packages[0].SHA256)
 }
 
+func TestRunnerRetentionFailureRecordsSuccessfulBackupWithWarning(t *testing.T) {
+	deps := successfulDependencies(t)
+	deps.incremental.retentionErr = errors.New("remote storage reset")
+
+	site := validSite()
+	site.BackupMode = "incremental"
+	site.Incremental = config.Incremental{Password: "test-secret-password"}
+
+	result, err := NewRunner(deps.dependencies()).Run(context.Background(), site, false)
+	require.NoError(t, err)
+	assert.Equal(t, StatusSuccess, result.Status)
+	assert.Equal(t, history.StatusSuccess, deps.repository.finishedStatus)
+	assert.Equal(t, "retention", deps.repository.errorCategory)
+	assert.Contains(t, deps.repository.errorMessage, "incremental retention")
+	assert.Equal(t, []string{"backup completed but incremental retention could not be applied"}, result.Warnings)
+}
+
+func TestRunnerRetentionWarningDoesNotSkipOtherDestinations(t *testing.T) {
+	deps := successfulDependencies(t)
+	deps.incremental.retentionErr = errors.New("remote storage reset")
+	deps.stores["local-secondary"] = &fakeStore{}
+	deps.storages["local-secondary"] = config.Storage{Type: "local", Directory: "/var/backups/bqckup-secondary"}
+
+	site := validSite()
+	site.BackupMode = "incremental"
+	site.Incremental = config.Incremental{Password: "test-secret-password"}
+	site.Destinations = append(site.Destinations, config.Destination{Storage: "local-secondary"})
+
+	result, err := NewRunner(deps.dependencies()).Run(context.Background(), site, false)
+	require.NoError(t, err)
+	assert.Equal(t, StatusSuccess, result.Status)
+	assert.Equal(t, 2, deps.incremental.backupCalls)
+	assert.Equal(t, 2, deps.incremental.retentionCalls)
+	assert.Equal(t, 2, deps.retainer.calls)
+	assert.Len(t, result.Warnings, 2)
+}
+
 func TestRunnerIncrementalSourceErrorsProducePartialResult(t *testing.T) {
 	deps := successfulDependencies(t)
 	deps.notifier = &fakeNotifier{}

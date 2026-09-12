@@ -352,6 +352,12 @@ func writeRunResultText(out io.Writer, result backup.RunResult) error {
 		}
 		_, err = fmt.Fprintf(out, "%s: %d %s could not be read\n", result.SiteName, result.FilesSkipped, label)
 	}
+	for _, warning := range result.Warnings {
+		if err != nil {
+			break
+		}
+		_, err = fmt.Fprintf(out, "%s: warning: %s\n", result.SiteName, warning)
+	}
 	return err
 }
 
