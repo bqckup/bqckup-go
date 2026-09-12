@@ -139,8 +139,10 @@ as a regular, non-symlink file with mode `0600`. The built-in engine is always
 used. A run is `success` when every source entry in the configured scope was
 read, `partial` when an incomplete but usable snapshot was saved, and `failed`
 when a root source, repository, destination, or database operation could not
-complete. A cancelled run remains `cancelled`. Excluded paths are outside the
-configured scope and do not make a run partial.
+complete. Retention cleanup errors are recorded as warnings after a successful
+backup and do not change its `success` status. A cancelled run remains
+`cancelled`. Excluded paths are outside the configured scope and do not make a
+run partial.
 
 ## Commands
 
