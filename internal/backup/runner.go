@@ -273,7 +273,8 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 
 	sitePrefix := backupSitePrefix(site.Name, r.dependencies.ServerID)
 	retentionWarnings := make([]string, 0)
-	recordRetentionWarning := func(message string, cause error) {
+	recordRetentionWarning := func(destination, message string, cause error) {
+		message = fmt.Sprintf("%s for destination %q", message, destination)
 		warning := apperror.Wrap(apperror.CategoryStorage, message, cause)
 		message = apperror.UserMessage(warning)
 		retentionWarnings = append(retentionWarnings, message)
@@ -430,7 +431,7 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 					return fail(apperror.Wrap(apperror.CategoryStorage, "backup completed but incremental retention could not be applied", err))
 				}
-				recordRetentionWarning("backup completed but incremental retention could not be applied", err)
+				recordRetentionWarning(destination.Storage, "backup completed but incremental retention could not be applied", err)
 			} else {
 				result.ReclaimedBytes += reclaimed
 			}
@@ -443,7 +444,7 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				return fail(apperror.Wrap(apperror.CategoryStorage, "backup completed but retention could not be applied", err))
 			}
-			recordRetentionWarning("backup completed but retention could not be applied", err)
+			recordRetentionWarning(destination.Storage, "backup completed but retention could not be applied", err)
 		}
 	}
 
@@ -477,7 +478,13 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 				}
 
 				finished := r.dependencies.Clock.Now().UTC()
-				if err := r.dependencies.Repository.FinishRun(context.WithoutCancel(ctx), run.ID, history.StatusNoChange, finished, "no_change", msg); err != nil {
+				historyCategory := "no_change"
+				historyMessage := msg
+				if len(retentionWarnings) > 0 {
+					historyCategory = "retention"
+					historyMessage = strings.Join(append([]string{msg}, retentionWarnings...), "; ")
+				}
+				if err := r.dependencies.Repository.FinishRun(context.WithoutCancel(ctx), run.ID, history.StatusNoChange, finished, historyCategory, historyMessage); err != nil {
 					result.Status = StatusFailed
 					result.FinishedAt = finished
 					r.notify(context.WithoutCancel(ctx), NotifyInput{
@@ -506,7 +513,11 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 	if result.FilesSkipped > 0 {
 		finished := r.dependencies.Clock.Now().UTC()
 		message := fmt.Sprintf("%d source entries could not be read; an incomplete snapshot was saved", result.FilesSkipped)
-		if err := r.dependencies.Repository.FinishRun(context.WithoutCancel(ctx), run.ID, history.StatusPartial, finished, "source", message); err != nil {
+		historyMessage := message
+		if len(retentionWarnings) > 0 {
+			historyMessage = strings.Join(append([]string{message}, retentionWarnings...), "; ")
+		}
+		if err := r.dependencies.Repository.FinishRun(context.WithoutCancel(ctx), run.ID, history.StatusPartial, finished, "source", historyMessage); err != nil {
 			result.Status = StatusFailed
 			result.FinishedAt = finished
 			r.notify(context.WithoutCancel(ctx), NotifyInput{
@@ -523,7 +534,7 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 		r.notify(context.WithoutCancel(ctx), NotifyInput{
 			Event: config.EventBackupPartial, RunID: run.ID, SiteName: site.Name, Status: result.Status,
 			StartedAt: now, FinishedAt: finished,
-			ErrorCategory: "source", ErrorMessage: message,
+			ErrorCategory: "source", ErrorMessage: historyMessage,
 			Destinations:       buildNotifyDestinations(site, r.dependencies.Storages),
 			HasDatabaseSources: hasEnabledDatabaseSources(site),
 			FilesSkipped:       result.FilesSkipped,

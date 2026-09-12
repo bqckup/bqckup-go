@@ -493,12 +493,13 @@ func (*fakeStore) ListBackupSets(context.Context, string) ([]storage.BackupSet, 
 type fakeRetainer struct {
 	calls          int
 	lastSitePrefix string
+	err            error
 }
 
 func (f *fakeRetainer) Apply(_ context.Context, _ storage.Store, sitePrefix string, _ int) error {
 	f.calls++
 	f.lastSitePrefix = sitePrefix
-	return nil
+	return f.err
 }
 
 type fakeLocker struct {
@@ -676,7 +677,7 @@ func TestRunnerRetentionFailureRecordsSuccessfulBackupWithWarning(t *testing.T) 
 	assert.Equal(t, history.StatusSuccess, deps.repository.finishedStatus)
 	assert.Equal(t, "retention", deps.repository.errorCategory)
 	assert.Contains(t, deps.repository.errorMessage, "incremental retention")
-	assert.Equal(t, []string{"backup completed but incremental retention could not be applied"}, result.Warnings)
+	assert.Equal(t, []string{`backup completed but incremental retention could not be applied for destination "local-primary"`}, result.Warnings)
 }
 
 func TestRunnerRetentionWarningDoesNotSkipOtherDestinations(t *testing.T) {
@@ -697,6 +698,40 @@ func TestRunnerRetentionWarningDoesNotSkipOtherDestinations(t *testing.T) {
 	assert.Equal(t, 2, deps.incremental.retentionCalls)
 	assert.Equal(t, 2, deps.retainer.calls)
 	assert.Len(t, result.Warnings, 2)
+}
+
+func TestRunnerPackageRetentionFailureRecordsSuccessfulBackupWithWarning(t *testing.T) {
+	deps := successfulDependencies(t)
+	deps.retainer.err = errors.New("remote cleanup unavailable")
+
+	result, err := NewRunner(deps.dependencies()).Run(context.Background(), validSite(), false)
+	require.NoError(t, err)
+	assert.Equal(t, StatusSuccess, result.Status)
+	assert.Equal(t, history.StatusSuccess, deps.repository.finishedStatus)
+	assert.Equal(t, "retention", deps.repository.errorCategory)
+	assert.Contains(t, deps.repository.errorMessage, "retention")
+	assert.Equal(t, []string{`backup completed but retention could not be applied for destination "local-primary"`}, result.Warnings)
+}
+
+func TestRunnerNoChangeRetentionWarningIsKeptInHistory(t *testing.T) {
+	deps := successfulDependencies(t)
+	deps.retainer.err = errors.New("remote cleanup unavailable")
+	anchorID := "anchor-run-1"
+	deps.repository.lastSuccessful = &history.BackupRun{
+		ID: anchorID, SiteName: "example", Status: history.StatusSuccess,
+		StartedAt: deps.clock.now.Add(-2 * time.Hour),
+	}
+	deps.repository.packages = []history.Package{{
+		RunID: anchorID, SourceKind: "files", SourceName: "files",
+		Destination: "local-primary", Size: 7, Status: history.PackageStored,
+	}}
+
+	result, err := NewRunner(deps.dependencies()).Run(context.Background(), validSite(), true)
+	require.NoError(t, err)
+	assert.Equal(t, StatusNoChange, result.Status)
+	assert.Equal(t, "retention", deps.repository.errorCategory)
+	assert.Contains(t, deps.repository.errorMessage, "unchanged")
+	assert.Contains(t, deps.repository.errorMessage, "retention")
 }
 
 func TestRunnerIncrementalSourceErrorsProducePartialResult(t *testing.T) {
