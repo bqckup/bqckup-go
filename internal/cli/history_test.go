@@ -128,6 +128,32 @@ func TestWriteHistoryTextExplainsPartialRun(t *testing.T) {
 	assert.Contains(t, output.String(), "Run partial-run warning [source]: 2 source entries could not be read; an incomplete snapshot was saved")
 }
 
+func TestWriteHistoryTextExplainsRetentionWarningOnSuccess(t *testing.T) {
+	runs := []history.BackupRun{{
+		ID: "retention-run", SiteName: "example", Status: history.StatusSuccess,
+		StartedAt:     time.Date(2026, 9, 9, 12, 0, 0, 0, time.UTC),
+		ErrorCategory: "retention", ErrorMessage: "backup completed but retention could not be applied",
+	}}
+
+	var output bytes.Buffer
+	require.NoError(t, writeHistoryText(&output, runs, false))
+	assert.Contains(t, output.String(), "SUCCESS")
+	assert.Contains(t, output.String(), "Run retention-run warning [retention]: backup completed but retention could not be applied")
+}
+
+func TestWriteHistoryTextExplainsRetentionWarningOnNoChange(t *testing.T) {
+	runs := []history.BackupRun{{
+		ID: "no-change-retention-run", SiteName: "example", Status: history.StatusNoChange,
+		StartedAt:     time.Date(2026, 9, 9, 12, 0, 0, 0, time.UTC),
+		ErrorCategory: "retention", ErrorMessage: "1 item is unchanged from the previous run.; backup completed but retention could not be applied",
+	}}
+
+	var output bytes.Buffer
+	require.NoError(t, writeHistoryText(&output, runs, false))
+	assert.Contains(t, output.String(), "NO_CHANGE")
+	assert.Contains(t, output.String(), "Run no-change-retention-run warning [retention]: 1 item is unchanged from the previous run.; backup completed but retention could not be applied")
+}
+
 func TestWriteHistoryTextRedactsSensitiveHistoryFields(t *testing.T) {
 	privateURL := strings.Join([]string{"https", "://", "storage.invalid", "/private"}, "")
 	privatePath := strings.Join([]string{"/srv", "/customer-data"}, "")

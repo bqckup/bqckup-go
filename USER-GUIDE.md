@@ -295,7 +295,9 @@ Incremental results follow Restic's incomplete-snapshot model:
   the remaining data was saved in a usable snapshot. The next run processes a
   previously skipped entry when it becomes available.
 - `failed` means a root source, repository, destination, or database export
-  prevented the run from completing normally.
+  prevented the run from completing normally. Retention cleanup is
+  post-backup maintenance: if it fails after the stored backup completes, the
+  run remains `success` and reports a warning for the deferred cleanup.
 - `cancelled` means the run was stopped before it could complete.
 
 Directory names such as `tmp`, `cache`, and `sessions` are not treated as
@@ -489,9 +491,10 @@ json` suppresses these progress lines so stdout remains valid machine-readable
 JSON.
 
 For a partial incremental run, text output also reports how many source
-entries could not be read. `history list` records the `partial` terminal status
-and its sanitized aggregate warning. Bqckup never stores skipped absolute
-paths in history or notification payloads.
+entries could not be read. Retention cleanup warnings are shown after a
+successful result and are included in JSON. `history list` records the
+sanitized warning for a successful run without changing its status. Bqckup
+never stores skipped absolute paths in history or notification payloads.
 
 Storage listing follows the backup mode: full sites show archive objects,
 while incremental sites show file snapshots. If an incremental site has an

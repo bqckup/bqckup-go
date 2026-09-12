@@ -4,6 +4,12 @@ All notable changes to Bqckup are documented in this file.
 
 ## Unreleased
 
+## v1.0.1
+
+- Keep successfully stored backups as `success` when post-backup retention
+  cleanup fails; expose the deferred cleanup as a warning in CLI, JSON, and
+  history output while continuing retention attempts for other destinations.
+
 ## v1.0.0
 
 - Show an elapsed-time spinner while incremental backups prepare the

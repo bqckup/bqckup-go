@@ -7,6 +7,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/bqckup/bqckup-go/internal/apperror"
@@ -49,6 +50,10 @@ type RunResult struct {
 	FilesSkipped int `json:"files_skipped,omitempty"`
 	// ReclaimedBytes is the space freed by incremental retention (prune).
 	ReclaimedBytes int64 `json:"reclaimed_bytes,omitempty"`
+	// Warnings contains post-backup maintenance problems that did not prevent
+	// the stored backup from being recorded as successful. The warning text is
+	// also retained in backup history under the retention category.
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 type Archiver interface {
@@ -267,6 +272,14 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 	}
 
 	sitePrefix := backupSitePrefix(site.Name, r.dependencies.ServerID)
+	retentionWarnings := make([]string, 0)
+	recordRetentionWarning := func(destination, message string, cause error) {
+		message = fmt.Sprintf("%s for destination %q", message, destination)
+		warning := apperror.Wrap(apperror.CategoryStorage, message, cause)
+		message = apperror.UserMessage(warning)
+		retentionWarnings = append(retentionWarnings, message)
+		result.Warnings = append(result.Warnings, message)
+	}
 
 	if site.BackupMode == "incremental" {
 		engine := r.dependencies.IncrementalEngine
@@ -415,22 +428,23 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 			r.progress.StartStage("applying retention to "+destination.Storage, -1)
 			reclaimed, err := engine.ApplyRetention(ctx, repo, site.Policy.KeepLast, site.Name)
 			if err != nil {
-				r.progress.FailStage()
-				return fail(apperror.Wrap(apperror.CategoryStorage, "backup completed but incremental retention could not be applied", err))
+				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+					return fail(apperror.Wrap(apperror.CategoryStorage, "backup completed but incremental retention could not be applied", err))
+				}
+				recordRetentionWarning(destination.Storage, "backup completed but incremental retention could not be applied", err)
+			} else {
+				result.ReclaimedBytes += reclaimed
 			}
-			result.ReclaimedBytes += reclaimed
+			r.progress.FinishStage()
 		}
 		// Set retention covers every mode: full sites store flat date-folder
 		// packages here, and incremental sites store their database dumps
 		// here. Without this, package objects would grow without bound.
 		if err := r.dependencies.Retainer.Apply(ctx, store, sitePrefix, site.Policy.KeepLast); err != nil {
-			if site.BackupMode == "incremental" {
-				r.progress.FailStage()
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return fail(apperror.Wrap(apperror.CategoryStorage, "backup completed but retention could not be applied", err))
 			}
-			return fail(apperror.Wrap(apperror.CategoryStorage, "backup completed but retention could not be applied", err))
-		}
-		if site.BackupMode == "incremental" {
-			r.progress.FinishStage()
+			recordRetentionWarning(destination.Storage, "backup completed but retention could not be applied", err)
 		}
 	}
 
@@ -464,7 +478,13 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 				}
 
 				finished := r.dependencies.Clock.Now().UTC()
-				if err := r.dependencies.Repository.FinishRun(context.WithoutCancel(ctx), run.ID, history.StatusNoChange, finished, "no_change", msg); err != nil {
+				historyCategory := "no_change"
+				historyMessage := msg
+				if len(retentionWarnings) > 0 {
+					historyCategory = "retention"
+					historyMessage = strings.Join(append([]string{msg}, retentionWarnings...), "; ")
+				}
+				if err := r.dependencies.Repository.FinishRun(context.WithoutCancel(ctx), run.ID, history.StatusNoChange, finished, historyCategory, historyMessage); err != nil {
 					result.Status = StatusFailed
 					result.FinishedAt = finished
 					r.notify(context.WithoutCancel(ctx), NotifyInput{
@@ -493,7 +513,11 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 	if result.FilesSkipped > 0 {
 		finished := r.dependencies.Clock.Now().UTC()
 		message := fmt.Sprintf("%d source entries could not be read; an incomplete snapshot was saved", result.FilesSkipped)
-		if err := r.dependencies.Repository.FinishRun(context.WithoutCancel(ctx), run.ID, history.StatusPartial, finished, "source", message); err != nil {
+		historyMessage := message
+		if len(retentionWarnings) > 0 {
+			historyMessage = strings.Join(append([]string{message}, retentionWarnings...), "; ")
+		}
+		if err := r.dependencies.Repository.FinishRun(context.WithoutCancel(ctx), run.ID, history.StatusPartial, finished, "source", historyMessage); err != nil {
 			result.Status = StatusFailed
 			result.FinishedAt = finished
 			r.notify(context.WithoutCancel(ctx), NotifyInput{
@@ -510,7 +534,7 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 		r.notify(context.WithoutCancel(ctx), NotifyInput{
 			Event: config.EventBackupPartial, RunID: run.ID, SiteName: site.Name, Status: result.Status,
 			StartedAt: now, FinishedAt: finished,
-			ErrorCategory: "source", ErrorMessage: message,
+			ErrorCategory: "source", ErrorMessage: historyMessage,
 			Destinations:       buildNotifyDestinations(site, r.dependencies.Storages),
 			HasDatabaseSources: hasEnabledDatabaseSources(site),
 			FilesSkipped:       result.FilesSkipped,
@@ -519,7 +543,13 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 	}
 
 	finished := r.dependencies.Clock.Now().UTC()
-	if err := r.dependencies.Repository.FinishRun(context.WithoutCancel(ctx), run.ID, history.StatusSuccess, finished, "", ""); err != nil {
+	errorCategory := ""
+	errorMessage := ""
+	if len(retentionWarnings) > 0 {
+		errorCategory = "retention"
+		errorMessage = strings.Join(retentionWarnings, "; ")
+	}
+	if err := r.dependencies.Repository.FinishRun(context.WithoutCancel(ctx), run.ID, history.StatusSuccess, finished, errorCategory, errorMessage); err != nil {
 		result.Status = StatusFailed
 		result.FinishedAt = finished
 		r.notify(context.WithoutCancel(ctx), NotifyInput{
