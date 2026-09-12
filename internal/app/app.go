@@ -259,6 +259,9 @@ func (a *App) RunBackup(ctx context.Context, siteName string, force bool) (backu
 		a.logger.write(logError, fmt.Sprintf("event=backup_finished site=%q run_id=%q status=%q category=%q error=%q", siteName, result.RunID, result.Status, apperror.CategoryOf(err), apperror.DiagnosticMessage(err)))
 	} else {
 		a.logger.write(logInfo, fmt.Sprintf("event=backup_finished site=%q status=%q run_id=%q", siteName, result.Status, result.RunID))
+		for _, warning := range result.Warnings {
+			a.logger.write(logWarn, fmt.Sprintf("event=backup_warning site=%q run_id=%q category=%q warning=%q", siteName, result.RunID, "retention", warning))
+		}
 	}
 	return result, err
 }

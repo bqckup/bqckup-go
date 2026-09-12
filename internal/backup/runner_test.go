@@ -493,12 +493,13 @@ func (*fakeStore) ListBackupSets(context.Context, string) ([]storage.BackupSet, 
 type fakeRetainer struct {
 	calls          int
 	lastSitePrefix string
+	err            error
 }
 
 func (f *fakeRetainer) Apply(_ context.Context, _ storage.Store, sitePrefix string, _ int) error {
 	f.calls++
 	f.lastSitePrefix = sitePrefix
-	return nil
+	return f.err
 }
 
 type fakeLocker struct {
@@ -660,6 +661,77 @@ func TestRunnerIncrementalBackupSuccess(t *testing.T) {
 	assert.Equal(t, "snap-001", deps.repository.packages[0].ObjectKey)
 	assert.Equal(t, int64(5_000_000), deps.repository.packages[0].Size)
 	assert.Empty(t, deps.repository.packages[0].SHA256)
+}
+
+func TestRunnerRetentionFailureRecordsSuccessfulBackupWithWarning(t *testing.T) {
+	deps := successfulDependencies(t)
+	deps.incremental.retentionErr = errors.New("remote storage reset")
+
+	site := validSite()
+	site.BackupMode = "incremental"
+	site.Incremental = config.Incremental{Password: "test-secret-password"}
+
+	result, err := NewRunner(deps.dependencies()).Run(context.Background(), site, false)
+	require.NoError(t, err)
+	assert.Equal(t, StatusSuccess, result.Status)
+	assert.Equal(t, history.StatusSuccess, deps.repository.finishedStatus)
+	assert.Equal(t, "retention", deps.repository.errorCategory)
+	assert.Contains(t, deps.repository.errorMessage, "incremental retention")
+	assert.Equal(t, []string{`backup completed but incremental retention could not be applied for destination "local-primary"`}, result.Warnings)
+}
+
+func TestRunnerRetentionWarningDoesNotSkipOtherDestinations(t *testing.T) {
+	deps := successfulDependencies(t)
+	deps.incremental.retentionErr = errors.New("remote storage reset")
+	deps.stores["local-secondary"] = &fakeStore{}
+	deps.storages["local-secondary"] = config.Storage{Type: "local", Directory: "/var/backups/bqckup-secondary"}
+
+	site := validSite()
+	site.BackupMode = "incremental"
+	site.Incremental = config.Incremental{Password: "test-secret-password"}
+	site.Destinations = append(site.Destinations, config.Destination{Storage: "local-secondary"})
+
+	result, err := NewRunner(deps.dependencies()).Run(context.Background(), site, false)
+	require.NoError(t, err)
+	assert.Equal(t, StatusSuccess, result.Status)
+	assert.Equal(t, 2, deps.incremental.backupCalls)
+	assert.Equal(t, 2, deps.incremental.retentionCalls)
+	assert.Equal(t, 2, deps.retainer.calls)
+	assert.Len(t, result.Warnings, 2)
+}
+
+func TestRunnerPackageRetentionFailureRecordsSuccessfulBackupWithWarning(t *testing.T) {
+	deps := successfulDependencies(t)
+	deps.retainer.err = errors.New("remote cleanup unavailable")
+
+	result, err := NewRunner(deps.dependencies()).Run(context.Background(), validSite(), false)
+	require.NoError(t, err)
+	assert.Equal(t, StatusSuccess, result.Status)
+	assert.Equal(t, history.StatusSuccess, deps.repository.finishedStatus)
+	assert.Equal(t, "retention", deps.repository.errorCategory)
+	assert.Contains(t, deps.repository.errorMessage, "retention")
+	assert.Equal(t, []string{`backup completed but retention could not be applied for destination "local-primary"`}, result.Warnings)
+}
+
+func TestRunnerNoChangeRetentionWarningIsKeptInHistory(t *testing.T) {
+	deps := successfulDependencies(t)
+	deps.retainer.err = errors.New("remote cleanup unavailable")
+	anchorID := "anchor-run-1"
+	deps.repository.lastSuccessful = &history.BackupRun{
+		ID: anchorID, SiteName: "example", Status: history.StatusSuccess,
+		StartedAt: deps.clock.now.Add(-2 * time.Hour),
+	}
+	deps.repository.packages = []history.Package{{
+		RunID: anchorID, SourceKind: "files", SourceName: "files",
+		Destination: "local-primary", Size: 7, Status: history.PackageStored,
+	}}
+
+	result, err := NewRunner(deps.dependencies()).Run(context.Background(), validSite(), true)
+	require.NoError(t, err)
+	assert.Equal(t, StatusNoChange, result.Status)
+	assert.Equal(t, "retention", deps.repository.errorCategory)
+	assert.Contains(t, deps.repository.errorMessage, "unchanged")
+	assert.Contains(t, deps.repository.errorMessage, "retention")
 }
 
 func TestRunnerIncrementalSourceErrorsProducePartialResult(t *testing.T) {
