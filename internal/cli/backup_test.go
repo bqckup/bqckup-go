@@ -161,6 +161,18 @@ func TestWriteRunResultTextShowsIncompleteSnapshotCount(t *testing.T) {
 	assert.Equal(t, "[WARN] example: partial (run 12345678)\nexample: 2 source entries could not be read\n", output.String())
 }
 
+func TestWriteRunResultTextShowsRetentionWarning(t *testing.T) {
+	var output bytes.Buffer
+	err := writeRunResultText(&output, backup.RunResult{
+		RunID:    "12345678-abcd",
+		SiteName: "example",
+		Status:   backup.StatusSuccess,
+		Warnings: []string{"backup completed but retention could not be applied"},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "[OK] example: success (run 12345678)\nexample: warning: backup completed but retention could not be applied\n", output.String())
+}
+
 func TestRestoreSummaryText(t *testing.T) {
 	var out bytes.Buffer
 	result := backup.RestoreResult{

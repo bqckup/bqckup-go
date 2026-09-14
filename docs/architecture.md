@@ -36,15 +36,17 @@ Dependencies point toward the use case. `backup.Runner` knows interfaces and dom
 7. Calculate SHA-256 and size for the file archive and each enabled database export.
 8. Store every package to every destination without overwriting; local uses atomic staging, while S3/R2 uses conditional transfer and metadata verification.
 9. Record each stored package.
-10. Apply retention after every required destination succeeds.
-11. Mark the run `success` (or `no_change` when full-mode prepared packages match the previous successful run byte-for-byte); failures and cancellation get a terminal status with a redacted message.
+10. Apply retention after every required destination succeeds. Retention is
+    post-backup maintenance: a cleanup error is recorded as a warning while
+    the stored backup remains successful.
+11. Mark the run `success` (or `no_change` when full-mode prepared packages match the previous successful run byte-for-byte); source, repository, destination, and database failures and cancellation get a terminal status with a redacted message.
 12. Notify the terminal status through the configured notification routes
     (best effort; a failing channel warns and never changes the run result
     or history). Only runs recorded in history notify: skipped runs and
     preflight failures are silent.
 13. Remove temporary files and release the lock.
 
-Multiple destinations have all-required semantics. A destination failure fails the run and prevents retention. Previously successful backup sets are not removed after a failed current run.
+Multiple destinations have all-required semantics. A package destination failure fails the run and prevents retention, while a retention failure is recorded as a warning and does not prevent retention attempts for other destinations. Previously successful backup sets are not removed after a failed current run.
 
 ## Incremental engine
 

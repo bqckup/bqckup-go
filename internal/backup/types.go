@@ -14,11 +14,12 @@ type FileSource struct {
 }
 
 type Package struct {
-	Path       string
-	Size       int64
-	SHA256     string
-	SourceKind string
-	SourceName string
+	Path         string
+	Size         int64
+	SHA256       string
+	SourceKind   string
+	SourceName   string
+	FilesSkipped int
 }
 
 type Exporter interface {
