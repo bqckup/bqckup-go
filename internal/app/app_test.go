@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/bqckup/bqckup-go/internal/apperror"
+	"github.com/bqckup/bqckup-go/internal/backup"
 	databaseexporter "github.com/bqckup/bqckup-go/internal/backup/database"
 	incremental "github.com/bqckup/bqckup-go/internal/backup/incremental"
 	"github.com/bqckup/bqckup-go/internal/config"
@@ -23,6 +24,61 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestRunEnabledBackupsStartsFullSiteWhileIncrementalRuns(t *testing.T) {
+	sites := []config.Site{
+		{Name: "long-incremental", Enabled: true, BackupMode: "incremental"},
+		{Name: "short-full", Enabled: true, BackupMode: "full"},
+	}
+	incrementalStarted := make(chan struct{})
+	allowIncrementalToFinish := make(chan struct{})
+	fullStarted := make(chan struct{})
+	type batchResult struct {
+		results []backup.RunResult
+		err     error
+	}
+	done := make(chan batchResult, 1)
+
+	go func() {
+		results, err := runEnabledBackups(context.Background(), sites, false, nil,
+			func(ctx context.Context, siteName string, force bool) (backup.RunResult, error) {
+				switch siteName {
+				case "long-incremental":
+					close(incrementalStarted)
+					select {
+					case <-allowIncrementalToFinish:
+					case <-ctx.Done():
+						return backup.RunResult{SiteName: siteName, Status: backup.StatusCancelled}, ctx.Err()
+					}
+				case "short-full":
+					close(fullStarted)
+				}
+				return backup.RunResult{SiteName: siteName, Status: backup.StatusSuccess}, nil
+			})
+		done <- batchResult{results: results, err: err}
+	}()
+
+	select {
+	case <-incrementalStarted:
+	case <-time.After(time.Second):
+		t.Fatal("incremental backup did not start")
+	}
+	select {
+	case <-fullStarted:
+	case <-time.After(time.Second):
+		t.Fatal("full backup waited for the incremental backup")
+	}
+	close(allowIncrementalToFinish)
+
+	select {
+	case result := <-done:
+		require.NoError(t, result.err)
+		require.Len(t, result.results, 2)
+		assert.Equal(t, []string{"long-incremental", "short-full"}, []string{result.results[0].SiteName, result.results[1].SiteName})
+	case <-time.After(time.Second):
+		t.Fatal("batch did not finish")
+	}
+}
 
 type fakeRemoteStorageResolver struct {
 	storages map[string]config.Storage

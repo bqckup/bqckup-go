@@ -4,6 +4,12 @@ All notable changes to Bqckup are documented in this file.
 
 ## Unreleased
 
+## v1.0.3
+
+- Run enabled full and incremental sites in bounded concurrent lanes so a
+  long-running incremental backup does not block independent full backups,
+  while preserving per-site locks and deterministic result ordering.
+
 ## v1.0.2
 
 - Retry volatile child archive entries briefly and save a usable `partial`

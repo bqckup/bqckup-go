@@ -183,6 +183,19 @@ func buildRepoConfig(site config.Site, storageConfig config.Storage, requirePass
 }
 
 func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result RunResult, returnedErr error) {
+	return r.run(ctx, site, force)
+}
+
+// RunWithProgress runs one backup with an isolated progress reporter. A
+// shallow copy keeps concurrent site runs from sharing mutable progress state;
+// the configured dependencies are read-only during a run.
+func (r *Runner) RunWithProgress(ctx context.Context, site config.Site, force bool, progress Progress) (RunResult, error) {
+	isolated := *r
+	isolated.progress = progressOrNoop(progress)
+	return isolated.run(ctx, site, force)
+}
+
+func (r *Runner) run(ctx context.Context, site config.Site, force bool) (result RunResult, returnedErr error) {
 	defer r.progress.Done()
 	result.SiteName = site.Name
 	if err := r.validateDependencies(); err != nil {
