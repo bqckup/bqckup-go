@@ -4,6 +4,12 @@ All notable changes to Bqckup are documented in this file.
 
 ## Unreleased
 
+## v1.0.2
+
+- Retry volatile child archive entries briefly and save a usable `partial`
+  full backup when a source entry remains unavailable, while keeping other
+  archive errors fatal.
+
 ## v1.0.1
 
 - Keep successfully stored backups as `success` when post-backup retention

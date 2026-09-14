@@ -13,6 +13,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/bqckup/bqckup-go/internal/backup"
 	"github.com/bqckup/bqckup-go/internal/fileexclude"
@@ -21,6 +22,11 @@ import (
 type Archiver struct{}
 
 func New() *Archiver { return &Archiver{} }
+
+const (
+	missingRetryAttempts = 3
+	missingRetryDelay    = 100 * time.Millisecond
+)
 
 func (a *Archiver) Create(ctx context.Context, source backup.FileSource, destination string) (backup.Package, error) {
 	if err := ctx.Err(); err != nil {
@@ -47,7 +53,7 @@ func (a *Archiver) Create(ctx context.Context, source backup.FileSource, destina
 	digest := sha256.New()
 	gz := gzip.NewWriter(io.MultiWriter(output, digest))
 	tw := tar.NewWriter(gz)
-	state := archiveState{ctx: ctx, writer: tw, source: source}
+	state := &archiveState{ctx: ctx, writer: tw, source: source}
 	rootNames := map[string]struct{}{}
 	preserveSourcePaths := len(source.Include) > 1
 	for _, include := range source.Include {
@@ -58,7 +64,7 @@ func (a *Archiver) Create(ctx context.Context, source backup.FileSource, destina
 		}
 		rootName = archiveRootName(include, rootName, rootNames, preserveSourcePaths)
 		rootNames[rootName] = struct{}{}
-		if err := state.add(clean, rootName, map[string]bool{}); err != nil {
+		if err := state.add(clean, rootName, map[string]bool{}, false); err != nil {
 			return backup.Package{}, err
 		}
 	}
@@ -82,8 +88,31 @@ func (a *Archiver) Create(ctx context.Context, source backup.FileSource, destina
 	success = true
 	return backup.Package{
 		Path: destination, Size: info.Size(), SHA256: hex.EncodeToString(digest.Sum(nil)),
-		SourceKind: "files", SourceName: "files",
+		SourceKind: "files", SourceName: "files", FilesSkipped: state.filesSkipped,
 	}, nil
+}
+
+func retryMissing[T any](ctx context.Context, operation func() (T, error)) (T, error) {
+	var zero T
+	for attempt := 0; attempt < missingRetryAttempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return zero, err
+		}
+		value, err := operation()
+		if err == nil || !errors.Is(err, os.ErrNotExist) || attempt == missingRetryAttempts-1 {
+			return value, err
+		}
+		timer := time.NewTimer(missingRetryDelay)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return zero, ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return zero, ctx.Err()
 }
 
 // archiveRootName gives multi-root archives descriptive, non-overlapping
@@ -105,12 +134,13 @@ func archiveRootName(include, base string, used map[string]struct{}, preservePat
 }
 
 type archiveState struct {
-	ctx    context.Context
-	writer *tar.Writer
-	source backup.FileSource
+	ctx          context.Context
+	writer       *tar.Writer
+	source       backup.FileSource
+	filesSkipped int
 }
 
-func (s archiveState) add(realPath, archivePath string, active map[string]bool) error {
+func (s *archiveState) add(realPath, archivePath string, active map[string]bool, optional bool) error {
 	if err := s.ctx.Err(); err != nil {
 		return err
 	}
@@ -118,29 +148,53 @@ func (s archiveState) add(realPath, archivePath string, active map[string]bool) 
 	if s.excluded(realPath) {
 		return nil
 	}
-	info, err := os.Lstat(realPath)
+	info, err := retryMissing(s.ctx, func() (os.FileInfo, error) {
+		return os.Lstat(realPath)
+	})
 	if err != nil {
+		if optional && errors.Is(err, os.ErrNotExist) {
+			s.filesSkipped++
+			return nil
+		}
 		return fmt.Errorf("inspect archive source %s: %w", realPath, err)
 	}
 
 	if info.Mode()&os.ModeSymlink != 0 {
-		target, err := os.Readlink(realPath)
+		target, err := retryMissing(s.ctx, func() (string, error) {
+			return os.Readlink(realPath)
+		})
 		if err != nil {
+			if optional && errors.Is(err, os.ErrNotExist) {
+				s.filesSkipped++
+				return nil
+			}
 			return fmt.Errorf("read symlink %s: %w", realPath, err)
 		}
 		if !s.source.FollowSymlinks {
 			return s.writeHeader(info, archivePath, target)
 		}
-		resolved, err := filepath.EvalSymlinks(realPath)
+		resolved, err := retryMissing(s.ctx, func() (string, error) {
+			return filepath.EvalSymlinks(realPath)
+		})
 		if err != nil {
+			if optional && errors.Is(err, os.ErrNotExist) {
+				s.filesSkipped++
+				return nil
+			}
 			return fmt.Errorf("resolve symlink %s: %w", realPath, err)
 		}
-		return s.add(resolved, archivePath, active)
+		return s.add(resolved, archivePath, active, optional)
 	}
 
 	if info.IsDir() {
-		canonical, err := filepath.EvalSymlinks(realPath)
+		canonical, err := retryMissing(s.ctx, func() (string, error) {
+			return filepath.EvalSymlinks(realPath)
+		})
 		if err != nil {
+			if optional && errors.Is(err, os.ErrNotExist) {
+				s.filesSkipped++
+				return nil
+			}
 			return fmt.Errorf("resolve directory %s: %w", realPath, err)
 		}
 		if active[canonical] {
@@ -148,15 +202,21 @@ func (s archiveState) add(realPath, archivePath string, active map[string]bool) 
 		}
 		active[canonical] = true
 		defer delete(active, canonical)
+		entries, err := retryMissing(s.ctx, func() ([]os.DirEntry, error) {
+			return os.ReadDir(realPath)
+		})
+		if err != nil {
+			if optional && errors.Is(err, os.ErrNotExist) {
+				s.filesSkipped++
+				return nil
+			}
+			return fmt.Errorf("read archive directory %s: %w", realPath, err)
+		}
 		if err := s.writeHeader(info, archivePath+"/", ""); err != nil {
 			return err
 		}
-		entries, err := os.ReadDir(realPath)
-		if err != nil {
-			return fmt.Errorf("read archive directory %s: %w", realPath, err)
-		}
 		for _, entry := range entries {
-			if err := s.add(filepath.Join(realPath, entry.Name()), path.Join(archivePath, entry.Name()), active); err != nil {
+			if err := s.add(filepath.Join(realPath, entry.Name()), path.Join(archivePath, entry.Name()), active, true); err != nil {
 				return err
 			}
 		}
@@ -166,12 +226,19 @@ func (s archiveState) add(realPath, archivePath string, active map[string]bool) 
 	if !info.Mode().IsRegular() {
 		return fmt.Errorf("unsupported archive source type at %s", realPath)
 	}
-	if err := s.writeHeader(info, archivePath, ""); err != nil {
-		return err
-	}
-	file, err := os.Open(realPath)
+	file, err := retryMissing(s.ctx, func() (*os.File, error) {
+		return os.Open(realPath)
+	})
 	if err != nil {
+		if optional && errors.Is(err, os.ErrNotExist) {
+			s.filesSkipped++
+			return nil
+		}
 		return fmt.Errorf("open archive source %s: %w", realPath, err)
+	}
+	if err := s.writeHeader(info, archivePath, ""); err != nil {
+		_ = file.Close()
+		return err
 	}
 	_, copyErr := io.Copy(s.writer, file)
 	closeErr := file.Close()

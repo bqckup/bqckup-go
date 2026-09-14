@@ -36,6 +36,19 @@ func TestRunnerCompletesBackupLifecycle(t *testing.T) {
 	assert.ErrorIs(t, statErr, os.ErrNotExist)
 }
 
+func TestRunnerMarksFullArchiveWithSkippedFilesPartial(t *testing.T) {
+	deps := successfulDependencies(t)
+	deps.archiver.filesSkipped = 1
+
+	result, err := NewRunner(deps.dependencies()).Run(context.Background(), validSite(), false)
+
+	require.NoError(t, err)
+	assert.Equal(t, StatusPartial, result.Status)
+	assert.Equal(t, 1, result.FilesSkipped)
+	assert.Equal(t, history.StatusPartial, deps.repository.finishedStatus)
+	assert.Len(t, deps.repository.packages, 1)
+}
+
 func TestRunnerSkipsInsideMinimumInterval(t *testing.T) {
 	deps := successfulDependencies(t)
 	deps.repository.lastSuccessful = &history.BackupRun{StartedAt: deps.clock.now.Add(-30 * time.Minute)}
@@ -424,9 +437,10 @@ func (f *fakeRepository) RunPackages(_ context.Context, runID string) ([]history
 }
 
 type fakeArchiver struct {
-	calls     int
-	err       error
-	workspace string
+	calls        int
+	err          error
+	workspace    string
+	filesSkipped int
 }
 
 func (f *fakeArchiver) Create(_ context.Context, _ FileSource, destination string) (Package, error) {
@@ -440,7 +454,7 @@ func (f *fakeArchiver) Create(_ context.Context, _ FileSource, destination strin
 		return Package{}, err
 	}
 	sum := sha256.Sum256(contents)
-	return Package{Path: destination, Size: int64(len(contents)), SHA256: hex.EncodeToString(sum[:]), SourceKind: "files", SourceName: "files"}, nil
+	return Package{Path: destination, Size: int64(len(contents)), SHA256: hex.EncodeToString(sum[:]), SourceKind: "files", SourceName: "files", FilesSkipped: f.filesSkipped}, nil
 }
 
 type fakeStore struct {
