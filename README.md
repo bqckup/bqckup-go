@@ -129,6 +129,8 @@ legacy database type `postgresql` to `postgres`.
 Full mode is the default. It creates portable `.tar.gz` file archives and
 compressed `.sql.gz` database dumps below
 `bqckup/<server_id>/<site>/<YYYY-MM-DD>/<HH-mm-ss>-<package>.gz` in each destination.
+If a child file disappears during archive creation, bqckup retries it briefly
+and saves the remaining archive as `partial` when it is still unavailable.
 
 ### Incremental backup
 
@@ -139,8 +141,10 @@ as a regular, non-symlink file with mode `0600`. The built-in engine is always
 used. A run is `success` when every source entry in the configured scope was
 read, `partial` when an incomplete but usable snapshot was saved, and `failed`
 when a root source, repository, destination, or database operation could not
-complete. A cancelled run remains `cancelled`. Excluded paths are outside the
-configured scope and do not make a run partial.
+complete. Retention cleanup errors are recorded as warnings after a successful
+backup and do not change its `success` status. A cancelled run remains
+`cancelled`. Excluded paths are outside the configured scope and do not make a
+run partial.
 
 ## Commands
 

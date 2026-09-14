@@ -288,15 +288,19 @@ packages are stored below `bqckup/<server_id>/<site>/<YYYY-MM-DD>/` and use
 `<HH-mm-ss>-<package>.gz` names. Packages from one run share the same time
 prefix.
 
-Incremental results follow Restic's incomplete-snapshot model:
+Full and incremental results follow the same incomplete-backup model:
 
 - `success` means every source entry inside the configured include/exclude
   scope was read.
-- `partial` means one or more child entries disappeared or could not be read;
-  the remaining data was saved in a usable snapshot. The next run processes a
-  previously skipped entry when it becomes available.
+- `partial` means one or more child entries disappeared during archive or
+  snapshot creation; bqckup retries transient `ENOENT` races, then saves the
+  remaining data when an entry is still unavailable. The next run processes a
+  previously skipped entry when it becomes available. Other read errors remain
+  fatal.
 - `failed` means a root source, repository, destination, or database export
-  prevented the run from completing normally.
+  prevented the run from completing normally. Retention cleanup is
+  post-backup maintenance: if it fails after the stored backup completes, the
+  run remains `success` and reports a warning for the deferred cleanup.
 - `cancelled` means the run was stopped before it could complete.
 
 Directory names such as `tmp`, `cache`, and `sessions` are not treated as
@@ -489,10 +493,11 @@ when redirected), then prints that site's result when it finishes. `--output
 json` suppresses these progress lines so stdout remains valid machine-readable
 JSON.
 
-For a partial incremental run, text output also reports how many source
-entries could not be read. `history list` records the `partial` terminal status
-and its sanitized aggregate warning. Bqckup never stores skipped absolute
-paths in history or notification payloads.
+For a partial full or incremental run, text output also reports how many source
+entries could not be read. Retention cleanup warnings are shown after a
+successful result and are included in JSON. `history list` records the
+sanitized warning for a successful run without changing its status. Bqckup
+never stores skipped absolute paths in history or notification payloads.
 
 Storage listing follows the backup mode: full sites show archive objects,
 while incremental sites show file snapshots. If an incremental site has an
