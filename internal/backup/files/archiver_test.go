@@ -63,6 +63,39 @@ func TestCreateSupportsRelativeExcludePatterns(t *testing.T) {
 	assert.NotContains(t, names, filepath.Base(source)+"/cache/deep/secret")
 }
 
+func TestCreateSkipsMissingChildSourceAsPartialArchive(t *testing.T) {
+	parent := t.TempDir()
+	source := filepath.Join(parent, "source")
+	require.NoError(t, os.MkdirAll(source, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(source, "keep.txt"), []byte("keep"), 0o600))
+	require.NoError(t, os.Symlink("missing-target.txt", filepath.Join(source, "volatile-link")))
+	out := filepath.Join(t.TempDir(), "files.tar.gz")
+
+	pkg, err := New().Create(context.Background(), backup.FileSource{
+		Include:        []string{source},
+		FollowSymlinks: true,
+	}, out)
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, pkg.FilesSkipped)
+	assert.Equal(t, []string{"source/keep.txt"}, archiveMembers(t, out))
+}
+
+func TestRetryMissingRetriesENOENT(t *testing.T) {
+	calls := 0
+	value, err := retryMissing(context.Background(), func() (string, error) {
+		calls++
+		if calls < 3 {
+			return "", os.ErrNotExist
+		}
+		return "ready", nil
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "ready", value)
+	assert.Equal(t, 3, calls)
+}
+
 func TestCreateDisambiguatesDuplicateSourceBasenames(t *testing.T) {
 	parent := t.TempDir()
 	first := filepath.Join(parent, "one", "crowdsec")

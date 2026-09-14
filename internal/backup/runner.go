@@ -45,7 +45,7 @@ type RunResult struct {
 	StartedAt  time.Time  `json:"started_at,omitempty"`
 	FinishedAt time.Time  `json:"finished_at,omitempty"`
 	// FilesSkipped is the number of source entries omitted from an incomplete
-	// incremental snapshot. With multiple destinations, it is the largest
+	// file backup. With multiple incremental destinations, it is the largest
 	// count reported by any destination rather than a duplicate sum.
 	FilesSkipped int `json:"files_skipped,omitempty"`
 	// ReclaimedBytes is the space freed by incremental retention (prune).
@@ -358,6 +358,7 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 			r.progress.FailStage()
 			return fail(apperror.Wrap(apperror.CategoryExecution, "could not create the file archive", err))
 		}
+		result.FilesSkipped = archive.FilesSkipped
 		r.progress.FinishStage()
 
 		objectKey := path.Join(sitePrefix, storage.FormatPackageKey(now, "files.tar.gz", run.ID))
