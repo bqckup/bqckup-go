@@ -138,10 +138,7 @@ func newBackupCommand(opts *options) *cobra.Command {
 
 				var progressErr error
 				var observer app.BackupRunObserver
-				var progress *CLIProgress
 				if opts.output != "json" {
-					progress = NewCLIProgress(cmd.ErrOrStderr())
-					application.SetBackupProgress(progress)
 					observer = func(runProgress app.BackupRunProgress) {
 						if progressErr != nil {
 							return
@@ -149,9 +146,6 @@ func newBackupCommand(opts *options) *cobra.Command {
 						if runProgress.Result == nil {
 							progressErr = writeBackupStartText(cmd.ErrOrStderr(), runProgress)
 							return
-						}
-						if progress != nil {
-							progress.Done()
 						}
 						progressErr = writeRunResultText(cmd.OutOrStdout(), *runProgress.Result)
 						if progressErr == nil && runProgress.Error != nil {
@@ -163,9 +157,6 @@ func newBackupCommand(opts *options) *cobra.Command {
 					}
 				}
 				results, runErr := application.RunEnabledBackups(cmd.Context(), force, observer)
-				if progress != nil {
-					progress.Done()
-				}
 				if progressErr != nil {
 					return progressErr
 				}

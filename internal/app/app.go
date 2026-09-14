@@ -246,6 +246,10 @@ func (a *App) SetBackupProgress(progress backup.Progress) {
 }
 
 func (a *App) RunBackup(ctx context.Context, siteName string, force bool) (backup.RunResult, error) {
+	return a.runBackup(ctx, siteName, force, nil)
+}
+
+func (a *App) runBackup(ctx context.Context, siteName string, force bool, progress backup.Progress) (backup.RunResult, error) {
 	a.logger.write(logInfo, fmt.Sprintf("event=backup_start site=%q force=%t", siteName, force))
 	site, ok := a.configuration.Site(siteName)
 	if !ok {
@@ -254,7 +258,13 @@ func (a *App) RunBackup(ctx context.Context, siteName string, force bool) (backu
 	if !site.Enabled {
 		return backup.RunResult{SiteName: siteName, Status: backup.StatusFailed}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q is disabled", siteName), nil)
 	}
-	result, err := a.runner.Run(ctx, site, force)
+	var result backup.RunResult
+	var err error
+	if progress == nil {
+		result, err = a.runner.Run(ctx, site, force)
+	} else {
+		result, err = a.runner.RunWithProgress(ctx, site, force, progress)
+	}
 	if err != nil {
 		a.logger.write(logError, fmt.Sprintf("event=backup_finished site=%q run_id=%q status=%q category=%q error=%q", siteName, result.RunID, result.Status, apperror.CategoryOf(err), apperror.DiagnosticMessage(err)))
 	} else {
@@ -279,45 +289,109 @@ type BackupRunProgress struct {
 
 type BackupRunObserver func(BackupRunProgress)
 
-// RunEnabledBackups runs every enabled site in deterministic configuration
-// order. A failure is collected and does not prevent later sites from running;
-// the combined error is returned after all sites finish. Context cancellation
-// still stops the batch immediately. The optional observer is called
-// synchronously, allowing text clients to render each site's progress without
-// exposing credentials from the site configuration.
+// RunEnabledBackups runs enabled sites concurrently in two bounded lanes: one
+// incremental site and one full site at a time. A failure is collected and
+// does not prevent other sites from running; the combined error is returned
+// after all active work finishes. Context cancellation stops queued work and
+// is passed to active runs. The optional observer is called synchronously with
+// sanitized site progress.
 func (a *App) RunEnabledBackups(ctx context.Context, force bool, observer BackupRunObserver) ([]backup.RunResult, error) {
-	results := make([]backup.RunResult, 0, len(a.configuration.Sites))
-	var runErr error
-	for _, site := range a.configuration.Sites {
+	return runEnabledBackups(ctx, a.configuration.Sites, force, observer,
+		func(ctx context.Context, siteName string, force bool) (backup.RunResult, error) {
+			return a.runBackup(ctx, siteName, force, backup.NoopProgress{})
+		})
+}
+
+type batchRunFunc func(context.Context, string, bool) (backup.RunResult, error)
+
+type batchJob struct {
+	index int
+	site  config.Site
+}
+
+type batchOutcome struct {
+	result backup.RunResult
+	err    error
+	done   bool
+}
+
+func runEnabledBackups(ctx context.Context, sites []config.Site, force bool, observer BackupRunObserver, run batchRunFunc) ([]backup.RunResult, error) {
+	jobs := make([]batchJob, 0, len(sites))
+	for _, site := range sites {
 		if !site.Enabled {
 			continue
 		}
-		progress := BackupRunProgress{
-			SiteName:     site.Name,
-			BackupMode:   site.BackupMode,
-			Destinations: make([]string, 0, len(site.Destinations)),
-		}
-		for _, destination := range site.Destinations {
-			progress.Destinations = append(progress.Destinations, destination.Storage)
-		}
+		job := batchJob{index: len(jobs), site: site}
+		jobs = append(jobs, job)
 		if observer != nil {
-			observer(progress)
-		}
-		result, err := a.RunBackup(ctx, site.Name, force)
-		if observer != nil {
-			progress.Result = &result
-			progress.Error = err
-			observer(progress)
-		}
-		results = append(results, result)
-		if err != nil {
-			runErr = errors.Join(runErr, err)
-			if ctx.Err() != nil {
-				return results, errors.Join(runErr, ctx.Err())
-			}
+			observer(batchProgressForSite(site))
 		}
 	}
+
+	outcomes := make([]batchOutcome, len(jobs))
+	var outcomesMu sync.Mutex
+	var observerMu sync.Mutex
+	var workers sync.WaitGroup
+	for _, mode := range []string{"full", "incremental"} {
+		mode := mode
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			for _, job := range jobs {
+				jobMode := job.site.BackupMode
+				if jobMode == "" {
+					jobMode = "full"
+				}
+				if jobMode != mode {
+					continue
+				}
+				if ctx.Err() != nil {
+					return
+				}
+				result, err := run(ctx, job.site.Name, force)
+				outcomesMu.Lock()
+				outcomes[job.index] = batchOutcome{result: result, err: err, done: true}
+				outcomesMu.Unlock()
+				if observer != nil {
+					progress := batchProgressForSite(job.site)
+					progress.Result = &result
+					progress.Error = err
+					observerMu.Lock()
+					observer(progress)
+					observerMu.Unlock()
+				}
+			}
+		}()
+	}
+	workers.Wait()
+
+	results := make([]backup.RunResult, 0, len(jobs))
+	var runErr error
+	for _, outcome := range outcomes {
+		if !outcome.done {
+			continue
+		}
+		results = append(results, outcome.result)
+		if outcome.err != nil {
+			runErr = errors.Join(runErr, outcome.err)
+		}
+	}
+	if ctx.Err() != nil {
+		runErr = errors.Join(runErr, ctx.Err())
+	}
 	return results, runErr
+}
+
+func batchProgressForSite(site config.Site) BackupRunProgress {
+	progress := BackupRunProgress{
+		SiteName:     site.Name,
+		BackupMode:   site.BackupMode,
+		Destinations: make([]string, 0, len(site.Destinations)),
+	}
+	for _, destination := range site.Destinations {
+		progress.Destinations = append(progress.Destinations, destination.Storage)
+	}
+	return progress
 }
 
 func (a *App) LastSuccessful(ctx context.Context, siteName string) (*history.BackupRun, error) {

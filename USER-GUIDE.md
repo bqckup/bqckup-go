@@ -487,11 +487,12 @@ Ignore `minimum_interval` for one run:
 bqckup backup run website --force
 ```
 
-Text output immediately shows which site and backup mode are running, shows a
-loading spinner in an interactive terminal (or a heartbeat every five seconds
-when redirected), then prints that site's result when it finishes. `--output
-json` suppresses these progress lines so stdout remains valid machine-readable
-JSON.
+Text output immediately shows which site and backup mode are running, then
+prints each site's result when it finishes. A batch can finish out of
+configuration order because one full and one incremental site may run at the
+same time. Single-site runs show a loading spinner in an interactive terminal
+(or a heartbeat every five seconds when redirected). `--output json` suppresses
+these progress lines so stdout remains valid machine-readable JSON.
 
 For a partial full or incremental run, text output also reports how many source
 entries could not be read. Retention cleanup warnings are shown after a

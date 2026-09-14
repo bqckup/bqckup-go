@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/bqckup/bqckup-go/internal/backup"
@@ -191,7 +192,13 @@ func TestBackupRunTextSeparatesSiteBlocks(t *testing.T) {
 
 	output := combined.String()
 	assert.Contains(t, output, "[>] backup:example: starting full backup to local-primary")
-	assert.Regexp(t, `\[OK\] example: success \(run [^)]+\)\n\n\[>] backup:site-b: starting full backup to local-primary`, output)
+	assert.Contains(t, output, "[>] backup:site-b: starting full backup to local-primary")
+	exampleStart := strings.Index(output, "[>] backup:example: starting full backup to local-primary")
+	siteBStart := strings.Index(output, "[>] backup:site-b: starting full backup to local-primary")
+	exampleResult := strings.Index(output, "[OK] example: success")
+	siteBResult := strings.Index(output, "[OK] site-b: success")
+	assert.Less(t, exampleStart, exampleResult)
+	assert.Less(t, siteBStart, siteBResult)
 	assert.Contains(t, output, "[OK] site-b: success")
 }
 
