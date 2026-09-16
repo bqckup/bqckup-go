@@ -121,6 +121,36 @@ func TestLoadRequires0600ForIncrementalPassword(t *testing.T) {
 	assert.Contains(t, err.Error(), "credential-bearing site file must have mode 0600")
 }
 
+func TestFixCredentialFilePermissionsRepairsIncrementalSite(t *testing.T) {
+	dir := writeConfigTree(t, `app:
+  state_database: data/bqckup.db
+  temporary_directory: tmp
+  lock_directory: locks
+`, localStorageYAML, `site:
+  name: example
+  enabled: true
+  backup_mode: incremental
+  incremental:
+    password: "literal-secret"
+  sources:
+    files:
+      include: [/var/www/html]
+  destinations:
+    - storage: local-primary
+`)
+	sitePath := filepath.Join(dir, "sites", "example.yaml")
+	require.NoError(t, os.Chmod(sitePath, 0o644))
+
+	changed, err := FixCredentialFilePermissions(t.Context(), dir)
+	require.NoError(t, err)
+	assert.Equal(t, []string{sitePath}, changed)
+	info, err := os.Stat(sitePath)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+	_, err = Load(t.Context(), dir)
+	require.NoError(t, err)
+}
+
 func TestLoadRejectsRemovedIncrementalEngineField(t *testing.T) {
 	siteYAML := `version: 2
 site:

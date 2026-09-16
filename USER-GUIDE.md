@@ -340,6 +340,17 @@ bqckup doctor --site website
 writable application directories, required database tools, and configured
 incremental passwords without printing their values.
 
+If validation reports a credential-bearing YAML file with the wrong mode, fix
+only the affected regular files explicitly, then validate again:
+
+```bash
+sudo bqckup config fix-permissions
+sudo bqckup config validate
+```
+
+The command never follows symlinks and only sets `0600` on files that contain
+inline credentials.
+
 ## Notifications
 
 Add this optional section to the root `bqckup.yaml`:

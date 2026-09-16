@@ -154,6 +154,7 @@ run partial.
 ```text
 bqckup init
 bqckup config validate
+bqckup config fix-permissions
 bqckup doctor [--site <name>]
 bqckup backup list
 bqckup backup summary [--site <name>]

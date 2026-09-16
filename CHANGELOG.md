@@ -2,6 +2,11 @@
 
 All notable changes to Bqckup are documented in this file.
 
+## v1.0.6
+
+- Add `config fix-permissions` to explicitly set credential-bearing regular
+  configuration files to mode `0600` without weakening validation.
+
 ## v1.0.5
 
 - Store new full backup package folders with the human-readable UTC date

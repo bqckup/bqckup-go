@@ -19,6 +19,7 @@ done
 for command in \
     "bqckup init" \
     "bqckup config validate" \
+    "bqckup config fix-permissions" \
     "bqckup doctor" \
     "bqckup backup list" \
     "bqckup backup run" \
