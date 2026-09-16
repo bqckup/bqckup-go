@@ -7,6 +7,9 @@ All notable changes to Bqckup are documented in this file.
 - Add optional `backup_prefix` namespace support so backup keys can use
   `bqckup/<backup_prefix>/<server_id>/<site>/...` while preserving the legacy
   layout when the field is empty.
+- Expand the default `info` application log with backup plans, stage durations,
+  stored object details, and final run statistics while keeping secrets and
+  absolute source paths out of log output.
 
 ## v1.0.3
 

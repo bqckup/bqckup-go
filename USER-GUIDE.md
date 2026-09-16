@@ -112,7 +112,10 @@ Relative paths are resolved from the configuration directory. Values inside
 the YAML are authoritative and are not overridden by environment variables.
 `log_level` accepts `debug`, `info`, `warn`, or `error`. When `log_file` is
 set, Bqckup appends operational events to that file and creates it with mode
-`0600`.
+`0600`. The default `info` level records the backup plan, each stage and its
+duration, stored object keys and sizes, and the final run summary. `debug` adds
+sanitized source configuration details. Logs never include credentials,
+signed URLs, provider response bodies, or absolute source paths.
 
 `backup_prefix` is an optional safe relative path used below the `bqckup/`
 namespace. With the example above, backup keys start with
