@@ -4,6 +4,18 @@ All notable changes to Bqckup are documented in this file.
 
 ## Unreleased
 
+## v1.0.3
+
+- Add optional `backup_prefix` namespace support so backup keys can use
+  `bqckup/<backup_prefix>/<server_id>/<site>/...` while preserving the legacy
+  layout when the field is empty.
+- Emit application logs as JSON Lines and expand the default `info` events with
+  backup plans, stage durations, stored object details, and final run statistics
+  while keeping secrets and absolute source paths out of log output.
+- Run enabled full and incremental sites in bounded concurrent lanes so a
+  long-running incremental backup does not block independent full backups,
+  while preserving per-site locks and deterministic result ordering.
+
 ## v1.0.2
 
 - Retry volatile child archive entries briefly and save a usable `partial`

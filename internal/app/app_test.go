@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/bqckup/bqckup-go/internal/apperror"
+	"github.com/bqckup/bqckup-go/internal/backup"
 	databaseexporter "github.com/bqckup/bqckup-go/internal/backup/database"
 	incremental "github.com/bqckup/bqckup-go/internal/backup/incremental"
 	"github.com/bqckup/bqckup-go/internal/config"
@@ -23,6 +24,61 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestRunEnabledBackupsStartsFullSiteWhileIncrementalRuns(t *testing.T) {
+	sites := []config.Site{
+		{Name: "long-incremental", Enabled: true, BackupMode: "incremental"},
+		{Name: "short-full", Enabled: true, BackupMode: "full"},
+	}
+	incrementalStarted := make(chan struct{})
+	allowIncrementalToFinish := make(chan struct{})
+	fullStarted := make(chan struct{})
+	type batchResult struct {
+		results []backup.RunResult
+		err     error
+	}
+	done := make(chan batchResult, 1)
+
+	go func() {
+		results, err := runEnabledBackups(context.Background(), sites, false, nil,
+			func(ctx context.Context, siteName string, force bool) (backup.RunResult, error) {
+				switch siteName {
+				case "long-incremental":
+					close(incrementalStarted)
+					select {
+					case <-allowIncrementalToFinish:
+					case <-ctx.Done():
+						return backup.RunResult{SiteName: siteName, Status: backup.StatusCancelled}, ctx.Err()
+					}
+				case "short-full":
+					close(fullStarted)
+				}
+				return backup.RunResult{SiteName: siteName, Status: backup.StatusSuccess}, nil
+			})
+		done <- batchResult{results: results, err: err}
+	}()
+
+	select {
+	case <-incrementalStarted:
+	case <-time.After(time.Second):
+		t.Fatal("incremental backup did not start")
+	}
+	select {
+	case <-fullStarted:
+	case <-time.After(time.Second):
+		t.Fatal("full backup waited for the incremental backup")
+	}
+	close(allowIncrementalToFinish)
+
+	select {
+	case result := <-done:
+		require.NoError(t, result.err)
+		require.Len(t, result.results, 2)
+		assert.Equal(t, []string{"long-incremental", "short-full"}, []string{result.results[0].SiteName, result.results[1].SiteName})
+	case <-time.After(time.Second):
+		t.Fatal("batch did not finish")
+	}
+}
 
 type fakeRemoteStorageResolver struct {
 	storages map[string]config.Storage
@@ -269,6 +325,11 @@ func TestListSiteSnapshotsSucceedsWithLocalStorageDocument(t *testing.T) {
 
 func TestOpenWiresAWorkingLocalBackupApplication(t *testing.T) {
 	configDir, backupRoot := writeApplicationConfig(t)
+	logPath := filepath.Join(filepath.Dir(configDir), "bqckup.log")
+	rootPath := filepath.Join(configDir, "bqckup.yaml")
+	root, err := os.ReadFile(rootPath)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(rootPath, fmt.Appendf(root, "  log_file: %s\n", logPath), 0o600))
 	application, err := Open(context.Background(), configDir)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, application.Close()) })
@@ -284,6 +345,19 @@ func TestOpenWiresAWorkingLocalBackupApplication(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, runs, 1)
 	assert.Len(t, runs[0].Packages, 1)
+
+	contents, err := os.ReadFile(logPath)
+	require.NoError(t, err)
+	text := string(contents)
+	for _, line := range strings.Split(strings.TrimSpace(text), "\n") {
+		assert.True(t, json.Valid([]byte(line)), "invalid JSON log line: %s", line)
+	}
+	assert.Contains(t, text, `"event":"backup_plan","site":"example"`)
+	assert.Contains(t, text, `"event":"stage_start","site":"example","stage":"compress files"`)
+	assert.Contains(t, text, `"event":"package_stored","site":"example"`)
+	assert.Contains(t, text, `"object_key":"bqckup/example/`)
+	assert.Contains(t, text, `"event":"backup_finished","site":"example"`)
+	assert.NotContains(t, text, filepath.Join(filepath.Dir(configDir), "source"))
 }
 
 func TestBuildNotifierConstructsChannelsFromConfiguration(t *testing.T) {

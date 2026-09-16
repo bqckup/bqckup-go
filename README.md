@@ -86,6 +86,7 @@ Common options:
 
 | Field | Available values |
 | --- | --- |
+| `backup_prefix` | optional safe relative path below `bqckup/` |
 | `app.log_level` | `debug`, `info`, `warn`, `error` |
 | `storage.type` | `local`, `s3`, `r2` |
 | `site.backup_mode` | `full` (default), `incremental` |
@@ -129,6 +130,8 @@ legacy database type `postgresql` to `postgres`.
 Full mode is the default. It creates portable `.tar.gz` file archives and
 compressed `.sql.gz` database dumps below
 `bqckup/<server_id>/<site>/<YYYY-MM-DD>/<HH-mm-ss>-<package>.gz` in each destination.
+Set optional `backup_prefix` in `bqckup.yaml` to place the server namespace
+below `bqckup/<backup_prefix>/`.
 If a child file disappears during archive creation, bqckup retries it briefly
 and saves the remaining archive as `partial` when it is still unavailable.
 
@@ -167,9 +170,11 @@ bqckup version
 
 Use `--output json` for machine-readable output. Run `bqckup --help` or any
 subcommand with `--help` to see all available options. In text mode,
-`backup run` reports each site as soon as it starts, shows a loading spinner in
-an interactive terminal (or a five-second heartbeat when redirected), and
-prints its result as soon as it finishes; JSON mode suppresses progress text.
+`backup run` reports each site as soon as it starts and prints its result as
+soon as it finishes; batch runs can finish out of configuration order because
+independent full and incremental sites run concurrently. Single-site runs show
+a loading spinner in an interactive terminal (or a five-second heartbeat when
+redirected). JSON mode suppresses progress text.
 `update` likewise shows an interactive spinner (or a five-second heartbeat
 when redirected) while it downloads, verifies, and installs the release.
 

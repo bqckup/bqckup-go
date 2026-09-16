@@ -41,7 +41,7 @@ func listSnapshots(t *testing.T, repo backupincremental.RepoConfig) []repository
 
 func TestEnsureAndBackupAndList(t *testing.T) {
 	ctx := context.Background()
-	engine := NewEngine()
+	engine := new(Engine)
 	repo := testRepo(t)
 
 	if err := engine.EnsureRepository(ctx, repo); err != nil {
@@ -78,7 +78,7 @@ func TestBackupNeedsNoResticBinary(t *testing.T) {
 	// The facade path spawns no processes: a full run must work with a PATH
 	// that contains only a directory without incremental.
 	ctx := context.Background()
-	engine := NewEngine()
+	engine := new(Engine)
 	repo := testRepo(t)
 	source := t.TempDir()
 	if err := os.WriteFile(filepath.Join(source, "f.txt"), []byte("x"), 0o644); err != nil {
@@ -98,7 +98,7 @@ func TestBackupNeedsNoResticBinary(t *testing.T) {
 
 func TestApplyRetentionKeepsNewest(t *testing.T) {
 	ctx := context.Background()
-	engine := NewEngine()
+	engine := new(Engine)
 	repo := testRepo(t)
 	if err := engine.EnsureRepository(ctx, repo); err != nil {
 		t.Fatal(err)
@@ -129,7 +129,7 @@ func TestApplyRetentionKeepsNewest(t *testing.T) {
 
 func TestApplyRetentionIgnoresOtherSites(t *testing.T) {
 	ctx := context.Background()
-	engine := NewEngine()
+	engine := new(Engine)
 	repo := testRepo(t)
 	if err := engine.EnsureRepository(ctx, repo); err != nil {
 		t.Fatal(err)
@@ -155,7 +155,7 @@ func TestApplyRetentionIgnoresOtherSites(t *testing.T) {
 }
 
 func TestRejectsRemoteURLs(t *testing.T) {
-	engine := NewEngine()
+	engine := new(Engine)
 	repo := backupincremental.RepoConfig{URL: "rest:https://user:secret-key@example.com/repo", Password: "x"}
 	err := engine.EnsureRepository(context.Background(), repo)
 	if err == nil {
@@ -168,7 +168,7 @@ func TestRejectsRemoteURLs(t *testing.T) {
 
 func TestUnlockSucceedsOnCleanRepository(t *testing.T) {
 	ctx := context.Background()
-	engine := NewEngine()
+	engine := new(Engine)
 	repo := testRepo(t)
 	if err := engine.EnsureRepository(ctx, repo); err != nil {
 		t.Fatal(err)
@@ -188,7 +188,7 @@ var _ interface {
 
 func TestListSnapshotsListsRepositorySnapshotsAndReleasesLock(t *testing.T) {
 	ctx := context.Background()
-	engine := NewEngine()
+	engine := new(Engine)
 	repo := testRepo(t)
 	if err := engine.EnsureRepository(ctx, repo); err != nil {
 		t.Fatal(err)
@@ -250,7 +250,7 @@ func TestListSnapshotsListsRepositorySnapshotsAndReleasesLock(t *testing.T) {
 
 func TestListSnapshotsTakesANonExclusiveLockDuringListing(t *testing.T) {
 	ctx := context.Background()
-	engine := NewEngine()
+	engine := new(Engine)
 	repo := testRepo(t)
 	if err := engine.EnsureRepository(ctx, repo); err != nil {
 		t.Fatal(err)
@@ -293,7 +293,7 @@ func TestEnsureRepositoryRefusesToInitWhileAnotherMachineHoldsTheInitLock(t *tes
 	}
 	defer func() { _ = other.Unlock(ctx, b) }()
 
-	err = NewEngine().EnsureRepository(ctx, repo)
+	err = new(Engine).EnsureRepository(ctx, repo)
 	var locked *lock.ErrLocked
 	if !errors.As(err, &locked) {
 		t.Fatalf("EnsureRepository under a concurrent init lock: got %v, want ErrLocked", err)
@@ -309,7 +309,7 @@ func TestEnsureRepositoryRefusesToInitWhileAnotherMachineHoldsTheInitLock(t *tes
 // that block the first real backup.
 func TestEnsureRepositoryLeavesNoInitLockBehind(t *testing.T) {
 	ctx := context.Background()
-	engine := NewEngine()
+	engine := new(Engine)
 	repo := testRepo(t)
 	if err := engine.EnsureRepository(ctx, repo); err != nil {
 		t.Fatal(err)
@@ -330,7 +330,7 @@ func TestEnsureRepositoryLeavesNoInitLockBehind(t *testing.T) {
 
 func TestRestoreRoundTripLocalRepository(t *testing.T) {
 	ctx := context.Background()
-	engine := NewEngine()
+	engine := new(Engine)
 	repo := testRepo(t)
 	if err := engine.EnsureRepository(ctx, repo); err != nil {
 		t.Fatal(err)
@@ -385,7 +385,7 @@ func TestRestoreRoundTripLocalRepository(t *testing.T) {
 }
 
 func TestRestoreRejectsUnsupportedURL(t *testing.T) {
-	engine := NewEngine()
+	engine := new(Engine)
 	repo := backupincremental.RepoConfig{URL: "sftp:host/repo", Password: "x"}
 	_, err := engine.RestoreSnapshot(context.Background(), repo, strings.Repeat("a", 64), []string{"/a"}, "/tmp/restore", func([]string) error { return nil })
 	if err == nil {
@@ -398,7 +398,7 @@ func TestRestoreRejectsUnsupportedURL(t *testing.T) {
 
 func TestRestoreUnknownSnapshotFails(t *testing.T) {
 	ctx := context.Background()
-	engine := NewEngine()
+	engine := new(Engine)
 	repo := testRepo(t)
 	if err := engine.EnsureRepository(ctx, repo); err != nil {
 		t.Fatal(err)
@@ -414,7 +414,7 @@ func TestRestoreUnknownSnapshotFails(t *testing.T) {
 
 func TestRestoreTakesNonExclusiveLockDuringRestore(t *testing.T) {
 	ctx := context.Background()
-	engine := NewEngine()
+	engine := new(Engine)
 	repo := testRepo(t)
 	if err := engine.EnsureRepository(ctx, repo); err != nil {
 		t.Fatal(err)
@@ -448,7 +448,7 @@ func TestRestoreTakesNonExclusiveLockDuringRestore(t *testing.T) {
 
 func TestCheckRepositoryHealthyAndLockReleased(t *testing.T) {
 	ctx := context.Background()
-	engine := NewEngine()
+	engine := new(Engine)
 	repo := testRepo(t)
 	if err := engine.EnsureRepository(ctx, repo); err != nil {
 		t.Fatal(err)
@@ -491,7 +491,7 @@ func TestCheckRepositoryHealthyAndLockReleased(t *testing.T) {
 
 func TestCheckRepositoryReportsCorruptionWithoutLockingOut(t *testing.T) {
 	ctx := context.Background()
-	engine := NewEngine()
+	engine := new(Engine)
 	repo := testRepo(t)
 	if err := engine.EnsureRepository(ctx, repo); err != nil {
 		t.Fatal(err)
@@ -551,7 +551,7 @@ func TestCheckRepositoryReportsCorruptionWithoutLockingOut(t *testing.T) {
 }
 
 func TestCheckRepositoryRejectsUnsupportedURL(t *testing.T) {
-	engine := NewEngine()
+	engine := new(Engine)
 	repo := backupincremental.RepoConfig{URL: "b2:repo", Password: "x"}
 	_, err := engine.CheckRepository(context.Background(), repo, false)
 	if err == nil || !strings.Contains(err.Error(), "does not support b2:") {
@@ -561,7 +561,7 @@ func TestCheckRepositoryRejectsUnsupportedURL(t *testing.T) {
 
 func TestFacadeRepairIndexRebuildsValidIndex(t *testing.T) {
 	ctx := context.Background()
-	engine := NewEngine()
+	engine := new(Engine)
 	repo := testRepo(t)
 	if err := engine.EnsureRepository(ctx, repo); err != nil {
 		t.Fatal(err)
@@ -620,7 +620,7 @@ func TestFacadeRepairIndexRebuildsValidIndex(t *testing.T) {
 
 func TestFacadeRepairIndexLockConflict(t *testing.T) {
 	ctx := context.Background()
-	engine := NewEngine()
+	engine := new(Engine)
 	repo := testRepo(t)
 	if err := engine.EnsureRepository(ctx, repo); err != nil {
 		t.Fatal(err)

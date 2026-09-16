@@ -16,6 +16,13 @@ func TestRepositoryURL(t *testing.T) {
 		assert.Equal(t, "s3:s3.amazonaws.com/backups/objtbackup/bqckup/207.180.252.231/website/incremental-backup", url)
 	})
 
+	t.Run("s3 storage supports a prefixed server namespace", func(t *testing.T) {
+		storage := config.Storage{Type: "s3", Bucket: "backups"}
+		url, err := RepositoryURL(storage, "website", "hosting_client/194.233.87.182")
+		require.NoError(t, err)
+		assert.Equal(t, "s3:s3.amazonaws.com/backups/bqckup/hosting_client/194.233.87.182/website/incremental-backup", url)
+	})
+
 	t.Run("local storage", func(t *testing.T) {
 		storage := config.Storage{Type: "local", Directory: "/var/backups/bqckup"}
 		url, err := RepositoryURL(storage, "my-site")

@@ -14,8 +14,6 @@ type Builder struct {
 	blobs []Blob
 }
 
-func NewBuilder() *Builder { return &Builder{} }
-
 // Add appends one encrypted blob (ciphertext already carries its IV and
 // MAC). uncompressedLength is 0 for uncompressed blobs.
 func (b *Builder) Add(blobType incremental.BlobType, id incremental.ID, ciphertext []byte, uncompressedLength uint32) {

@@ -14,6 +14,7 @@ Use these exact values; configuration decoding is strict.
 
 | Field | Available values |
 | --- | --- |
+| `backup_prefix` | optional safe relative path below `bqckup/` |
 | `app.log_level` | `debug`, `info`, `warn`, `error` |
 | `storage.type` | `local`, `s3`, `r2` |
 | `site.backup_mode` | `full` (default), `incremental` |
@@ -32,6 +33,7 @@ should omit the `version` field. Existing files that explicitly contain
 
 ```yaml
 server_id: 207.180.252.231
+backup_prefix: hosting_client # optional
 
 app:
   state_database: /var/lib/bqckup/bqckup.db
@@ -46,6 +48,11 @@ environment variables. `BQCKUP_CONFIG_DIR` only selects the configuration
 directory when `--config-dir` is omitted. `log_level` accepts `debug`, `info`,
 `warn`, or `error`; `log_file` receives operational events and is created with
 mode `0600`.
+
+`backup_prefix` is an optional safe relative path below `bqckup/`. For example,
+with `backup_prefix: hosting_client`, keys use
+`bqckup/hosting_client/207.180.252.231/<site>/...`. An empty value preserves
+the default `bqckup/<server_id>/<site>/...` layout.
 
 ## Storage file
 

@@ -40,6 +40,24 @@ func TestValidateAcceptsLocalFileBackup(t *testing.T) {
 	require.NoError(t, cfg.Validate())
 }
 
+func TestValidateAcceptsBackupPrefixAndBuildsNamespace(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.BackupPrefix = "hosting_client/production"
+	cfg.ServerID = "194.233.87.182"
+
+	require.NoError(t, cfg.Validate())
+	assert.Equal(t, "hosting_client/production/194.233.87.182", cfg.BackupNamespace())
+}
+
+func TestValidateRejectsUnsafeBackupPrefix(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.BackupPrefix = "../outside"
+
+	err := cfg.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "backup_prefix")
+}
+
 func TestValidateAcceptsUppercaseAndUnderscoreSiteName(t *testing.T) {
 	cfg := validConfig(t)
 	cfg.Sites[0].Name = "Vortex_Intileggence"

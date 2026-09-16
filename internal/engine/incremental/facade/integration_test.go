@@ -69,7 +69,7 @@ func TestDisposableIncrementalBackupS3Compatible(t *testing.T) {
 		t.Cleanup(func() { require.NoError(t, removeRepository(context.Background(), repoBackend)) })
 	}
 
-	engine := facade.NewEngine()
+	engine := new(facade.Engine)
 	require.NoError(t, engine.EnsureRepository(ctx, repoConfig))
 	require.NoError(t, engine.EnsureRepository(ctx, repoConfig), "repository init must be idempotent")
 

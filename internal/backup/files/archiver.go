@@ -21,8 +21,6 @@ import (
 
 type Archiver struct{}
 
-func New() *Archiver { return &Archiver{} }
-
 const (
 	missingRetryAttempts = 3
 	missingRetryDelay    = 100 * time.Millisecond

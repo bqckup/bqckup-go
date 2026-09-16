@@ -85,8 +85,8 @@ func newRepository(b backend.Backend, master *crypto.MasterKey, config Config) (
 		master:     master,
 		config:     config,
 		index:      newMasterIndex(),
-		dataPacker: pack.NewBuilder(),
-		treePacker: pack.NewBuilder(),
+		dataPacker: new(pack.Builder),
+		treePacker: new(pack.Builder),
 		zstd:       encoder,
 	}, nil
 }
@@ -245,10 +245,10 @@ func (r *Repository) flushPacker(ctx context.Context, blobType incremental.BlobT
 
 	// 4. reset packer state
 	if blobType == incremental.DataBlob {
-		r.dataPacker = pack.NewBuilder()
+		r.dataPacker = new(pack.Builder)
 		r.dataBlobs = nil
 	} else {
-		r.treePacker = pack.NewBuilder()
+		r.treePacker = new(pack.Builder)
 		r.treeBlobs = nil
 	}
 	return nil

@@ -98,6 +98,7 @@ Initialization never overwrites an existing configuration file.
 
 ```yaml
 server_id: 207.180.252.231
+backup_prefix: hosting_client # optional
 
 app:
   state_database: /var/lib/bqckup/bqckup.db
@@ -111,7 +112,18 @@ Relative paths are resolved from the configuration directory. Values inside
 the YAML are authoritative and are not overridden by environment variables.
 `log_level` accepts `debug`, `info`, `warn`, or `error`. When `log_file` is
 set, Bqckup appends operational events to that file and creates it with mode
-`0600`.
+`0600`. Each line is a JSON object so collectors such as OpenObserve can query
+fields including `event`, `site`, `run_id`, `status`, `stage`, `duration_ms`,
+and `size_bytes` directly. The default `info` level records the backup plan,
+each stage and its duration, stored object keys and sizes, and the final run
+summary. `debug` adds sanitized source configuration details. Logs never
+include credentials, signed URLs, provider response bodies, or absolute source
+paths.
+
+`backup_prefix` is an optional safe relative path used below the `bqckup/`
+namespace. With the example above, backup keys start with
+`bqckup/hosting_client/207.180.252.231/`. Leave it empty to preserve the
+default `bqckup/<server_id>/` layout.
 
 ## 4. Configure server and storage
 
@@ -119,6 +131,7 @@ Set the global server identity in `bqckup.yaml`:
 
 ```yaml
 server_id: 207.180.252.231
+backup_prefix: hosting_client # optional
 ```
 
 Each Bqckup installation should use its own stable server ID.
@@ -487,11 +500,12 @@ Ignore `minimum_interval` for one run:
 bqckup backup run website --force
 ```
 
-Text output immediately shows which site and backup mode are running, shows a
-loading spinner in an interactive terminal (or a heartbeat every five seconds
-when redirected), then prints that site's result when it finishes. `--output
-json` suppresses these progress lines so stdout remains valid machine-readable
-JSON.
+Text output immediately shows which site and backup mode are running, then
+prints each site's result when it finishes. A batch can finish out of
+configuration order because one full and one incremental site may run at the
+same time. Single-site runs show a loading spinner in an interactive terminal
+(or a heartbeat every five seconds when redirected). `--output json` suppresses
+these progress lines so stdout remains valid machine-readable JSON.
 
 For a partial full or incremental run, text output also reports how many source
 entries could not be read. Retention cleanup warnings are shown after a
