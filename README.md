@@ -190,6 +190,11 @@ exports.
 `backup run --force` ignores only the configured minimum backup interval. It
 does not bypass the per-site lock while another backup of that site is active.
 
+For full-mode archives and database dumps with a known estimate, Bqckup checks
+free space in its local temporary directory before writing the artifact. It
+reserves the larger of 10% or 64 MiB; remote S3/R2 quota remains verified by
+the upload itself because providers do not expose a reliable capacity check.
+
 `backup active` is a local Linux process view. It reports `running` only when
 the held site lock has a verified PID identity, `stale` when history still says
 `running` after that process/lock has gone, and `unknown` for a legacy or

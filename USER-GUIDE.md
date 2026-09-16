@@ -571,6 +571,11 @@ bqckup backup unlock website
 Unlock applies only to incremental sites and removes stale repository locks.
 Do not run it while a backup is active.
 
+Before a full archive or database dump with a known size estimate, Bqckup
+checks the free space of `app.temporary_directory`. It requires the estimate
+plus the larger of 10% or 64 MiB. This protects the local compression/dump
+workspace; S3/R2 quota cannot be reliably checked before upload.
+
 To inspect backup processes running on this Linux server:
 
 ```bash

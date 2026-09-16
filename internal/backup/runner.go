@@ -350,6 +350,14 @@ func (r *Runner) run(ctx context.Context, site config.Site, force bool) (result 
 		}
 		result.FilesSkipped = partialFiles
 	} else {
+		archiveTotal := estimateArchiveTotal(FileSource{
+			Include:        []string(site.Sources.Files.Include),
+			Exclude:        []string(site.Sources.Files.Exclude),
+			FollowSymlinks: site.Sources.Files.FollowSymlinks,
+		})
+		if err := ensureTemporarySpace(r.dependencies.TemporaryDirectory, archiveTotal); err != nil {
+			return fail(apperror.Wrap(apperror.CategoryPreflight, "insufficient temporary disk space for file archive", err))
+		}
 		workspace, err := os.MkdirTemp(r.dependencies.TemporaryDirectory, site.Name+"-*")
 		if err != nil {
 			return fail(apperror.Wrap(apperror.CategoryExecution, "could not create a temporary backup workspace", err))
@@ -361,7 +369,6 @@ func (r *Runner) run(ctx context.Context, site config.Site, force bool) (result 
 			Exclude:        []string(site.Sources.Files.Exclude),
 			FollowSymlinks: site.Sources.Files.FollowSymlinks,
 		}
-		archiveTotal := estimateArchiveTotal(archiveSource)
 		r.progress.StartStage("compress files", archiveTotal)
 		archive, err := r.dependencies.Archiver.Create(ctx, archiveSource, filepath.Join(workspace, "files.tar.gz"))
 		if err != nil {
@@ -401,6 +408,9 @@ func (r *Runner) run(ctx context.Context, site config.Site, force bool) (result 
 				if size, known, estimateErr := estimator.EstimateSize(ctx, source); estimateErr == nil && known && size > 0 {
 					exportTotal = size
 				}
+			}
+			if err := ensureTemporarySpace(r.dependencies.TemporaryDirectory, exportTotal); err != nil {
+				return fail(apperror.Wrap(apperror.CategoryPreflight, "insufficient temporary disk space for database export", err))
 			}
 			r.progress.StartStage("export "+source.Name, exportTotal)
 			databasePackage, exportErr := exporter.Export(ctx, source, destination)

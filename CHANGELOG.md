@@ -4,6 +4,8 @@ All notable changes to Bqckup are documented in this file.
 
 ## Unreleased
 
+- Check local temporary free space before creating a full archive or a
+  database dump with a known size estimate.
 - Add local `backup active` process visibility and SIGTERM-only `backup stop`
   controls. Verified lock-owner metadata distinguishes live, stale, and legacy
   unknown runs without allowing `--force` to bypass a site lock.
