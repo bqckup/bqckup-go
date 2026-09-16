@@ -129,7 +129,7 @@ legacy database type `postgresql` to `postgres`.
 
 Full mode is the default. It creates portable `.tar.gz` file archives and
 compressed `.sql.gz` database dumps below
-`bqckup/<server_id>/<site>/<YYYY-MM-DD>/<HH-mm-ss>-<package>.gz` in each destination.
+`bqckup/<server_id>/<site>/<DD-Month-YYYY>/<HH-mm-ss>-<package>.gz` in each destination.
 Set optional `backup_prefix` in `bqckup.yaml` to place the server namespace
 below `bqckup/<backup_prefix>/`.
 If a child file disappears during archive creation, bqckup retries it briefly

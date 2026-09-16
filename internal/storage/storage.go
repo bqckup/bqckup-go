@@ -9,8 +9,10 @@ import (
 )
 
 const (
-	// BackupDateLayout is the sortable UTC date directory.
+	// BackupDateLayout is the legacy sortable UTC date directory.
 	BackupDateLayout = "2006-01-02"
+	// BackupObjectDateLayout is the UTC date directory for new full packages.
+	BackupObjectDateLayout = "02-January-2006"
 	// BackupRunLayout is the compact UTC time prefix used in package names.
 	BackupRunLayout = "15-04-05"
 	// TimestampLayout is the logical run prefix used by retention.
@@ -36,7 +38,7 @@ func FormatPackageKey(createdAt time.Time, packageName string, runID ...string) 
 		}
 		name += "-" + compact
 	}
-	return createdAt.UTC().Format(BackupDateLayout) + "/" + name + "-" + packageName
+	return createdAt.UTC().Format(BackupObjectDateLayout) + "/" + name + "-" + packageName
 }
 
 // ParseBackupSet parses the logical date/time run prefix.
@@ -81,10 +83,16 @@ func BackupSetForPackage(date, packageName string) (string, time.Time, error) {
 	if _, err := ParseBackupPackage(packageName); err != nil {
 		return "", time.Time{}, err
 	}
-	dateTime, err := time.Parse(BackupDateLayout+"/"+BackupRunLayout, date+"/"+packageName[:8])
+	dateTime, err := parseBackupDate(date)
 	if err != nil {
 		return "", time.Time{}, fmt.Errorf("invalid backup date: %w", err)
 	}
+	dateTime = time.Date(dateTime.Year(), dateTime.Month(), dateTime.Day(), 0, 0, 0, 0, time.UTC)
+	timeOfDay, err := time.Parse(BackupRunLayout, packageName[:8])
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("invalid backup time: %w", err)
+	}
+	dateTime = dateTime.Add(time.Duration(timeOfDay.Hour())*time.Hour + time.Duration(timeOfDay.Minute())*time.Minute + time.Duration(timeOfDay.Second())*time.Second)
 	setTime := packageName[:8]
 	if len(packageName) > 9 && packageName[8] == '-' {
 		if separator := strings.IndexByte(packageName[9:], '-'); separator >= 0 {
@@ -92,6 +100,16 @@ func BackupSetForPackage(date, packageName string) (string, time.Time, error) {
 		}
 	}
 	return date + "/" + setTime, dateTime, nil
+}
+
+func parseBackupDate(value string) (time.Time, error) {
+	for _, layout := range []string{BackupObjectDateLayout, BackupDateLayout} {
+		date, err := time.Parse(layout, value)
+		if err == nil && date.Format(layout) == value {
+			return date, nil
+		}
+	}
+	return time.Time{}, errors.New("invalid backup date")
 }
 
 type StoredPackage struct {

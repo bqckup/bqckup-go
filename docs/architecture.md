@@ -113,7 +113,7 @@ SQLite runs with WAL, foreign keys, a five-second busy timeout, and one open con
 Package keys use:
 
 ```text
-bqckup/<backup_prefix>/<server_id>/<site>/<YYYY-MM-DD>/<HH-mm-ss>-<package name>
+bqckup/<backup_prefix>/<server_id>/<site>/<DD-Month-YYYY>/<HH-mm-ss>-<package name>
 ```
 
 The optional `backup_prefix` component is omitted when it is empty. The

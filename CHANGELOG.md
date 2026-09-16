@@ -2,6 +2,11 @@
 
 All notable changes to Bqckup are documented in this file.
 
+## v1.0.5
+
+- Store new full backup package folders with the human-readable UTC date
+  layout `DD-Month-YYYY` while retaining support for existing layouts.
+
 ## v1.0.4
 
 - Check local temporary free space before creating a full archive or a

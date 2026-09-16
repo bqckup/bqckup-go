@@ -33,3 +33,17 @@ func TestParseBackupSetRejectsNonCanonicalNames(t *testing.T) {
 		require.Error(t, err, value)
 	}
 }
+
+func TestFormatPackageKeyUsesLongMonthDateDirectory(t *testing.T) {
+	createdAt := time.Date(2026, time.September, 16, 3, 4, 5, 0, time.UTC)
+	assert.Equal(t, "16-September-2026/03-04-05-files.tar.gz", FormatPackageKey(createdAt, "files.tar.gz"))
+}
+
+func TestBackupSetForPackageAcceptsOldAndNewDateDirectories(t *testing.T) {
+	for _, date := range []string{"2026-09-16", "16-September-2026"} {
+		set, createdAt, err := BackupSetForPackage(date, "03-04-05-files.tar.gz")
+		require.NoError(t, err, date)
+		assert.Equal(t, date+"/03-04-05", set)
+		assert.Equal(t, time.Date(2026, time.September, 16, 3, 4, 5, 0, time.UTC), createdAt)
+	}
+}

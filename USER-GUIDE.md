@@ -297,7 +297,7 @@ built-in engine is always used.
 
 Incremental repositories are stored below
 `bqckup/<server_id>/<site>/incremental-backup/` inside each destination. Full
-packages are stored below `bqckup/<server_id>/<site>/<YYYY-MM-DD>/` and use
+packages are stored below `bqckup/<server_id>/<site>/<DD-Month-YYYY>/` and use
 `<HH-mm-ss>-<package>.gz` names. Packages from one run share the same time
 prefix.
 
