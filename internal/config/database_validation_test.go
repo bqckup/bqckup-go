@@ -62,7 +62,7 @@ func TestValidateRejectsDuplicateEnabledDatabaseNames(t *testing.T) {
 	assert.Contains(t, err.Error(), "duplicate database source name")
 }
 
-func TestLoadRejectsDatabaseCredentialFileWithoutMode0600(t *testing.T) {
+func TestLoadRepairsDatabaseCredentialFileWithoutMode0600(t *testing.T) {
 	dir := writeConfigTree(t, `version: 2
 app:
   state_database: data/bqckup.db
@@ -73,9 +73,10 @@ app:
 	require.NoError(t, os.Chmod(sitePath, 0o640))
 
 	_, err := Load(context.Background(), dir)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "mode 0600")
-	assert.NotContains(t, err.Error(), "database-secret")
+	require.NoError(t, err)
+	info, err := os.Stat(sitePath)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
 }
 
 func TestLoadRejectsDatabaseCredentialFileSymlink(t *testing.T) {

@@ -96,7 +96,7 @@ app:
 	assert.Equal(t, "test-secret-password", cfg.Sites[0].Incremental.Password)
 }
 
-func TestLoadRequires0600ForIncrementalPassword(t *testing.T) {
+func TestLoadRepairs0600ForIncrementalPassword(t *testing.T) {
 	dir := writeConfigTree(t, `app:
   state_database: data/bqckup.db
   temporary_directory: tmp
@@ -117,8 +117,10 @@ func TestLoadRequires0600ForIncrementalPassword(t *testing.T) {
 	require.NoError(t, os.Chmod(sitePath, 0o644))
 
 	_, err := Load(t.Context(), dir)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "credential-bearing site file must have mode 0600")
+	require.NoError(t, err)
+	info, err := os.Stat(sitePath)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
 }
 
 func TestFixCredentialFilePermissionsRepairsIncrementalSite(t *testing.T) {

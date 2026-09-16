@@ -74,8 +74,11 @@ func tightenCredentialFile(path string) (bool, error) {
 	if err != nil {
 		return false, &Error{File: path, Kind: ErrorRead, Err: err}
 	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
-		return false, validationError(path, "permissions", "credential-bearing file must be a regular non-symlink file")
+	if info.Mode()&os.ModeSymlink != 0 {
+		return false, validationError(path, "permissions", "credential-bearing file must not be a symlink")
+	}
+	if !info.Mode().IsRegular() {
+		return false, validationError(path, "permissions", "credential-bearing file must be a regular file")
 	}
 	if info.Mode().Perm() == 0o600 {
 		return false, nil

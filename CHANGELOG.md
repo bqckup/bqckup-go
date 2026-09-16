@@ -2,6 +2,12 @@
 
 All notable changes to Bqckup are documented in this file.
 
+## v1.0.7
+
+- Automatically tighten loose modes on credential-bearing regular YAML files
+  to `0600` during configuration load; symlink and non-regular protections
+  remain strict.
+
 ## v1.0.6
 
 - Add `config fix-permissions` to explicitly set credential-bearing regular

@@ -81,7 +81,7 @@ func TestValidateRemoteStorageCredentials(t *testing.T) {
 	}
 }
 
-func TestLoadRejectsRemoteCredentialURLWithoutSecretFileMode(t *testing.T) {
+func TestLoadRepairsRemoteCredentialURLWithoutSecretFileMode(t *testing.T) {
 	dir := writeConfigTree(t, `app:
   state_database: data/bqckup.db
   temporary_directory: tmp
@@ -97,8 +97,10 @@ func TestLoadRejectsRemoteCredentialURLWithoutSecretFileMode(t *testing.T) {
 	require.NoError(t, os.Chmod(storageFile, 0o644))
 
 	_, err := Load(context.Background(), dir)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "must have mode 0600")
+	require.NoError(t, err)
+	info, err := os.Stat(storageFile)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
 }
 
 func TestValidateStorageEndpointsAndPrefixes(t *testing.T) {
@@ -159,16 +161,16 @@ func TestValidateRejectsMultiplePrimaryStorages(t *testing.T) {
 	assert.Contains(t, err.Error(), "at most one storage may be primary")
 }
 
-func TestLoadRejectsCredentialFileWithoutMode0600(t *testing.T) {
+func TestLoadRepairsCredentialFileWithoutMode0600(t *testing.T) {
 	dir := writeRemoteConfigTree(t)
 	storageFile := filepath.Join(dir, "config", "storages.yaml")
 	require.NoError(t, os.Chmod(storageFile, 0o640))
 
 	_, err := Load(context.Background(), dir)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "must have mode 0600")
-	assert.NotContains(t, err.Error(), "EXAMPLE_ACCESS_KEY")
-	assert.NotContains(t, err.Error(), "EXAMPLE_SECRET_KEY")
+	require.NoError(t, err)
+	info, err := os.Stat(storageFile)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
 }
 
 func TestLoadRejectsCredentialFileSymlink(t *testing.T) {

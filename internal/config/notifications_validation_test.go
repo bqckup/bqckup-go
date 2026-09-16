@@ -288,12 +288,14 @@ func TestLoadDecodesNotificationsSection(t *testing.T) {
 	assert.Equal(t, []string{EventBackupFailed, EventBackupCancelled}, cfg.Notifications.Routes[0].Events)
 }
 
-func TestLoadRequires0600ForInlineNotificationCredentials(t *testing.T) {
+func TestLoadRepairs0600ForInlineNotificationCredentials(t *testing.T) {
 	dir := writeConfigTree(t, "version: 2\napp:\n  state_database: data/bqckup.db\n  temporary_directory: tmp\n  lock_directory: locks\n"+validNotificationsYAML, localStorageYAML, validSiteYAML(t))
 	rootPath := filepath.Join(dir, "bqckup.yaml")
 	require.NoError(t, os.Chmod(rootPath, 0o644))
 
 	_, err := Load(context.Background(), dir)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "must have mode 0600")
+	require.NoError(t, err)
+	info, err := os.Stat(rootPath)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
 }
