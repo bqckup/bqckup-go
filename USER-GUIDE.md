@@ -571,6 +571,37 @@ bqckup backup unlock website
 Unlock applies only to incremental sites and removes stale repository locks.
 Do not run it while a backup is active.
 
+To inspect backup processes running on this Linux server:
+
+```bash
+bqckup backup active
+bqckup --output json backup active --site website
+```
+
+`running` means Bqckup verified the lock owner's PID and Linux process start
+ticks. `stale` means SQLite still has an unfinished run but no live local lock.
+`unknown` is a held lock from an older binary or with invalid metadata; leave
+it for manual investigation.
+
+To request a normal shutdown, Bqckup sends SIGTERM and waits for the site lock
+to be released. It never sends SIGKILL, removes locks, changes history, or
+runs another backup:
+
+```bash
+bqckup backup stop website --timeout 1m
+```
+
+When one batch process owns more than one site lock, the single-site command
+refuses the request and names the affected sites. Review them, then explicitly
+stop every verified local backup process if appropriate:
+
+```bash
+bqckup backup stop --all --timeout 1m
+```
+
+After a graceful stop, the target process records its run as `cancelled`.
+If it crashes instead, its unfinished history remains `stale` for review.
+
 ## 8. Scheduling
 
 Bqckup does not include a scheduler. Use cron or a systemd timer.

@@ -4,6 +4,9 @@ All notable changes to Bqckup are documented in this file.
 
 ## Unreleased
 
+- Add local `backup active` process visibility and SIGTERM-only `backup stop`
+  controls. Verified lock-owner metadata distinguishes live, stale, and legacy
+  unknown runs without allowing `--force` to bypass a site lock.
 - Protect completed recovery points with per-run completion markers so failed
   or partial backups cannot consume `keep_last` slots or trigger retention.
 - Extend `backup check` to full-mode backups, including package size and remote

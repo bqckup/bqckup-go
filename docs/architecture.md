@@ -91,12 +91,16 @@ existing files.
   route dispatch, per-channel renders. Implements the consumer-owned
   `backup.Notifier` interface; no secrets in payloads or errors.
 - `internal/platform/lock`: Linux `flock` implementation (site-level
-  mutual exclusion).
+  mutual exclusion), with owner-only PID/start-tick metadata for local
+  process visibility and SIGTERM-only safe stopping.
 - Repository-level locking for the builtin engine lives in
   `internal/engine/incremental/lock` (Restic-compatible lock files: encrypted
   blobs in `locks/`, 30-minute staleness, exclusive for backup/retention,
-  refresh every 5 minutes during long operations). `bqckup backup unlock
+refresh every 5 minutes during long operations). `bqckup backup unlock
   <site>` removes stale locks.
+- `backup active` combines verified local lock owners with unfinished SQLite
+  history. `backup stop` uses only local config, logger, lock, and history;
+  it never resolves remote storage credentials or builds backup clients.
 - `internal/cli`: command parsing, presentation, and the single exit-code mapper (0: success, 1: internal error, 2: configuration error, 3: preflight error, 4: execution/storage/cancellation error). A `no_change` backup is informational and exits 0.
 - `internal/app`: the only normal place that constructs concrete dependencies.
 

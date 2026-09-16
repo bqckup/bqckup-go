@@ -22,6 +22,8 @@ for command in \
     "bqckup doctor" \
     "bqckup backup list" \
     "bqckup backup run" \
+    "bqckup backup active" \
+    "bqckup backup stop" \
     "bqckup backup unlock" \
     "bqckup history list" \
     "bqckup version"; do

@@ -50,6 +50,20 @@ func TestBackupSnapshotsRequiresDestination(t *testing.T) {
 	assert.Equal(t, 2, ExitCode(err))
 }
 
+func TestBackupActiveEmptyOutput(t *testing.T) {
+	configDir, _ := writeCLIConfig(t)
+	root, out, _ := commandForTest(t, "--config-dir", configDir, "backup", "active")
+	require.NoError(t, root.Execute())
+	assert.Equal(t, "No active or stale backups.\n", out.String())
+}
+
+func TestBackupStopRequiresSiteOrAll(t *testing.T) {
+	root, _, _ := commandForTest(t, "backup", "stop")
+	err := root.Execute()
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrInvalidInput)
+}
+
 func TestBackupSnapshotsRequiresSite(t *testing.T) {
 	root, _, _ := commandForTest(t, "backup", "snapshots")
 	err := root.Execute()

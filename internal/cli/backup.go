@@ -91,6 +91,63 @@ func newBackupCommand(opts *options) *cobra.Command {
 	summary.Flags().StringVar(&site, "site", "", "show only this site")
 	command.AddCommand(summary)
 
+	var activeSite string
+	active := &cobra.Command{
+		Use:   "active",
+		Short: "Show live, stale, or unknown local backup processes",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return withBackupControl(cmd, opts.configDir, func(control *app.BackupControl) error {
+				activities, err := control.Active(cmd.Context(), activeSite)
+				if err != nil {
+					return err
+				}
+				if opts.output == "json" {
+					return writeJSON(cmd, activities)
+				}
+				return writeBackupActiveText(cmd.OutOrStdout(), activities)
+			})
+		},
+	}
+	active.Flags().StringVar(&activeSite, "site", "", "show only this site")
+	command.AddCommand(active)
+
+	var stopAll bool
+	var stopTimeout time.Duration
+	stop := &cobra.Command{
+		Use:     "stop <site>",
+		Short:   "Request a local backup process to stop safely",
+		Example: "  bqckup backup stop example --timeout 1m\n  bqckup backup stop --all",
+		Args: func(cmd *cobra.Command, args []string) error {
+			if stopAll && len(args) != 0 {
+				return usageError(cmd, "backup stop accepts a site or --all, not both")
+			}
+			if !stopAll && len(args) != 1 {
+				return usageError(cmd, "backup stop requires exactly one site or --all")
+			}
+			return nil
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			site := ""
+			if len(args) == 1 {
+				site = args[0]
+			}
+			return withBackupControl(cmd, opts.configDir, func(control *app.BackupControl) error {
+				stopped, err := control.Stop(cmd.Context(), site, stopAll, stopTimeout)
+				if err != nil {
+					return err
+				}
+				if opts.output == "json" {
+					return writeJSON(cmd, stopped)
+				}
+				return writeBackupStoppedText(cmd.OutOrStdout(), stopped)
+			})
+		},
+	}
+	stop.Flags().BoolVar(&stopAll, "all", false, "stop every verified local backup process")
+	stop.Flags().DurationVar(&stopTimeout, "timeout", time.Minute, "maximum time to wait for locks to be released")
+	command.AddCommand(stop)
+
 	var force bool
 	run := &cobra.Command{
 		Use:     "run [site]",
@@ -316,6 +373,43 @@ func writeBackupListText(output io.Writer, views []siteView) error {
 		}
 		destinations := strings.Join(view.Destinations, ", ")
 		if _, err := fmt.Fprintf(output, "%-*s  %s  %-*s  %5d  %-*s\n", siteWidth, view.Name, enabledField, modeWidth, mode, view.FileSources, destinationWidth, destinations); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func writeBackupActiveText(output io.Writer, activities []app.BackupActivity) error {
+	if len(activities) == 0 {
+		_, err := fmt.Fprintln(output, "No active or stale backups.")
+		return err
+	}
+	if _, err := fmt.Fprintln(output, "SITE  MODE  PID  RUN ID  STARTED  ELAPSED  STATE"); err != nil {
+		return err
+	}
+	for _, activity := range activities {
+		pid := "-"
+		if activity.PID > 0 {
+			pid = fmt.Sprintf("%d", activity.PID)
+		}
+		runID := "-"
+		if activity.RunID != "" {
+			runID = shortRunID(activity.RunID)
+		}
+		mode := activity.Mode
+		if mode == "" {
+			mode = "-"
+		}
+		if _, err := fmt.Fprintf(output, "%s  %s  %s  %s  %s  %s  %s\n", activity.Site, mode, pid, runID, activity.StartedAt.UTC().Format(time.RFC3339), time.Duration(activity.ElapsedSeconds)*time.Second, activity.State); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func writeBackupStoppedText(output io.Writer, activities []app.BackupActivity) error {
+	for _, activity := range activities {
+		if _, err := fmt.Fprintf(output, "Stop requested for %s (PID %d); lock released.\n", activity.Site, activity.PID); err != nil {
 			return err
 		}
 	}
@@ -561,6 +655,19 @@ func withApplication(cmd *cobra.Command, configDir string, operation func(*app.A
 	}
 	operationErr := operation(application)
 	closeErr := application.Close()
+	if operationErr != nil {
+		return operationErr
+	}
+	return closeErr
+}
+
+func withBackupControl(cmd *cobra.Command, configDir string, operation func(*app.BackupControl) error) error {
+	control, err := app.OpenBackupControl(cmd.Context(), configDir)
+	if err != nil {
+		return err
+	}
+	operationErr := operation(control)
+	closeErr := control.Close()
 	if operationErr != nil {
 		return operationErr
 	}

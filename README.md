@@ -158,6 +158,9 @@ bqckup doctor [--site <name>]
 bqckup backup list
 bqckup backup summary [--site <name>]
 bqckup backup run <site> [--force]
+bqckup backup active [--site <name>]
+bqckup backup stop <site> [--timeout 1m]
+bqckup backup stop --all [--timeout 1m]
 bqckup backup check <site> --destination <name> [--read-data]
 bqckup backup unlock <site>
 bqckup backup snapshots <site> --destination <name>
@@ -186,6 +189,14 @@ exports.
 
 `backup run --force` ignores only the configured minimum backup interval. It
 does not bypass the per-site lock while another backup of that site is active.
+
+`backup active` is a local Linux process view. It reports `running` only when
+the held site lock has a verified PID identity, `stale` when history still says
+`running` after that process/lock has gone, and `unknown` for a legacy or
+corrupt held lock. Use `backup stop <site>` only for a verified single-site
+process, or `backup stop --all` when a batch process owns multiple site locks.
+Stop sends SIGTERM and waits for normal cleanup; it never sends SIGKILL,
+removes locks, rewrites history, or starts another backup.
 
 `backup check` supports both modes. For full backups it verifies every package
 from the latest successful run at the selected destination; `--read-data`

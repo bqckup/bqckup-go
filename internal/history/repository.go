@@ -144,6 +144,20 @@ func (r *Repository) ListRuns(ctx context.Context, filter RunFilter) ([]BackupRu
 	return runs, nil
 }
 
+// ListRunning returns unfinished runs without packages. It is used by local
+// process control to distinguish an abandoned history row from a live lock.
+func (r *Repository) ListRunning(ctx context.Context) ([]BackupRun, error) {
+	var runs []BackupRun
+	err := r.db.WithContext(ctx).
+		Where("status = ?", StatusRunning).
+		Order("started_at DESC").
+		Find(&runs).Error
+	if err != nil {
+		return nil, fmt.Errorf("list running backup runs: %w", err)
+	}
+	return runs, nil
+}
+
 // ListRunsInRange returns all backup runs whose started_at falls within
 // [from, to), ordered by started_at ASC. Packages are not preloaded because
 // report aggregation only needs run-level fields.
