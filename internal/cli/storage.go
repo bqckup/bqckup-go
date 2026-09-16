@@ -15,10 +15,15 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const storageTimeLayout = "02 Jan 2006 15:04"
+const storageTimeLayout = "02-January-2006"
+const expiryTimeLayout = "02 Jan 2006 15:04"
 
 func formatCLITime(value time.Time) string {
 	return value.UTC().Format(storageTimeLayout)
+}
+
+func formatCLIExpiryTime(value time.Time) string {
+	return value.UTC().Format(expiryTimeLayout)
 }
 
 type packageJSON struct {
@@ -136,7 +141,7 @@ func writeLinkText(stdout, stderr io.Writer, link storage.DownloadLink) error {
 	if _, err := fmt.Fprintln(stderr, "DOWNLOAD LINK"); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(stderr, "  Expires: %s UTC\n", formatCLITime(link.ExpiresAt)); err != nil {
+	if _, err := fmt.Fprintf(stderr, "  Expires: %s UTC\n", formatCLIExpiryTime(link.ExpiresAt)); err != nil {
 		return err
 	}
 	_, err := fmt.Fprintln(stderr, "  Access:  anyone with this link can download the file.")

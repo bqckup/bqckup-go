@@ -400,7 +400,7 @@ func writeBackupActiveText(output io.Writer, activities []app.BackupActivity) er
 		if mode == "" {
 			mode = "-"
 		}
-		if _, err := fmt.Fprintf(output, "%s  %s  %s  %s  %s  %s  %s\n", activity.Site, mode, pid, runID, activity.StartedAt.UTC().Format(time.RFC3339), time.Duration(activity.ElapsedSeconds)*time.Second, activity.State); err != nil {
+		if _, err := fmt.Fprintf(output, "%s  %s  %s  %s  %s  %s  %s\n", activity.Site, mode, pid, runID, formatCLITime(activity.StartedAt), time.Duration(activity.ElapsedSeconds)*time.Second, activity.State); err != nil {
 			return err
 		}
 	}

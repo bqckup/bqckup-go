@@ -32,7 +32,7 @@ func TestWriteStorageTextFullMode(t *testing.T) {
 	for _, heading := range []string{"DESTINATION", "KEY", "SIZE", "CREATED AT"} {
 		assert.Contains(t, text, heading)
 	}
-	assert.Regexp(t, `s3-primary\s+bqckup/site-a/2026-11-10T03-00-00\.000000000Z/files\.tar\.gz\s+2\.1 GiB\s+10 Nov 2026 03:00`, text)
+	assert.Regexp(t, `s3-primary\s+bqckup/site-a/2026-11-10T03-00-00\.000000000Z/files\.tar\.gz\s+2\.1 GiB\s+10-November-2026`, text)
 	assert.Contains(t, text, "84.0 MiB")
 }
 
@@ -71,7 +71,7 @@ func TestWriteStorageTextIncrementalMode(t *testing.T) {
 	for _, heading := range []string{"ID", "PATHS", "SIZE", "CREATED AT"} {
 		assert.Contains(t, text, heading)
 	}
-	assert.Regexp(t, `33e25d78\s+/var/www/html\s+2\.0 GiB\s+11 Dec 2026 06:55`, text)
+	assert.Regexp(t, `33e25d78\s+/var/www/html\s+2\.0 GiB\s+11-December-2026`, text)
 	assert.Contains(t, text, "/etc, /opt")
 	assert.Contains(t, text, "-") // nil summary renders a dash
 }
