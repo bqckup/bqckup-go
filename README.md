@@ -86,6 +86,7 @@ Common options:
 
 | Field | Available values |
 | --- | --- |
+| `backup_prefix` | optional safe relative path below `bqckup/` |
 | `app.log_level` | `debug`, `info`, `warn`, `error` |
 | `storage.type` | `local`, `s3`, `r2` |
 | `site.backup_mode` | `full` (default), `incremental` |
@@ -129,6 +130,8 @@ legacy database type `postgresql` to `postgres`.
 Full mode is the default. It creates portable `.tar.gz` file archives and
 compressed `.sql.gz` database dumps below
 `bqckup/<server_id>/<site>/<YYYY-MM-DD>/<HH-mm-ss>-<package>.gz` in each destination.
+Set optional `backup_prefix` in `bqckup.yaml` to place the server namespace
+below `bqckup/<backup_prefix>/`.
 If a child file disappears during archive creation, bqckup retries it briefly
 and saves the remaining archive as `partial` when it is still unavailable.
 

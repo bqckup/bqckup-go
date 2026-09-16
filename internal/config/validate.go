@@ -45,6 +45,9 @@ func (c Config) Validate() error {
 	if c.ServerID != "" && !SafeName.MatchString(c.ServerID) {
 		return validationError("bqckup.yaml", "server_id", "contains unsupported characters")
 	}
+	if err := validateSafeRelativePrefix("bqckup.yaml", "backup_prefix", c.BackupPrefix); err != nil {
+		return err
+	}
 	if len(c.Storages) == 0 {
 		return validationError("config/storages.yaml", "storages", "at least one storage is required")
 	}
@@ -485,15 +488,19 @@ func isLoopbackHost(host string) bool {
 }
 
 func validatePrefix(field, prefix string) error {
+	return validateSafeRelativePrefix("config/storages.yaml", field, prefix)
+}
+
+func validateSafeRelativePrefix(file, field, prefix string) error {
 	if prefix == "" {
 		return nil
 	}
 	if strings.Contains(prefix, `\`) || path.IsAbs(prefix) || path.Clean(prefix) != prefix {
-		return validationError("config/storages.yaml", field, "prefix must be a safe relative object prefix")
+		return validationError(file, field, "prefix must be a safe relative object prefix")
 	}
 	for _, segment := range strings.Split(prefix, "/") {
 		if segment == "" || segment == "." || segment == ".." {
-			return validationError("config/storages.yaml", field, "prefix must be a safe relative object prefix")
+			return validationError(file, field, "prefix must be a safe relative object prefix")
 		}
 	}
 	return nil

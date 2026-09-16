@@ -325,6 +325,11 @@ func TestListSiteSnapshotsSucceedsWithLocalStorageDocument(t *testing.T) {
 
 func TestOpenWiresAWorkingLocalBackupApplication(t *testing.T) {
 	configDir, backupRoot := writeApplicationConfig(t)
+	logPath := filepath.Join(filepath.Dir(configDir), "bqckup.log")
+	rootPath := filepath.Join(configDir, "bqckup.yaml")
+	root, err := os.ReadFile(rootPath)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(rootPath, fmt.Appendf(root, "  log_file: %s\n", logPath), 0o600))
 	application, err := Open(context.Background(), configDir)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, application.Close()) })
@@ -340,6 +345,19 @@ func TestOpenWiresAWorkingLocalBackupApplication(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, runs, 1)
 	assert.Len(t, runs[0].Packages, 1)
+
+	contents, err := os.ReadFile(logPath)
+	require.NoError(t, err)
+	text := string(contents)
+	for _, line := range strings.Split(strings.TrimSpace(text), "\n") {
+		assert.True(t, json.Valid([]byte(line)), "invalid JSON log line: %s", line)
+	}
+	assert.Contains(t, text, `"event":"backup_plan","site":"example"`)
+	assert.Contains(t, text, `"event":"stage_start","site":"example","stage":"compress files"`)
+	assert.Contains(t, text, `"event":"package_stored","site":"example"`)
+	assert.Contains(t, text, `"object_key":"bqckup/example/`)
+	assert.Contains(t, text, `"event":"backup_finished","site":"example"`)
+	assert.NotContains(t, text, filepath.Join(filepath.Dir(configDir), "source"))
 }
 
 func TestBuildNotifierConstructsChannelsFromConfiguration(t *testing.T) {

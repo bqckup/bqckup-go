@@ -64,7 +64,8 @@ Retention (`keep_last` per site tag) forgets old snapshots and prunes
 unreachable pack data with a mark-and-sweep pass (no repack): the new
 index is written before any pack is deleted, so a crash at any point
 leaves `restic check` green. Retention also prunes the
-`bqckup/<server_id>/<site>/<timestamp>/` package sets in every mode, so database
+`bqckup/<backup_prefix>/<server_id>/<site>/<timestamp>/` package sets in every
+mode (omitting the optional `backup_prefix`), so database
 dumps stored there by incremental runs are kept for `keep_last` runs
 too. Restore requires an explicit destination and never silently overwrites
 existing files.
@@ -105,8 +106,11 @@ SQLite runs with WAL, foreign keys, a five-second busy timeout, and one open con
 Package keys use:
 
 ```text
-bqckup/<server_id>/<site>/<YYYY-MM-DD>/<HH-mm-ss>-<package name>
+bqckup/<backup_prefix>/<server_id>/<site>/<YYYY-MM-DD>/<HH-mm-ss>-<package name>
 ```
+
+The optional `backup_prefix` component is omitted when it is empty. The
+legacy `bqckup/<site>/...` layout remains valid when `server_id` is empty.
 
 The date directory and package time prefixes use UTC. Packages from one run
 share an eight-character run ID after the time prefix, so same-second runs

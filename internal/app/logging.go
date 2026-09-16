@@ -1,17 +1,19 @@
 package app
 
 import (
+	"context"
 	"io"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"time"
 
+	"github.com/bqckup/bqckup-go/internal/backup"
 	"github.com/bqckup/bqckup-go/internal/config"
 )
 
 type appLogger struct {
-	logger *log.Logger
-	level  int
+	logger *slog.Logger
 }
 
 const (
@@ -23,7 +25,7 @@ const (
 
 func openAppLogger(appConfig config.App) (*appLogger, func() error, error) {
 	if appConfig.LogFile == "" {
-		return &appLogger{logger: log.New(io.Discard, "", 0), level: logInfo}, func() error { return nil }, nil
+		return newAppLogger(io.Discard, logInfo), func() error { return nil }, nil
 	}
 	if err := os.MkdirAll(filepath.Dir(appConfig.LogFile), 0o750); err != nil {
 		return nil, nil, err
@@ -32,7 +34,12 @@ func openAppLogger(appConfig config.App) (*appLogger, func() error, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	return &appLogger{logger: log.New(file, "", log.Ldate|log.Ltime|log.LUTC), level: logLevelValue(appConfig.LogLevel)}, file.Close, nil
+	return newAppLogger(file, logLevelValue(appConfig.LogLevel)), file.Close, nil
+}
+
+func newAppLogger(writer io.Writer, level int) *appLogger {
+	handler := slog.NewJSONHandler(writer, &slog.HandlerOptions{Level: slogLevel(level)})
+	return &appLogger{logger: slog.New(handler)}
 }
 
 func logLevelValue(level string) int {
@@ -48,21 +55,83 @@ func logLevelValue(level string) int {
 	}
 }
 
-func (l *appLogger) write(level int, message string) {
-	if l != nil && level >= l.level {
-		l.logger.Printf("level=%s %s", logLevelName(level), message)
+func (l *appLogger) write(level int, event string, args ...any) {
+	if l != nil {
+		l.logger.Log(context.Background(), slogLevel(level), event, append([]any{"event", event}, args...)...)
 	}
 }
 
-func logLevelName(level int) string {
+func slogLevel(level int) slog.Level {
 	switch level {
 	case logDebug:
-		return "debug"
+		return slog.LevelDebug
 	case logWarn:
-		return "warn"
+		return slog.LevelWarn
 	case logError:
-		return "error"
+		return slog.LevelError
 	default:
-		return "info"
+		return slog.LevelInfo
 	}
+}
+
+type loggingProgress struct {
+	logger      *appLogger
+	site        string
+	next        backup.Progress
+	stage       string
+	total       int64
+	completed   int64
+	stageStart  time.Time
+	stageActive bool
+}
+
+func newLoggingProgress(logger *appLogger, site string, next backup.Progress) *loggingProgress {
+	if next == nil {
+		next = backup.NoopProgress{}
+	}
+	return &loggingProgress{logger: logger, site: site, next: next}
+}
+
+func (p *loggingProgress) StartStage(label string, total int64) {
+	p.stage = label
+	p.total = total
+	p.completed = 0
+	p.stageStart = time.Now()
+	p.stageActive = true
+	p.logger.write(logInfo, "stage_start", "site", p.site, "stage", label, "total_bytes", total)
+	p.next.StartStage(label, total)
+}
+
+func (p *loggingProgress) Add(units int64) {
+	p.completed += units
+	p.next.Add(units)
+}
+
+func (p *loggingProgress) FinishStage() {
+	p.finish("success", logInfo)
+	p.next.FinishStage()
+}
+
+func (p *loggingProgress) FailStage() {
+	p.finish("failed", logError)
+	p.next.FailStage()
+}
+
+func (p *loggingProgress) Done() {
+	p.next.Done()
+}
+
+func (p *loggingProgress) finish(status string, level int) {
+	if !p.stageActive {
+		return
+	}
+	p.logger.write(level, "stage_finished",
+		"site", p.site,
+		"stage", p.stage,
+		"status", status,
+		"completed_bytes", p.completed,
+		"total_bytes", p.total,
+		"duration_ms", time.Since(p.stageStart).Milliseconds(),
+	)
+	p.stageActive = false
 }

@@ -145,10 +145,6 @@ func NewRunner(dependencies Dependencies) *Runner {
 	return &Runner{dependencies: dependencies, progress: progressOrNoop(dependencies.Progress)}
 }
 
-func (r *Runner) SetProgress(progress Progress) {
-	r.progress = progressOrNoop(progress)
-}
-
 // buildRepo constructs the engine repository configuration for one
 // destination. requirePassword enforces a configured repository password.
 func (r *Runner) buildRepo(site config.Site, storageConfig config.Storage, requirePassword bool) (incremental.RepoConfig, error) {
