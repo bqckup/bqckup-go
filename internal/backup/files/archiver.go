@@ -238,7 +238,7 @@ func (s *archiveState) add(realPath, archivePath string, active map[string]bool,
 		_ = file.Close()
 		return err
 	}
-	_, copyErr := io.Copy(s.writer, file)
+	copyErr := copyArchiveFile(s.writer, file, info.Size())
 	closeErr := file.Close()
 	if copyErr != nil {
 		return fmt.Errorf("archive file %s: %w", realPath, copyErr)
@@ -247,6 +247,11 @@ func (s *archiveState) add(realPath, archivePath string, active map[string]bool,
 		return fmt.Errorf("close archive source %s: %w", realPath, closeErr)
 	}
 	return nil
+}
+
+func copyArchiveFile(destination io.Writer, source io.Reader, size int64) error {
+	_, err := io.CopyN(destination, source, size)
+	return err
 }
 
 func (s archiveState) writeHeader(info os.FileInfo, archivePath, link string) error {

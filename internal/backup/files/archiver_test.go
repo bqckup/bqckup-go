@@ -2,6 +2,7 @@ package files
 
 import (
 	"archive/tar"
+	"bytes"
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
@@ -139,6 +140,23 @@ func TestCreateRemovesPartialOutputOnCancellation(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled)
 	_, statErr := os.Stat(out)
 	assert.ErrorIs(t, statErr, os.ErrNotExist)
+}
+
+func TestCopyArchiveFileCapsContentAtHeaderSize(t *testing.T) {
+	var archive bytes.Buffer
+	tw := tar.NewWriter(&archive)
+	require.NoError(t, tw.WriteHeader(&tar.Header{Name: "php_log", Mode: 0o600, Size: 3}))
+
+	require.NoError(t, copyArchiveFile(tw, strings.NewReader("old-new"), 3))
+	require.NoError(t, tw.Close())
+
+	reader := tar.NewReader(&archive)
+	header, err := reader.Next()
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), header.Size)
+	contents, err := io.ReadAll(reader)
+	require.NoError(t, err)
+	assert.Equal(t, "old", string(contents))
 }
 
 func archiveMembers(t *testing.T, filename string) []string {

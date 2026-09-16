@@ -2,7 +2,7 @@ package buildinfo
 
 // Values are replaced by release builds through -ldflags.
 var (
-	version = "v1.0.8"
+	version = "v1.0.9"
 	commit  = ""
 )
 

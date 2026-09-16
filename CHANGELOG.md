@@ -2,6 +2,11 @@
 
 All notable changes to Bqckup are documented in this file.
 
+## v1.0.9
+
+- Cap each full-archive file at the size recorded in its tar header, so an
+  actively growing log file cannot fail a backup with `archive/tar: write too long`.
+
 ## v1.0.8
 
 - Allow site YAML filenames to differ from `site.name`; duplicate site names
