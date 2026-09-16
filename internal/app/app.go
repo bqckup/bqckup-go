@@ -246,7 +246,7 @@ func (a *App) RunBackup(ctx context.Context, siteName string, force bool) (backu
 
 func (a *App) runBackup(ctx context.Context, siteName string, force bool, progress backup.Progress) (backup.RunResult, error) {
 	started := time.Now()
-	a.logger.write(logInfo, fmt.Sprintf("event=backup_start site=%q force=%t", siteName, force))
+	a.logger.write(logInfo, "backup_start", "site", siteName, "force", force)
 	site, ok := a.configuration.Site(siteName)
 	if !ok {
 		err := apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q was not found", siteName), nil)
@@ -268,14 +268,22 @@ func (a *App) runBackup(ctx context.Context, siteName string, force bool, progre
 			databaseNames = append(databaseNames, source.Name)
 		}
 	}
-	a.logger.write(logInfo, fmt.Sprintf(
-		"event=backup_plan site=%q mode=%q namespace=%q destinations=%q file_sources=%d database_sources=%d keep_last=%d minimum_interval=%q",
-		siteName, site.BackupMode, a.configuration.BackupNamespace(), strings.Join(destinations, ","), len(site.Sources.Files.Include), len(databaseNames), site.Policy.KeepLast, site.Policy.MinimumInterval,
-	))
-	a.logger.write(logDebug, fmt.Sprintf(
-		"event=backup_plan_detail site=%q database_names=%q file_excludes=%d follow_symlinks=%t",
-		siteName, strings.Join(databaseNames, ","), len(site.Sources.Files.Exclude), site.Sources.Files.FollowSymlinks,
-	))
+	a.logger.write(logInfo, "backup_plan",
+		"site", siteName,
+		"mode", site.BackupMode,
+		"namespace", a.configuration.BackupNamespace(),
+		"destinations", destinations,
+		"file_sources", len(site.Sources.Files.Include),
+		"database_sources", len(databaseNames),
+		"keep_last", site.Policy.KeepLast,
+		"minimum_interval", site.Policy.MinimumInterval.String(),
+	)
+	a.logger.write(logDebug, "backup_plan_detail",
+		"site", siteName,
+		"database_names", databaseNames,
+		"file_excludes", len(site.Sources.Files.Exclude),
+		"follow_symlinks", site.Sources.Files.FollowSymlinks,
+	)
 	if progress == nil {
 		progress = a.backupProgress
 	}
@@ -284,7 +292,7 @@ func (a *App) runBackup(ctx context.Context, siteName string, force bool, progre
 	a.logBackupFinished(siteName, result, started, err)
 	if err == nil {
 		for _, warning := range result.Warnings {
-			a.logger.write(logWarn, fmt.Sprintf("event=backup_warning site=%q run_id=%q category=%q warning=%q", siteName, result.RunID, "retention", warning))
+			a.logger.write(logWarn, "backup_warning", "site", siteName, "run_id", result.RunID, "category", "retention", "warning", warning)
 		}
 	}
 	return result, err
@@ -296,27 +304,40 @@ func (a *App) logStoredPackages(ctx context.Context, result backup.RunResult) {
 	}
 	packages, err := a.repository.RunPackages(ctx, result.RunID)
 	if err != nil {
-		a.logger.write(logDebug, fmt.Sprintf("event=backup_packages_unavailable site=%q run_id=%q error=%q", result.SiteName, result.RunID, apperror.DiagnosticMessage(err)))
+		a.logger.write(logDebug, "backup_packages_unavailable", "site", result.SiteName, "run_id", result.RunID, "error", apperror.DiagnosticMessage(err))
 		return
 	}
 	for _, pkg := range packages {
-		a.logger.write(logInfo, fmt.Sprintf(
-			"event=package_stored site=%q run_id=%q source_kind=%q source_name=%q destination=%q object_key=%q size_bytes=%d status=%q",
-			result.SiteName, result.RunID, pkg.SourceKind, pkg.SourceName, pkg.Destination, pkg.ObjectKey, pkg.Size, pkg.Status,
-		))
+		a.logger.write(logInfo, "package_stored",
+			"site", result.SiteName,
+			"run_id", result.RunID,
+			"source_kind", pkg.SourceKind,
+			"source_name", pkg.SourceName,
+			"destination", pkg.Destination,
+			"object_key", pkg.ObjectKey,
+			"size_bytes", pkg.Size,
+			"status", pkg.Status,
+		)
 	}
 }
 
 func (a *App) logBackupFinished(siteName string, result backup.RunResult, started time.Time, err error) {
-	message := fmt.Sprintf(
-		"event=backup_finished site=%q run_id=%q status=%q duration_ms=%d files_skipped=%d reclaimed_bytes=%d warning_count=%d skip_reason=%q",
-		siteName, result.RunID, result.Status, time.Since(started).Milliseconds(), result.FilesSkipped, result.ReclaimedBytes, len(result.Warnings), result.SkipReason,
-	)
+	fields := []any{
+		"site", siteName,
+		"run_id", result.RunID,
+		"status", result.Status,
+		"duration_ms", time.Since(started).Milliseconds(),
+		"files_skipped", result.FilesSkipped,
+		"reclaimed_bytes", result.ReclaimedBytes,
+		"warning_count", len(result.Warnings),
+		"skip_reason", result.SkipReason,
+	}
 	if err != nil {
-		a.logger.write(logError, fmt.Sprintf("%s category=%q error=%q", message, apperror.CategoryOf(err), apperror.DiagnosticMessage(err)))
+		fields = append(fields, "category", apperror.CategoryOf(err), "error", apperror.DiagnosticMessage(err))
+		a.logger.write(logError, "backup_finished", fields...)
 		return
 	}
-	a.logger.write(logInfo, message)
+	a.logger.write(logInfo, "backup_finished", fields...)
 }
 
 // BackupRunProgress contains only the non-sensitive configuration needed to

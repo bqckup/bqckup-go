@@ -2,7 +2,7 @@ package app
 
 import (
 	"bytes"
-	"log"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,8 +16,8 @@ func TestOpenAppLoggerWritesConfiguredFileWithProtectedMode(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "bqckup.log")
 	logger, closeLogger, err := openAppLogger(config.App{LogFile: path, LogLevel: "info"})
 	require.NoError(t, err)
-	logger.write(logDebug, "event=debug_should_be_filtered")
-	logger.write(logInfo, "event=backup_start site=example")
+	logger.write(logDebug, "debug_should_be_filtered")
+	logger.write(logInfo, "backup_start", "site", "example")
 	require.NoError(t, closeLogger())
 
 	info, err := os.Stat(path)
@@ -28,15 +28,20 @@ func TestOpenAppLoggerWritesConfiguredFileWithProtectedMode(t *testing.T) {
 	contents, err := os.ReadFile(path)
 	require.NoError(t, err)
 	text := string(contents)
-	require.Contains(t, text, "event=backup_start site=example")
+	require.Contains(t, text, `"event":"backup_start"`)
 	if strings.Contains(text, "debug_should_be_filtered") {
 		t.Fatal("debug event was written below the configured info level")
 	}
+	var event map[string]any
+	require.NoError(t, json.Unmarshal(bytes.TrimSpace(contents), &event))
+	require.Equal(t, "INFO", event["level"])
+	require.Equal(t, "backup_start", event["event"])
+	require.Equal(t, "example", event["site"])
 }
 
 func TestLoggingProgressWritesDetailedStageLifecycle(t *testing.T) {
 	var output bytes.Buffer
-	logger := &appLogger{logger: log.New(&output, "", 0), level: logInfo}
+	logger := newAppLogger(&output, logInfo)
 	progress := newLoggingProgress(logger, "example", nil)
 
 	progress.StartStage("upload primary", 10)
@@ -44,7 +49,19 @@ func TestLoggingProgressWritesDetailedStageLifecycle(t *testing.T) {
 	progress.FinishStage()
 
 	text := output.String()
-	require.Contains(t, text, `event=stage_start site="example" stage="upload primary" total_bytes=10`)
-	require.Contains(t, text, `event=stage_finished site="example" stage="upload primary" status="success" completed_bytes=7 total_bytes=10 duration_ms=`)
+	require.Contains(t, text, `"event":"stage_start","site":"example","stage":"upload primary","total_bytes":10`)
+	require.Contains(t, text, `"event":"stage_finished","site":"example","stage":"upload primary","status":"success","completed_bytes":7,"total_bytes":10,"duration_ms":`)
 	require.Equal(t, 2, strings.Count(text, "\n"))
+}
+
+func TestAppLoggerWritesDebugAtConfiguredLevel(t *testing.T) {
+	var output bytes.Buffer
+	logger := newAppLogger(&output, logDebug)
+
+	logger.write(logDebug, "backup_plan_detail", "site", "example")
+
+	var event map[string]any
+	require.NoError(t, json.Unmarshal(bytes.TrimSpace(output.Bytes()), &event))
+	require.Equal(t, "DEBUG", event["level"])
+	require.Equal(t, "backup_plan_detail", event["event"])
 }

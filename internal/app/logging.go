@@ -1,9 +1,9 @@
 package app
 
 import (
-	"fmt"
+	"context"
 	"io"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
@@ -13,8 +13,7 @@ import (
 )
 
 type appLogger struct {
-	logger *log.Logger
-	level  int
+	logger *slog.Logger
 }
 
 const (
@@ -26,7 +25,7 @@ const (
 
 func openAppLogger(appConfig config.App) (*appLogger, func() error, error) {
 	if appConfig.LogFile == "" {
-		return &appLogger{logger: log.New(io.Discard, "", 0), level: logInfo}, func() error { return nil }, nil
+		return newAppLogger(io.Discard, logInfo), func() error { return nil }, nil
 	}
 	if err := os.MkdirAll(filepath.Dir(appConfig.LogFile), 0o750); err != nil {
 		return nil, nil, err
@@ -35,7 +34,12 @@ func openAppLogger(appConfig config.App) (*appLogger, func() error, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	return &appLogger{logger: log.New(file, "", log.Ldate|log.Ltime|log.LUTC), level: logLevelValue(appConfig.LogLevel)}, file.Close, nil
+	return newAppLogger(file, logLevelValue(appConfig.LogLevel)), file.Close, nil
+}
+
+func newAppLogger(writer io.Writer, level int) *appLogger {
+	handler := slog.NewJSONHandler(writer, &slog.HandlerOptions{Level: slogLevel(level)})
+	return &appLogger{logger: slog.New(handler)}
 }
 
 func logLevelValue(level string) int {
@@ -51,22 +55,22 @@ func logLevelValue(level string) int {
 	}
 }
 
-func (l *appLogger) write(level int, message string) {
-	if l != nil && level >= l.level {
-		l.logger.Printf("level=%s %s", logLevelName(level), message)
+func (l *appLogger) write(level int, event string, args ...any) {
+	if l != nil {
+		l.logger.Log(context.Background(), slogLevel(level), event, append([]any{"event", event}, args...)...)
 	}
 }
 
-func logLevelName(level int) string {
+func slogLevel(level int) slog.Level {
 	switch level {
 	case logDebug:
-		return "debug"
+		return slog.LevelDebug
 	case logWarn:
-		return "warn"
+		return slog.LevelWarn
 	case logError:
-		return "error"
+		return slog.LevelError
 	default:
-		return "info"
+		return slog.LevelInfo
 	}
 }
 
@@ -94,7 +98,7 @@ func (p *loggingProgress) StartStage(label string, total int64) {
 	p.completed = 0
 	p.stageStart = time.Now()
 	p.stageActive = true
-	p.logger.write(logInfo, fmt.Sprintf("event=stage_start site=%q stage=%q total_bytes=%d", p.site, label, total))
+	p.logger.write(logInfo, "stage_start", "site", p.site, "stage", label, "total_bytes", total)
 	p.next.StartStage(label, total)
 }
 
@@ -121,9 +125,13 @@ func (p *loggingProgress) finish(status string, level int) {
 	if !p.stageActive {
 		return
 	}
-	p.logger.write(level, fmt.Sprintf(
-		"event=stage_finished site=%q stage=%q status=%q completed_bytes=%d total_bytes=%d duration_ms=%d",
-		p.site, p.stage, status, p.completed, p.total, time.Since(p.stageStart).Milliseconds(),
-	))
+	p.logger.write(level, "stage_finished",
+		"site", p.site,
+		"stage", p.stage,
+		"status", status,
+		"completed_bytes", p.completed,
+		"total_bytes", p.total,
+		"duration_ms", time.Since(p.stageStart).Milliseconds(),
+	)
 	p.stageActive = false
 }

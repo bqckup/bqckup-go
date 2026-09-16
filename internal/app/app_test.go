@@ -349,11 +349,14 @@ func TestOpenWiresAWorkingLocalBackupApplication(t *testing.T) {
 	contents, err := os.ReadFile(logPath)
 	require.NoError(t, err)
 	text := string(contents)
-	assert.Contains(t, text, `event=backup_plan site="example"`)
-	assert.Contains(t, text, `event=stage_start site="example" stage="compress files"`)
-	assert.Contains(t, text, `event=package_stored site="example"`)
-	assert.Contains(t, text, `object_key="bqckup/example/`)
-	assert.Contains(t, text, `event=backup_finished site="example"`)
+	for _, line := range strings.Split(strings.TrimSpace(text), "\n") {
+		assert.True(t, json.Valid([]byte(line)), "invalid JSON log line: %s", line)
+	}
+	assert.Contains(t, text, `"event":"backup_plan","site":"example"`)
+	assert.Contains(t, text, `"event":"stage_start","site":"example","stage":"compress files"`)
+	assert.Contains(t, text, `"event":"package_stored","site":"example"`)
+	assert.Contains(t, text, `"object_key":"bqckup/example/`)
+	assert.Contains(t, text, `"event":"backup_finished","site":"example"`)
 	assert.NotContains(t, text, filepath.Join(filepath.Dir(configDir), "source"))
 }
 
