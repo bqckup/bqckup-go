@@ -2,7 +2,7 @@
 
 All notable changes to Bqckup are documented in this file.
 
-## v1.0.4
+## v1.0.4 — 16-September-2026
 
 - Check local temporary free space before creating a full archive or a
   database dump with a known size estimate.
