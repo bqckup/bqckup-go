@@ -200,8 +200,9 @@ It must be a regular file and must not be a symbolic link.
 
 ## 5. Configure a site
 
-The filename must match `site.name`. For example, site `website` belongs in
-`sites/website.yaml`.
+The filename is only an organizational label; Bqckup uses `site.name` as the
+backup identity. For example, `sites/website-production.yaml` may contain
+`name: website`.
 
 ### Full backup example
 

@@ -523,10 +523,6 @@ func (c Config) validateSite(site Site, seen map[string]struct{}) error {
 	}
 	seen[site.Name] = struct{}{}
 
-	filename := strings.TrimSuffix(filepath.Base(file), filepath.Ext(file))
-	if filename != site.Name {
-		return validationError(file, baseField+".name", "must match filename %q", filename)
-	}
 	if !site.Enabled {
 		return nil
 	}

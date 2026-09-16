@@ -2,6 +2,11 @@
 
 All notable changes to Bqckup are documented in this file.
 
+## v1.0.8
+
+- Allow site YAML filenames to differ from `site.name`; duplicate site names
+  and unsafe site names remain invalid.
+
 ## v1.0.7
 
 - Automatically tighten loose modes on credential-bearing regular YAML files

@@ -65,6 +65,12 @@ func TestValidateAcceptsUppercaseAndUnderscoreSiteName(t *testing.T) {
 	require.NoError(t, cfg.Validate())
 }
 
+func TestValidateAllowsSiteFilenameDifferentFromName(t *testing.T) {
+	cfg := validConfig(t)
+	cfg.Sites[0].SourceFile = filepath.Join(filepath.Dir(cfg.Sites[0].SourceFile), "legacy-file.yaml")
+	require.NoError(t, cfg.Validate())
+}
+
 func TestValidateAcceptsExcludePatterns(t *testing.T) {
 	cfg := validConfig(t)
 	cfg.Sites[0].BackupMode = "incremental"

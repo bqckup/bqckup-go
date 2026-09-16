@@ -137,7 +137,8 @@ decoding is strict, so upgrade the binary before deploying this form.
 
 ## Site file
 
-The filename must match `site.name`:
+The filename is only an organizational label; `site.name` is the backup
+identity:
 
 ```yaml
 site:
