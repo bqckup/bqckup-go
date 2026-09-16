@@ -44,6 +44,11 @@ func FormatPackageKey(createdAt time.Time, packageName string, runID ...string) 
 // ParseBackupSet parses the logical date/time run prefix.
 func ParseBackupSet(value string) (time.Time, error) {
 	parts := strings.Split(value, "/")
+	if len(parts) == 2 {
+		if _, createdAt, err := BackupSetForPackage(parts[0], parts[1]); err == nil {
+			return createdAt, nil
+		}
+	}
 	if len(parts) == 2 && len(parts[1]) >= 8 {
 		if createdAt, err := time.Parse(TimestampLayout, parts[0]+"/"+parts[1][:8]); err == nil && (len(parts[1]) == 8 || parts[1][8] == '-') {
 			return createdAt, nil

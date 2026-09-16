@@ -9,11 +9,11 @@ import (
 )
 
 func TestParseBackupSetAcceptsCurrentAndLegacyLayouts(t *testing.T) {
-	for _, value := range []string{"2026-08-20/00-09-30", "20-August-2026/00-09-30", "2026-08-20T00-09-30.123456789Z"} {
+	for _, value := range []string{"2026-08-20/00-09-30", "20-August-2026/00-09-30", "20-August-2026/00-09-30-12345678", "2026-08-20T00-09-30.123456789Z"} {
 		t.Run(value, func(t *testing.T) {
 			createdAt, err := ParseBackupSet(value)
 			require.NoError(t, err)
-			if value == "2026-08-20/00-09-30" || value == "20-August-2026/00-09-30" {
+			if value == "2026-08-20/00-09-30" || value == "20-August-2026/00-09-30" || value == "20-August-2026/00-09-30-12345678" {
 				assert.Equal(t, time.Date(2026, time.August, 20, 0, 9, 30, 0, time.UTC), createdAt)
 			} else {
 				assert.Equal(t, time.Date(2026, time.August, 20, 0, 9, 30, 123456789, time.UTC), createdAt)

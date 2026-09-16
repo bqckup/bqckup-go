@@ -552,9 +552,13 @@ func validateSitePrefix(sitePrefix string) error {
 		return err
 	}
 	parts := strings.Split(sitePrefix, "/")
-	if (len(parts) != 2 || parts[0] != "bqckup" || !config.SafeName.MatchString(parts[1])) &&
-		(len(parts) != 3 || parts[0] != "bqckup" || !config.SafeName.MatchString(parts[1]) || !config.SafeName.MatchString(parts[2])) {
+	if len(parts) < 2 || parts[0] != "bqckup" {
 		return errors.New("invalid backup site prefix")
+	}
+	for _, part := range parts[1:] {
+		if !config.SafeName.MatchString(part) {
+			return errors.New("invalid backup site prefix")
+		}
 	}
 	return nil
 }
@@ -564,21 +568,22 @@ func validateBackupSetPrefix(prefix string) error {
 		return err
 	}
 	parts := strings.Split(prefix, "/")
-	if (len(parts) != 3 && len(parts) != 4 && len(parts) != 5) || parts[0] != "bqckup" {
+	if len(parts) < 3 || parts[0] != "bqckup" {
 		return errors.New("invalid backup set prefix")
 	}
-	if len(parts) >= 4 && !config.SafeName.MatchString(parts[1]) {
-		return errors.New("invalid backup set prefix")
-	}
-	if len(parts) == 5 && !config.SafeName.MatchString(parts[2]) {
-		return errors.New("invalid backup set prefix")
-	}
-	setStart := 2
-	if len(parts) == 5 {
-		setStart = 3
+	setStart := len(parts) - 1
+	if len(parts) >= 4 {
+		if _, err := storage.ParseBackupSet(path.Join(parts[len(parts)-2], parts[len(parts)-1])); err == nil {
+			setStart--
+		}
 	}
 	if _, err := storage.ParseBackupSet(strings.Join(parts[setStart:], "/")); err != nil {
 		return errors.New("invalid backup set prefix")
+	}
+	for _, part := range parts[1:setStart] {
+		if !config.SafeName.MatchString(part) {
+			return errors.New("invalid backup set prefix")
+		}
 	}
 	return nil
 }

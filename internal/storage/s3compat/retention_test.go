@@ -54,6 +54,23 @@ func TestListBackupSetsMarksOnlyCompletedFlatRuns(t *testing.T) {
 	assert.False(t, sets[1].Complete)
 }
 
+func TestListBackupSetsAcceptsConfiguredBackupNamespace(t *testing.T) {
+	client := &fakeClient{listOutputs: []*s3.ListObjectsV2Output{
+		{Contents: []types.Object{
+			{Key: aws.String("bqckup/hosting_client/45.146.6.26_7bjym/abdimas.poltekparmedan.ac.id/16-September-2026/08-08-06-34091879-files.tar.gz")},
+			{Key: aws.String("bqckup/hosting_client/45.146.6.26_7bjym/abdimas.poltekparmedan.ac.id/16-September-2026/08-08-06-34091879-.bqckup-complete")},
+		}},
+	}}
+	store := newWithClients(Options{Bucket: "backups"}, &fakeUploader{}, client, nil)
+
+	sets, err := store.ListBackupSets(context.Background(), "bqckup/hosting_client/45.146.6.26_7bjym/abdimas.poltekparmedan.ac.id")
+
+	require.NoError(t, err)
+	require.Len(t, sets, 1)
+	assert.Equal(t, "bqckup/hosting_client/45.146.6.26_7bjym/abdimas.poltekparmedan.ac.id/16-September-2026/08-08-06-34091879", sets[0].Key)
+	assert.True(t, sets[0].Complete)
+}
+
 func TestDeletePaginatesAndBatchesAtOneThousand(t *testing.T) {
 	objects := make([]types.Object, 1001)
 	for index := range objects {
@@ -76,6 +93,15 @@ func TestDeleteAcceptsReadableBackupSetPrefix(t *testing.T) {
 	require.NoError(t, store.Delete(context.Background(), "bqckup/site/2026-08-01/00-00-00"))
 	require.Len(t, client.listInputs, 1)
 	assert.Equal(t, "company/bqckup/site/2026-08-01/", aws.ToString(client.listInputs[0].Prefix))
+}
+
+func TestDeleteAcceptsConfiguredBackupNamespace(t *testing.T) {
+	client := &fakeClient{listOutputs: []*s3.ListObjectsV2Output{{}}}
+	store := newWithClients(Options{Bucket: "backups"}, &fakeUploader{}, client, nil)
+
+	require.NoError(t, store.Delete(context.Background(), "bqckup/hosting_client/45.146.6.26_7bjym/abdimas.poltekparmedan.ac.id/16-September-2026/08-08-06-34091879"))
+	require.Len(t, client.listInputs, 1)
+	assert.Equal(t, "bqckup/hosting_client/45.146.6.26_7bjym/abdimas.poltekparmedan.ac.id/16-September-2026/", aws.ToString(client.listInputs[0].Prefix))
 }
 
 func TestDeleteRejectsUnsafeOrBroadPrefixes(t *testing.T) {

@@ -2,6 +2,11 @@
 
 All notable changes to Bqckup are documented in this file.
 
+## v1.0.10
+
+- Fix storage listing and retention for backups with a multi-segment
+  `backup_prefix` and the readable full-backup date/run layout.
+
 ## v1.0.9
 
 - Cap each full-archive file at the size recorded in its tar header, so an
