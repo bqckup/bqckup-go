@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path"
 	"strings"
 	"sync"
 	"time"
@@ -87,7 +88,7 @@ func Open(ctx context.Context, configDir string) (*App, error) {
 	repository := history.NewRepository(database)
 	engine := incrementalfacade.NewEngine()
 	runner := backup.NewRunner(backup.Dependencies{
-		ServerID:           configuration.ServerID,
+		ServerID:           configuration.BackupNamespace(),
 		Repository:         repository,
 		Archiver:           files.New(),
 		IncrementalEngine:  engine,
@@ -437,7 +438,7 @@ func (a *App) ListRemoteContents(ctx context.Context, siteName, destinationName 
 	if !ok || store == nil {
 		return backup.Listing{}, apperror.Wrap(apperror.CategoryInternal, "a configured storage destination is unavailable", nil)
 	}
-	return (&backup.Lister{ServerID: a.configuration.ServerID, Snapshots: a.snapshots}).List(ctx, destinationName, site, storageConfig, store)
+	return (&backup.Lister{ServerID: a.configuration.BackupNamespace(), Snapshots: a.snapshots}).List(ctx, destinationName, site, storageConfig, store)
 }
 
 // ListSiteSnapshots lists the live snapshots of one incremental site on
@@ -465,7 +466,7 @@ func (a *App) ListSiteSnapshots(ctx context.Context, siteName, destinationName s
 	if !siteUsesDestination(site, destinationName) {
 		return backup.Listing{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q does not send backups to destination %q", siteName, destinationName), nil)
 	}
-	return (&backup.Lister{ServerID: a.configuration.ServerID, Snapshots: a.snapshots}).ListSiteSnapshots(ctx, destinationName, site, storageConfig)
+	return (&backup.Lister{ServerID: a.configuration.BackupNamespace(), Snapshots: a.snapshots}).ListSiteSnapshots(ctx, destinationName, site, storageConfig)
 }
 
 func siteUsesDestination(site config.Site, destination string) bool {
@@ -502,7 +503,7 @@ func (a *App) CheckRepository(ctx context.Context, siteName, destinationName str
 	if !siteUsesDestination(site, destinationName) {
 		return backup.CheckOutcome{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q does not send backups to destination %q", siteName, destinationName), nil)
 	}
-	return (&backup.Checker{ServerID: a.configuration.ServerID, Engine: a.checker}).CheckSite(ctx, destinationName, readData, site, storageConfig)
+	return (&backup.Checker{ServerID: a.configuration.BackupNamespace(), Engine: a.checker}).CheckSite(ctx, destinationName, readData, site, storageConfig)
 }
 
 // RepairIndex rebuilds the index files of one incremental site's repository
@@ -529,7 +530,7 @@ func (a *App) RepairIndex(ctx context.Context, siteName, destinationName string)
 	if !siteUsesDestination(site, destinationName) {
 		return backup.RepairOutcome{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q does not send backups to destination %q", siteName, destinationName), nil)
 	}
-	return (&backup.Repairer{ServerID: a.configuration.ServerID, Engine: a.repairer}).RepairSite(ctx, destinationName, site, storageConfig)
+	return (&backup.Repairer{ServerID: a.configuration.BackupNamespace(), Engine: a.repairer}).RepairSite(ctx, destinationName, site, storageConfig)
 }
 
 // RestoreSnapshot restores one snapshot of one incremental site into the
@@ -555,22 +556,27 @@ func (a *App) RestoreSnapshot(ctx context.Context, siteName, destinationName, sn
 	if !siteUsesDestination(site, destinationName) {
 		return backup.RestoreResult{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q does not send backups to destination %q", siteName, destinationName), nil)
 	}
-	return (&backup.Restorer{ServerID: a.configuration.ServerID, Snapshots: a.snapshots, Engine: a.restorer}).RestoreSiteSnapshot(ctx, destinationName, snapshotRef, target, site, storageConfig, confirm)
+	return (&backup.Restorer{ServerID: a.configuration.BackupNamespace(), Snapshots: a.snapshots, Engine: a.restorer}).RestoreSiteSnapshot(ctx, destinationName, snapshotRef, target, site, storageConfig, confirm)
 }
 
 // parseSiteFromKey extracts the site name from a download-link key. Current
-// keys are namespaced as bqckup/<server_id>/<site>/... . The legacy
-// bqckup/<site>/... form remains valid when server_id is not configured.
+// keys are namespaced as bqckup/<backup_prefix>/<server_id>/<site>/... . The
+// legacy bqckup/<site>/... form remains valid when neither value is configured.
 func parseSiteFromKey(key, serverID string) (string, error) {
 	parts := strings.Split(key, "/")
-	if parts[0] != "bqckup" {
+	if len(parts) == 0 || parts[0] != "bqckup" {
 		return "", fmt.Errorf("key %q must start with bqckup/", key)
 	}
 	if serverID != "" {
-		if len(parts) < 4 || parts[1] != serverID || parts[2] == "" || parts[3] == "" {
+		namespace := path.Join("bqckup", serverID) + "/"
+		if !strings.HasPrefix(key, namespace) {
 			return "", fmt.Errorf("key %q must start with bqckup/%s/<site>/", key, serverID)
 		}
-		return parts[2], nil
+		parts = strings.Split(strings.TrimPrefix(key, namespace), "/")
+		if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
+			return "", fmt.Errorf("key %q must start with bqckup/%s/<site>/", key, serverID)
+		}
+		return parts[0], nil
 	}
 	if len(parts) < 3 || parts[1] == "" || parts[2] == "" {
 		return "", fmt.Errorf("key %q must start with bqckup/<site>/", key)
@@ -583,7 +589,7 @@ func parseSiteFromKey(key, serverID string) (string, error) {
 // use full mode, and send backups to the destination. Nothing is written to
 // history and the remote only receives one existence check.
 func (a *App) Link(ctx context.Context, destinationName, key string, expires time.Duration) (storage.DownloadLink, error) {
-	siteName, err := parseSiteFromKey(key, a.configuration.ServerID)
+	siteName, err := parseSiteFromKey(key, a.configuration.BackupNamespace())
 	if err != nil {
 		return storage.DownloadLink{}, apperror.Wrap(apperror.CategoryConfig, err.Error(), nil)
 	}

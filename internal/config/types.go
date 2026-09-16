@@ -1,6 +1,7 @@
 package config
 
 import (
+	"path"
 	"sort"
 	"time"
 )
@@ -11,11 +12,23 @@ const SchemaVersion = 2
 type Config struct {
 	Version       int
 	ServerID      string
+	BackupPrefix  string
 	App           App
 	Storages      map[string]Storage
 	Sites         []Site
 	Notifications Notifications
 	Reports       Reports
+}
+
+// BackupNamespace is the path component used below the bqckup root.
+func (c Config) BackupNamespace() string {
+	if c.BackupPrefix == "" {
+		return c.ServerID
+	}
+	if c.ServerID == "" {
+		return c.BackupPrefix
+	}
+	return path.Join(c.BackupPrefix, c.ServerID)
 }
 
 // Notification event names. These are the canonical values for the

@@ -136,6 +136,22 @@ app:
 	assert.Equal(t, filepath.Join(dir, "locks"), cfg.App.LockDirectory)
 }
 
+func TestLoadReadsBackupPrefix(t *testing.T) {
+	dir := writeConfigTree(t, `
+server_id: 194.233.87.182
+backup_prefix: hosting_client
+app:
+  state_database: data/bqckup.db
+  temporary_directory: tmp
+  lock_directory: locks
+`, localStorageYAML, validSiteYAML(t))
+
+	cfg, err := Load(t.Context(), dir)
+	require.NoError(t, err)
+	assert.Equal(t, "hosting_client", cfg.BackupPrefix)
+	assert.Equal(t, "hosting_client/194.233.87.182", cfg.BackupNamespace())
+}
+
 func TestLoadDoesNotOverrideYAMLFromEnvironment(t *testing.T) {
 	t.Setenv("BQCKUP_STATE_DATABASE", "/tmp/env-override.db")
 	t.Setenv("BQCKUP_LOG_LEVEL", "debug")

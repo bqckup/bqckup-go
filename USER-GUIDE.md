@@ -98,6 +98,7 @@ Initialization never overwrites an existing configuration file.
 
 ```yaml
 server_id: 207.180.252.231
+backup_prefix: hosting_client # optional
 
 app:
   state_database: /var/lib/bqckup/bqckup.db
@@ -113,12 +114,18 @@ the YAML are authoritative and are not overridden by environment variables.
 set, Bqckup appends operational events to that file and creates it with mode
 `0600`.
 
+`backup_prefix` is an optional safe relative path used below the `bqckup/`
+namespace. With the example above, backup keys start with
+`bqckup/hosting_client/207.180.252.231/`. Leave it empty to preserve the
+default `bqckup/<server_id>/` layout.
+
 ## 4. Configure server and storage
 
 Set the global server identity in `bqckup.yaml`:
 
 ```yaml
 server_id: 207.180.252.231
+backup_prefix: hosting_client # optional
 ```
 
 Each Bqckup installation should use its own stable server ID.

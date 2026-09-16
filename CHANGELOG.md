@@ -4,6 +4,10 @@ All notable changes to Bqckup are documented in this file.
 
 ## Unreleased
 
+- Add optional `backup_prefix` namespace support so backup keys can use
+  `bqckup/<backup_prefix>/<server_id>/<site>/...` while preserving the legacy
+  layout when the field is empty.
+
 ## v1.0.3
 
 - Run enabled full and incremental sites in bounded concurrent lanes so a

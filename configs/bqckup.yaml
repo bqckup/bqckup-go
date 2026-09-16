@@ -1,4 +1,5 @@
 server_id: 127.0.0.1
+# backup_prefix: hosting_client
 
 app:
   state_database: data/bqckup.db
