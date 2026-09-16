@@ -224,6 +224,22 @@ func TestListPackagesReturnsEveryObjectUnderTheSet(t *testing.T) {
 	assert.Equal(t, "next", aws.ToString(client.listInputs[1].ContinuationToken))
 }
 
+func TestListPackagesAcceptsConfiguredBackupNamespace(t *testing.T) {
+	created := time.Date(2026, time.September, 16, 8, 8, 6, 0, time.UTC)
+	client := &fakeClient{listOutputs: []*s3.ListObjectsV2Output{{Contents: []types.Object{
+		{Key: aws.String("bqckup/hosting_client/45.146.6.26_7bjym/abdimas.poltekparmedan.ac.id/16-September-2026/08-08-06-34091879-files.tar.gz"), Size: aws.Int64(100), LastModified: aws.Time(created)},
+		{Key: aws.String("bqckup/hosting_client/45.146.6.26_7bjym/abdimas.poltekparmedan.ac.id/16-September-2026/08-08-06-34091879-.bqckup-complete")},
+	}}}}
+	store := newWithClients(Options{Bucket: "backups"}, &fakeUploader{}, client, nil)
+
+	packages, err := store.ListPackages(context.Background(), "bqckup/hosting_client/45.146.6.26_7bjym/abdimas.poltekparmedan.ac.id/16-September-2026/08-08-06-34091879")
+
+	require.NoError(t, err)
+	require.Len(t, packages, 1)
+	assert.Equal(t, "bqckup/hosting_client/45.146.6.26_7bjym/abdimas.poltekparmedan.ac.id/16-September-2026/08-08-06-34091879-files.tar.gz", packages[0].Key)
+	assert.Equal(t, "bqckup/hosting_client/45.146.6.26_7bjym/abdimas.poltekparmedan.ac.id/16-September-2026/", aws.ToString(client.listInputs[0].Prefix))
+}
+
 func TestListPackagesSkipsKeysOutsideTheSet(t *testing.T) {
 	created := time.Date(2026, 11, 10, 3, 0, 0, 0, time.UTC)
 	client := &fakeClient{listOutputs: []*s3.ListObjectsV2Output{

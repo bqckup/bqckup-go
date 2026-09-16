@@ -33,6 +33,7 @@ func TestLinkResolvesSiteFromSupportedKeyLayouts(t *testing.T) {
 		{name: "legacy", key: "bqckup/site-a/2026-08-05T00-00-00Z/files.tar.gz"},
 		{name: "server", serverID: "127.0.0.1", key: "bqckup/127.0.0.1/site-a/30-August-2026/04-42-59/files.tar.gz"},
 		{name: "prefixed server", serverID: "194.233.87.182", backupPrefix: "hosting_client", key: "bqckup/hosting_client/194.233.87.182/site-a/30-August-2026/04-42-59/files.tar.gz"},
+		{name: "nested prefix", serverID: "45.146.6.26_7bjym", backupPrefix: "hosting_client/production", key: "bqckup/hosting_client/production/45.146.6.26_7bjym/site-a/30-August-2026/04-42-59-files.tar.gz"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

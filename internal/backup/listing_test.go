@@ -20,10 +20,12 @@ type fakeRemoteLister struct {
 	packages      map[string][]storage.RemotePackage
 	setsErr       error
 	packagesErr   error
+	sitePrefix    string
 	listedSetKeys []string
 }
 
-func (f *fakeRemoteLister) ListBackupSets(_ context.Context, _ string) ([]storage.BackupSet, error) {
+func (f *fakeRemoteLister) ListBackupSets(_ context.Context, sitePrefix string) ([]storage.BackupSet, error) {
+	f.sitePrefix = sitePrefix
 	return f.sets, f.setsErr
 }
 
@@ -103,6 +105,16 @@ func TestListFullModeReturnsNewestSetFirst(t *testing.T) {
 		"bqckup/site-a/2026-11-11T04-00-00.000000000Z",
 		"bqckup/site-a/2026-11-10T03-00-00.000000000Z",
 	}, remote.listedSetKeys)
+}
+
+func TestListFullModeUsesConfiguredBackupNamespace(t *testing.T) {
+	remote := &fakeRemoteLister{}
+	lister := &Lister{ServerID: "hosting_client/production/45.146.6.26_7bjym"}
+
+	_, err := lister.List(context.Background(), "s3-primary", fullSite(), config.Storage{Type: "s3"}, remote)
+
+	require.NoError(t, err)
+	assert.Equal(t, "bqckup/hosting_client/production/45.146.6.26_7bjym/site-a", remote.sitePrefix)
 }
 
 func TestListIncrementalModeTruncatesIDsAndNewestFirst(t *testing.T) {

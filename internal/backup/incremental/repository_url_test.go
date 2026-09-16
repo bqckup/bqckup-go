@@ -23,6 +23,13 @@ func TestRepositoryURL(t *testing.T) {
 		assert.Equal(t, "s3:s3.amazonaws.com/backups/bqckup/hosting_client/194.233.87.182/website/incremental-backup", url)
 	})
 
+	t.Run("s3 storage supports a nested backup prefix", func(t *testing.T) {
+		storage := config.Storage{Type: "s3", Bucket: "backups"}
+		url, err := RepositoryURL(storage, "website", "hosting_client/production/45.146.6.26_7bjym")
+		require.NoError(t, err)
+		assert.Equal(t, "s3:s3.amazonaws.com/backups/bqckup/hosting_client/production/45.146.6.26_7bjym/website/incremental-backup", url)
+	})
+
 	t.Run("local storage", func(t *testing.T) {
 		storage := config.Storage{Type: "local", Directory: "/var/backups/bqckup"}
 		url, err := RepositoryURL(storage, "my-site")
