@@ -4,6 +4,14 @@ All notable changes to Bqckup are documented in this file.
 
 ## Unreleased
 
+- Protect completed recovery points with per-run completion markers so failed
+  or partial backups cannot consume `keep_last` slots or trigger retention.
+- Extend `backup check` to full-mode backups, including package size and remote
+  metadata checks plus optional end-to-end SHA-256 verification with
+  `--read-data`.
+- Simplify backup progress, logging, and storage internals while removing the
+  unused progress-bar dependencies without changing the CLI contract.
+
 ## v1.0.3
 
 - Add optional `backup_prefix` namespace support so backup keys can use

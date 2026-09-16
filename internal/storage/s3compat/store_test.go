@@ -1,10 +1,12 @@
 package s3compat
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"io"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -133,9 +135,39 @@ type fakeClient struct {
 	deleteObjectsErr    error
 }
 
+type fakeReadableClient struct {
+	*fakeClient
+	contents []byte
+}
+
+func (f *fakeReadableClient) GetObject(_ context.Context, _ *s3.GetObjectInput, _ ...func(*s3.Options)) (*s3.GetObjectOutput, error) {
+	return &s3.GetObjectOutput{Body: io.NopCloser(bytes.NewReader(f.contents))}, nil
+}
+
 func (f *fakeClient) HeadObject(_ context.Context, input *s3.HeadObjectInput, _ ...func(*s3.Options)) (*s3.HeadObjectOutput, error) {
 	f.headInput = input
 	return f.headOutput, f.headErr
+}
+
+func TestVerifyPackageChecksMetadataAndOptionalData(t *testing.T) {
+	contents := []byte("verified remote backup")
+	digest := sha256.Sum256(contents)
+	checksum := hex.EncodeToString(digest[:])
+	head := &s3.HeadObjectOutput{
+		ContentLength: aws.Int64(int64(len(contents))),
+		Metadata: map[string]string{
+			checksumMetadata: checksum,
+			sizeMetadata:     strconv.Itoa(len(contents)),
+		},
+	}
+	client := &fakeReadableClient{fakeClient: &fakeClient{headOutput: head}, contents: contents}
+	store := newWithClients(Options{Bucket: "backups", Prefix: "company"}, &fakeUploader{}, client, nil)
+
+	require.NoError(t, store.VerifyPackage(context.Background(), "bqckup/site/files.tar.gz", int64(len(contents)), checksum, false))
+	require.NoError(t, store.VerifyPackage(context.Background(), "bqckup/site/files.tar.gz", int64(len(contents)), checksum, true))
+	client.contents = append([]byte(nil), contents...)
+	client.contents[0] = 'X'
+	require.ErrorContains(t, store.VerifyPackage(context.Background(), "bqckup/site/files.tar.gz", int64(len(contents)), checksum, true), "checksum")
 }
 
 func (f *fakeClient) DeleteObject(_ context.Context, input *s3.DeleteObjectInput, _ ...func(*s3.Options)) (*s3.DeleteObjectOutput, error) {
@@ -170,6 +202,7 @@ func TestListPackagesReturnsEveryObjectUnderTheSet(t *testing.T) {
 		{Contents: []types.Object{
 			{Key: aws.String("company/bqckup/site-a/2026-11-10/03-00-12-files.tar.gz"), Size: aws.Int64(100), LastModified: aws.Time(created)},
 			{Key: aws.String("company/bqckup/site-a/2026-11-10/03-00-12-db.sql.gz"), Size: aws.Int64(50), LastModified: aws.Time(created.Add(time.Second))},
+			{Key: aws.String("company/bqckup/site-a/2026-11-10/03-00-12-.bqckup-complete"), LastModified: aws.Time(created.Add(time.Second))},
 		}, IsTruncated: aws.Bool(true), NextContinuationToken: aws.String("next")},
 		{Contents: []types.Object{
 			{Key: aws.String("company/bqckup/site-a/2026-11-10/03-00-12-db2.sql.gz"), Size: aws.Int64(25), LastModified: aws.Time(created.Add(2 * time.Second))},

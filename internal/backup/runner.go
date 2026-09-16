@@ -2,6 +2,7 @@ package backup
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"os"
@@ -420,41 +421,52 @@ func (r *Runner) run(ctx context.Context, site config.Site, force bool) (result 
 		}
 	}
 
-	for _, destination := range site.Destinations {
-		store, ok := r.dependencies.Stores[destination.Storage]
-		if !ok || store == nil {
-			return fail(apperror.Wrap(apperror.CategoryInternal, "a configured storage destination is unavailable", nil))
+	if result.FilesSkipped == 0 && (site.BackupMode != "incremental" || hasEnabledDatabaseSources(site)) {
+		markerKey := path.Join(sitePrefix, storage.FormatPackageKey(now, storage.CompletionMarkerName, run.ID))
+		if err := r.storeCompletionMarker(ctx, markerKey, run.ID, site.Destinations); err != nil {
+			return fail(err)
 		}
-		if site.BackupMode == "incremental" {
-			engine := r.dependencies.IncrementalEngine
-			storageConfig, ok := r.dependencies.Storages[destination.Storage]
-			if !ok {
-				return fail(apperror.Wrap(apperror.CategoryInternal, fmt.Sprintf("storage configuration %q is unavailable", destination.Storage), nil))
+	}
+
+	// A partial backup must never trigger pruning: its snapshot or flat
+	// packages are preserved for diagnosis, but they do not displace a
+	// previously completed recovery point.
+	if result.FilesSkipped == 0 {
+		for _, destination := range site.Destinations {
+			store, ok := r.dependencies.Stores[destination.Storage]
+			if !ok || store == nil {
+				return fail(apperror.Wrap(apperror.CategoryInternal, "a configured storage destination is unavailable", nil))
 			}
-			repo, err := r.buildRepo(site, storageConfig, false)
-			if err != nil {
-				return fail(err)
-			}
-			r.progress.StartStage("applying retention to "+destination.Storage, -1)
-			reclaimed, err := engine.ApplyRetention(ctx, repo, site.Policy.KeepLast, site.Name)
-			if err != nil {
-				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-					return fail(apperror.Wrap(apperror.CategoryStorage, "backup completed but incremental retention could not be applied", err))
+			if site.BackupMode == "incremental" {
+				engine := r.dependencies.IncrementalEngine
+				storageConfig, ok := r.dependencies.Storages[destination.Storage]
+				if !ok {
+					return fail(apperror.Wrap(apperror.CategoryInternal, fmt.Sprintf("storage configuration %q is unavailable", destination.Storage), nil))
 				}
-				recordRetentionWarning(destination.Storage, "backup completed but incremental retention could not be applied", err)
-			} else {
-				result.ReclaimedBytes += reclaimed
+				repo, err := r.buildRepo(site, storageConfig, false)
+				if err != nil {
+					return fail(err)
+				}
+				r.progress.StartStage("applying retention to "+destination.Storage, -1)
+				reclaimed, err := engine.ApplyRetention(ctx, repo, site.Policy.KeepLast, site.Name)
+				if err != nil {
+					if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+						return fail(apperror.Wrap(apperror.CategoryStorage, "backup completed but incremental retention could not be applied", err))
+					}
+					recordRetentionWarning(destination.Storage, "backup completed but incremental retention could not be applied", err)
+				} else {
+					result.ReclaimedBytes += reclaimed
+				}
+				r.progress.FinishStage()
 			}
-			r.progress.FinishStage()
-		}
-		// Set retention covers every mode: full sites store flat date-folder
-		// packages here, and incremental sites store their database dumps
-		// here. Without this, package objects would grow without bound.
-		if err := r.dependencies.Retainer.Apply(ctx, store, sitePrefix, site.Policy.KeepLast); err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				return fail(apperror.Wrap(apperror.CategoryStorage, "backup completed but retention could not be applied", err))
+			// Set retention covers every mode: full sites store flat date-folder
+			// packages here, and incremental sites store their database dumps.
+			if err := r.dependencies.Retainer.Apply(ctx, store, sitePrefix, site.Policy.KeepLast); err != nil {
+				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+					return fail(apperror.Wrap(apperror.CategoryStorage, "backup completed but retention could not be applied", err))
+				}
+				recordRetentionWarning(destination.Storage, "backup completed but retention could not be applied", err)
 			}
-			recordRetentionWarning(destination.Storage, "backup completed but retention could not be applied", err)
 		}
 	}
 
@@ -795,6 +807,41 @@ func (r *Runner) putPackage(ctx context.Context, store storage.Store, pkg storag
 		return ps.PutWithProgress(ctx, pkg, key, r.progress.Add)
 	}
 	return store.Put(ctx, pkg, key)
+}
+
+func (r *Runner) storeCompletionMarker(ctx context.Context, key, runID string, destinations []config.Destination) error {
+	marker, err := os.CreateTemp(r.dependencies.TemporaryDirectory, ".bqckup-complete-*")
+	if err != nil {
+		return apperror.Wrap(apperror.CategoryExecution, "could not create backup completion marker", err)
+	}
+	markerPath := marker.Name()
+	defer os.Remove(markerPath)
+
+	contents := []byte(runID + "\n")
+	if _, err := marker.Write(contents); err != nil {
+		_ = marker.Close()
+		return apperror.Wrap(apperror.CategoryExecution, "could not write backup completion marker", err)
+	}
+	if err := marker.Sync(); err != nil {
+		_ = marker.Close()
+		return apperror.Wrap(apperror.CategoryExecution, "could not sync backup completion marker", err)
+	}
+	if err := marker.Close(); err != nil {
+		return apperror.Wrap(apperror.CategoryExecution, "could not close backup completion marker", err)
+	}
+
+	digest := sha256.Sum256(contents)
+	pkg := storage.Package{Path: markerPath, Size: int64(len(contents)), SHA256: fmt.Sprintf("%x", digest)}
+	for _, destination := range destinations {
+		store, ok := r.dependencies.Stores[destination.Storage]
+		if !ok || store == nil {
+			return apperror.Wrap(apperror.CategoryInternal, "a configured storage destination is unavailable", nil)
+		}
+		if _, err := store.Put(ctx, pkg, key); err != nil {
+			return apperror.Wrap(apperror.CategoryStorage, "could not commit completed backup set", fmt.Errorf("destination=%q: %w", destination.Storage, err))
+		}
+	}
+	return nil
 }
 
 func (r *Runner) recordFailedPackage(ctx context.Context, runID string, pkg Package, objectKey string, destinations []config.Destination, message string) error {

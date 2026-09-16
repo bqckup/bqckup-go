@@ -7,6 +7,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -133,6 +134,23 @@ func TestListBackupSetsRecognizesReadableAndLegacyUTCApplicationTimestamps(t *te
 	assert.Equal(t, "bqckup/site/23-July-2026/03-45-00", sets[2].Key)
 }
 
+func TestListBackupSetsMarksOnlyCompletedFlatRuns(t *testing.T) {
+	root := t.TempDir()
+	store, err := New(root)
+	require.NoError(t, err)
+	directory := filepath.Join(root, "bqckup", "site", "2026-09-16")
+	require.NoError(t, os.MkdirAll(directory, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(directory, "01-00-00-aaaaaaaa-files.tar.gz"), []byte("complete"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(directory, "01-00-00-aaaaaaaa-.bqckup-complete"), nil, 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(directory, "02-00-00-bbbbbbbb-files.tar.gz"), []byte("failed"), 0o600))
+
+	sets, err := store.ListBackupSets(context.Background(), "bqckup/site")
+	require.NoError(t, err)
+	require.Len(t, sets, 2)
+	assert.True(t, sets[0].Complete)
+	assert.False(t, sets[1].Complete)
+}
+
 func sourcePackage(t *testing.T, contents []byte) storage.Package {
 	t.Helper()
 	filename := filepath.Join(t.TempDir(), "pkg.tar.gz")
@@ -177,4 +195,22 @@ func TestLocalStoreProbe(t *testing.T) {
 	probeErr := store.Probe(context.Background())
 	require.Error(t, probeErr)
 	assert.Contains(t, probeErr.Error(), "not writable")
+}
+
+func TestVerifyPackageChecksSizeAndOptionallyReadsData(t *testing.T) {
+	root := t.TempDir()
+	store, err := New(root)
+	require.NoError(t, err)
+	key := "bqckup/site-a/2026-09-16/files.tar.gz"
+	contents := []byte("verified backup")
+	resolved, err := store.LocalPath(key)
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(filepath.Dir(resolved), 0o700))
+	require.NoError(t, os.WriteFile(resolved, contents, 0o600))
+	digest := sha256.Sum256(contents)
+
+	require.NoError(t, store.VerifyPackage(context.Background(), key, int64(len(contents)), hex.EncodeToString(digest[:]), false))
+	require.NoError(t, store.VerifyPackage(context.Background(), key, int64(len(contents)), hex.EncodeToString(digest[:]), true))
+	require.ErrorContains(t, store.VerifyPackage(context.Background(), key, int64(len(contents))+1, hex.EncodeToString(digest[:]), false), "size")
+	require.ErrorContains(t, store.VerifyPackage(context.Background(), key, int64(len(contents)), strings.Repeat("0", 64), true), "checksum")
 }

@@ -548,6 +548,20 @@ Use JSON output for automation:
 bqckup --output json history list --site website
 ```
 
+Verify the latest successful backup at one destination:
+
+```bash
+bqckup backup check website --destination local-primary
+bqckup backup check website --destination local-primary --read-data
+```
+
+The first command performs the destination's inexpensive metadata and size
+checks. `--read-data` streams the stored content: full-mode packages are
+checked against the SHA-256 recorded in history, while incremental repository
+data is authenticated by the repository engine. A completed check with
+findings exits with status 1; command or storage failures use the normal
+categorized exit codes.
+
 If an interrupted incremental operation leaves a stale repository lock:
 
 ```bash
@@ -571,6 +585,7 @@ To also send a daily report at 08:00 and a monthly report on the 1st:
 
 ```cron
 30 2 * * * root /usr/bin/bqckup backup run website
+30 5 * * 0 root /usr/bin/bqckup backup check website --destination local-primary --read-data
 0  8 * * * root /usr/bin/bqckup report send daily
 0  8 1 * * root /usr/bin/bqckup report send monthly
 ```
@@ -578,7 +593,8 @@ To also send a daily report at 08:00 and a monthly report on the 1st:
 Use the same operating-system user for scheduled and manual runs. Mixing root
 and non-root runs can leave storage or history files with incompatible
 ownership. Ensure the scheduler's service account can read the protected site
-and storage YAML files.
+and storage YAML files. Schedule checks after the backup window; do not run a
+data-reading check concurrently with a backup of the same site.
 
 ## 9. Restore
 
@@ -634,6 +650,11 @@ PGPASSWORD='database-password' psql \
 
 Restore into a new directory or test database first. Verify the result before
 replacing production data.
+
+Run a restore drill regularly, not only after an incident. Use a new isolated
+target, confirm representative files can be opened, import database dumps into
+a disposable database, and record the tested backup timestamp. Delete the
+drill target only after the result has been reviewed.
 
 ### Restore an incremental snapshot
 

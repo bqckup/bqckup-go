@@ -7,7 +7,8 @@ Bqckup Go is a CLI-only modular monolith. One process loads immutable configurat
 For operators, the shortest path is: `init` → edit the three YAML files →
 `config validate` → `doctor` → `backup run`. Use `backup snapshots` and
 `backup restore` only for incremental sites; use `storage list` and
-`storage link` for stored full-mode packages.
+`storage link` for stored full-mode packages. `backup check` validates either
+an incremental repository or the latest successful full-mode packages.
 
 ```text
 cmd/bqckup       process signals and exit
@@ -36,7 +37,9 @@ Dependencies point toward the use case. `backup.Runner` knows interfaces and dom
 7. Calculate SHA-256 and size for the file archive and each enabled database export.
 8. Store every package to every destination without overwriting; local uses atomic staging, while S3/R2 uses conditional transfer and metadata verification.
 9. Record each stored package.
-10. Apply retention after every required destination succeeds. Retention is
+10. After every required destination succeeds, write a completion marker and
+    apply retention. Only marked sets count toward `keep_last`; failed or
+    partial sets cannot evict a completed recovery point. Retention is
     post-backup maintenance: a cleanup error is recorded as a warning while
     the stored backup remains successful.
 11. Mark the run `success` (or `no_change` when full-mode prepared packages match the previous successful run byte-for-byte); source, repository, destination, and database failures and cancellation get a terminal status with a redacted message.

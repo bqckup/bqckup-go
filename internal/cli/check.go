@@ -28,7 +28,7 @@ func newCheckCommand(opts *options) *cobra.Command {
 	var readData bool
 	command := &cobra.Command{
 		Use:   "check <site>",
-		Short: "Check the repository of one incremental site",
+		Short: "Check one site's latest backup",
 		Args: func(_ *cobra.Command, args []string) error {
 			if len(args) != 1 {
 				return fmt.Errorf("%w: backup check requires exactly one site", ErrInvalidInput)
@@ -67,7 +67,7 @@ func newCheckCommand(opts *options) *cobra.Command {
 		},
 	}
 	command.Flags().StringVar(&destination, "destination", "", "storage destination of the site to check (required)")
-	command.Flags().BoolVar(&readData, "read-data", false, "also read and authenticate every stored blob")
+	command.Flags().BoolVar(&readData, "read-data", false, "also read and authenticate every stored blob or package")
 	command.Flags().StringVar(&findingsFile, "findings-file", "", "write the complete finding list to this file")
 	return command
 }

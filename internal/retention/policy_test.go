@@ -21,6 +21,20 @@ func TestApplyKeepsNewestSuccessfulSets(t *testing.T) {
 	assert.Equal(t, []string{"bqckup/site/2026-01-01T00-00-00.000000000Z"}, store.deleted)
 }
 
+func TestApplyIgnoresUncommittedSets(t *testing.T) {
+	sets := backupSets(
+		"2026-01-01T00-00-00.000000000Z",
+		"2026-01-02T00-00-00.000000000Z",
+		"2026-01-03T00-00-00.000000000Z",
+		"2026-01-04T00-00-00.000000000Z",
+	)
+	sets[2].Complete = false // failed run left an object but no completion marker
+	store := &fakeStore{sets: sets}
+
+	require.NoError(t, Apply(context.Background(), store, "bqckup/site", 2))
+	assert.Equal(t, []string{"bqckup/site/2026-01-01T00-00-00.000000000Z"}, store.deleted)
+}
+
 func TestApplyRejectsInvalidKeepLast(t *testing.T) {
 	err := Apply(context.Background(), &fakeStore{}, "bqckup/site", 0)
 	require.Error(t, err)
@@ -58,7 +72,7 @@ func backupSets(names ...string) []storage.BackupSet {
 	sets := make([]storage.BackupSet, 0, len(names))
 	for _, name := range names {
 		parsed, _ := storage.ParseBackupSet(name)
-		sets = append(sets, storage.BackupSet{Key: "bqckup/site/" + name, CreatedAt: parsed})
+		sets = append(sets, storage.BackupSet{Key: "bqckup/site/" + name, CreatedAt: parsed, Complete: true})
 	}
 	return sets
 }

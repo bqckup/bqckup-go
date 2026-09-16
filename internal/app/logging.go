@@ -17,10 +17,10 @@ type appLogger struct {
 }
 
 const (
-	logDebug = iota
-	logInfo
-	logWarn
-	logError
+	logDebug = slog.LevelDebug
+	logInfo  = slog.LevelInfo
+	logWarn  = slog.LevelWarn
+	logError = slog.LevelError
 )
 
 func openAppLogger(appConfig config.App) (*appLogger, func() error, error) {
@@ -37,12 +37,12 @@ func openAppLogger(appConfig config.App) (*appLogger, func() error, error) {
 	return newAppLogger(file, logLevelValue(appConfig.LogLevel)), file.Close, nil
 }
 
-func newAppLogger(writer io.Writer, level int) *appLogger {
-	handler := slog.NewJSONHandler(writer, &slog.HandlerOptions{Level: slogLevel(level)})
+func newAppLogger(writer io.Writer, level slog.Level) *appLogger {
+	handler := slog.NewJSONHandler(writer, &slog.HandlerOptions{Level: level})
 	return &appLogger{logger: slog.New(handler)}
 }
 
-func logLevelValue(level string) int {
+func logLevelValue(level string) slog.Level {
 	switch level {
 	case "debug":
 		return logDebug
@@ -55,22 +55,9 @@ func logLevelValue(level string) int {
 	}
 }
 
-func (l *appLogger) write(level int, event string, args ...any) {
+func (l *appLogger) write(level slog.Level, event string, args ...any) {
 	if l != nil {
-		l.logger.Log(context.Background(), slogLevel(level), event, append([]any{"event", event}, args...)...)
-	}
-}
-
-func slogLevel(level int) slog.Level {
-	switch level {
-	case logDebug:
-		return slog.LevelDebug
-	case logWarn:
-		return slog.LevelWarn
-	case logError:
-		return slog.LevelError
-	default:
-		return slog.LevelInfo
+		l.logger.Log(context.Background(), level, event, append([]any{"event", event}, args...)...)
 	}
 }
 
@@ -121,7 +108,7 @@ func (p *loggingProgress) Done() {
 	p.next.Done()
 }
 
-func (p *loggingProgress) finish(status string, level int) {
+func (p *loggingProgress) finish(status string, level slog.Level) {
 	if !p.stageActive {
 		return
 	}

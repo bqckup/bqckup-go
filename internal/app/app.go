@@ -103,7 +103,11 @@ func Open(ctx context.Context, configDir string) (*App, error) {
 		TemporaryDirectory: configuration.App.TemporaryDirectory,
 	})
 	reportBuilder := report.NewBuilder(repository)
-	reportDispatcher := buildReportDispatcher(configuration.Notifications, repository)
+	reportDispatcher := report.NewDispatcher(
+		buildNotificationChannels(configuration.Notifications.Channels),
+		configuration.Notifications.Routes,
+		repository,
+	)
 	return &App{
 		configuration:    configuration,
 		runner:           runner,
@@ -119,12 +123,6 @@ func Open(ctx context.Context, configDir string) (*App, error) {
 		logger:           logger,
 		closeLogger:      closeLogger,
 	}, nil
-}
-
-// buildReportDispatcher constructs the report dispatcher from the configured
-// channels and routes. It shares the same channel map as the backup notifier.
-func buildReportDispatcher(notifications config.Notifications, repo *history.Repository) *report.Dispatcher {
-	return report.NewDispatcher(buildNotificationChannels(notifications.Channels), notifications.Routes, repo)
 }
 
 // buildNotifier constructs the notification dispatcher from the configured
@@ -393,11 +391,9 @@ func runEnabledBackups(ctx context.Context, sites []config.Site, force bool, obs
 	}
 
 	outcomes := make([]batchOutcome, len(jobs))
-	var outcomesMu sync.Mutex
 	var observerMu sync.Mutex
 	var workers sync.WaitGroup
 	for _, mode := range []string{"full", "incremental"} {
-		mode := mode
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
@@ -413,9 +409,7 @@ func runEnabledBackups(ctx context.Context, sites []config.Site, force bool, obs
 					return
 				}
 				result, err := run(ctx, job.site.Name, force)
-				outcomesMu.Lock()
 				outcomes[job.index] = batchOutcome{result: result, err: err, done: true}
-				outcomesMu.Unlock()
 				if observer != nil {
 					progress := batchProgressForSite(job.site)
 					progress.Result = &result
@@ -526,17 +520,31 @@ func siteUsesDestination(site config.Site, destination string) bool {
 	return false
 }
 
-// CheckRepository runs the read-only integrity check of one incremental
-// site's repository on one of its destinations. Validation mirrors
-// ListSiteSnapshots: the site must exist, be enabled, use incremental
-// mode, and actually send backups to the destination. Nothing is written
-// to history and no storage.Store is resolved.
+// CheckRepository runs a read-only integrity check for either backup mode.
+// Incremental mode checks its repository; full mode verifies packages from
+// the latest successful history run against the selected storage.
 func (a *App) CheckRepository(ctx context.Context, siteName, destinationName string, readData bool) (backup.CheckOutcome, error) {
-	site, storageConfig, err := a.incrementalSiteDestination(siteName, destinationName)
+	site, storageConfig, err := a.siteDestination(siteName, destinationName)
 	if err != nil {
 		return backup.CheckOutcome{}, err
 	}
-	return (&backup.Checker{ServerID: a.configuration.BackupNamespace(), Engine: a.checker}).CheckSite(ctx, destinationName, readData, site, storageConfig)
+	var verifier backup.PackageVerifier
+	if site.BackupMode != "incremental" {
+		store, ok := a.stores[destinationName]
+		if !ok || store == nil {
+			return backup.CheckOutcome{}, apperror.Wrap(apperror.CategoryInternal, "a configured storage destination is unavailable", nil)
+		}
+		verifier, ok = store.(backup.PackageVerifier)
+		if !ok {
+			return backup.CheckOutcome{}, apperror.Wrap(apperror.CategoryInternal, "the configured storage cannot verify backup packages", nil)
+		}
+	}
+	return (&backup.Checker{
+		ServerID: a.configuration.BackupNamespace(),
+		Engine:   a.checker,
+		History:  a.repository,
+		Verifier: verifier,
+	}).CheckSite(ctx, destinationName, readData, site, storageConfig)
 }
 
 // RepairIndex rebuilds the index files of one incremental site's repository
@@ -563,17 +571,32 @@ func (a *App) RestoreSnapshot(ctx context.Context, siteName, destinationName, sn
 }
 
 func (a *App) incrementalSiteDestination(siteName, destinationName string) (config.Site, config.Storage, error) {
+	configured, ok := a.configuration.Site(siteName)
+	if !ok {
+		return config.Site{}, config.Storage{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q was not found", siteName), nil)
+	}
+	if !configured.Enabled {
+		return config.Site{}, config.Storage{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q is disabled", siteName), nil)
+	}
+	if configured.BackupMode != "incremental" {
+		return config.Site{}, config.Storage{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf(
+			"site %q uses full backup mode; use 'bqckup history list --site %s --details' to inspect stored archives",
+			siteName, siteName), nil)
+	}
+	site, storageConfig, err := a.siteDestination(siteName, destinationName)
+	if err != nil {
+		return config.Site{}, config.Storage{}, err
+	}
+	return site, storageConfig, nil
+}
+
+func (a *App) siteDestination(siteName, destinationName string) (config.Site, config.Storage, error) {
 	site, ok := a.configuration.Site(siteName)
 	if !ok {
 		return config.Site{}, config.Storage{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q was not found", siteName), nil)
 	}
 	if !site.Enabled {
 		return config.Site{}, config.Storage{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q is disabled", siteName), nil)
-	}
-	if site.BackupMode != "incremental" {
-		return config.Site{}, config.Storage{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf(
-			"site %q uses full backup mode; use 'bqckup history list --site %s --details' to inspect stored archives",
-			siteName, siteName), nil)
 	}
 	storageConfig, ok := a.configuration.Storages[destinationName]
 	if !ok {
