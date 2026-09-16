@@ -86,11 +86,11 @@ func Open(ctx context.Context, configDir string) (*App, error) {
 	}
 
 	repository := history.NewRepository(database)
-	engine := incrementalfacade.NewEngine()
+	engine := &incrementalfacade.Engine{}
 	runner := backup.NewRunner(backup.Dependencies{
 		ServerID:           configuration.BackupNamespace(),
 		Repository:         repository,
-		Archiver:           files.New(),
+		Archiver:           &files.Archiver{},
 		IncrementalEngine:  engine,
 		DatabaseExporters:  databaseExporters,
 		Stores:             stores,
@@ -123,18 +123,7 @@ func Open(ctx context.Context, configDir string) (*App, error) {
 // buildReportDispatcher constructs the report dispatcher from the configured
 // channels and routes. It shares the same channel map as the backup notifier.
 func buildReportDispatcher(notifications config.Notifications, repo *history.Repository) *report.Dispatcher {
-	channels := make(map[string]notify.Channel, len(notifications.Channels))
-	for name, channel := range notifications.Channels {
-		switch channel.Type {
-		case "smtp":
-			channels[name] = notify.NewSMTP(name, channel, nil)
-		case "webhook":
-			channels[name] = notify.NewWebhook(name, channel.URL)
-		case "discord":
-			channels[name] = notify.NewDiscord(name, channel.WebhookURL)
-		}
-	}
-	return report.NewDispatcher(channels, notifications.Routes, repo)
+	return report.NewDispatcher(buildNotificationChannels(notifications.Channels), notifications.Routes, repo)
 }
 
 // buildNotifier constructs the notification dispatcher from the configured
@@ -144,8 +133,12 @@ func buildNotifier(notifications config.Notifications) backup.Notifier {
 	if len(notifications.Channels) == 0 {
 		return nil
 	}
-	channels := make(map[string]notify.Channel, len(notifications.Channels))
-	for name, channel := range notifications.Channels {
+	return notify.NewDispatcher(buildNotificationChannels(notifications.Channels), notifications.Routes)
+}
+
+func buildNotificationChannels(configured map[string]config.Channel) map[string]notify.Channel {
+	channels := make(map[string]notify.Channel, len(configured))
+	for name, channel := range configured {
 		switch channel.Type {
 		case "smtp":
 			channels[name] = notify.NewSMTP(name, channel, nil)
@@ -155,7 +148,7 @@ func buildNotifier(notifications config.Notifications) backup.Notifier {
 			channels[name] = notify.NewDiscord(name, channel.WebhookURL)
 		}
 	}
-	return notify.NewDispatcher(channels, notifications.Routes)
+	return channels
 }
 
 func resolveRemoteStorageConfiguration(ctx context.Context, configuration config.Config, resolver remoteStorageResolver) (config.Config, error) {
@@ -447,24 +440,9 @@ func (a *App) ListRemoteContents(ctx context.Context, siteName, destinationName 
 // to the destination. No storage.Store is resolved: the lister only needs
 // the storage document to build the repository configuration.
 func (a *App) ListSiteSnapshots(ctx context.Context, siteName, destinationName string) (backup.Listing, error) {
-	site, ok := a.configuration.Site(siteName)
-	if !ok {
-		return backup.Listing{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q was not found", siteName), nil)
-	}
-	if !site.Enabled {
-		return backup.Listing{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q is disabled", siteName), nil)
-	}
-	if site.BackupMode != "incremental" {
-		return backup.Listing{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf(
-			"site %q uses full backup mode; use 'bqckup history list --site %s --details' to inspect stored archives",
-			siteName, siteName), nil)
-	}
-	storageConfig, ok := a.configuration.Storages[destinationName]
-	if !ok {
-		return backup.Listing{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("storage destination %q was not found", destinationName), nil)
-	}
-	if !siteUsesDestination(site, destinationName) {
-		return backup.Listing{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q does not send backups to destination %q", siteName, destinationName), nil)
+	site, storageConfig, err := a.incrementalSiteDestination(siteName, destinationName)
+	if err != nil {
+		return backup.Listing{}, err
 	}
 	return (&backup.Lister{ServerID: a.configuration.BackupNamespace(), Snapshots: a.snapshots}).ListSiteSnapshots(ctx, destinationName, site, storageConfig)
 }
@@ -484,24 +462,9 @@ func siteUsesDestination(site config.Site, destination string) bool {
 // mode, and actually send backups to the destination. Nothing is written
 // to history and no storage.Store is resolved.
 func (a *App) CheckRepository(ctx context.Context, siteName, destinationName string, readData bool) (backup.CheckOutcome, error) {
-	site, ok := a.configuration.Site(siteName)
-	if !ok {
-		return backup.CheckOutcome{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q was not found", siteName), nil)
-	}
-	if !site.Enabled {
-		return backup.CheckOutcome{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q is disabled", siteName), nil)
-	}
-	if site.BackupMode != "incremental" {
-		return backup.CheckOutcome{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf(
-			"site %q uses full backup mode; use 'bqckup history list --site %s --details' to inspect stored archives",
-			siteName, siteName), nil)
-	}
-	storageConfig, ok := a.configuration.Storages[destinationName]
-	if !ok {
-		return backup.CheckOutcome{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("storage destination %q was not found", destinationName), nil)
-	}
-	if !siteUsesDestination(site, destinationName) {
-		return backup.CheckOutcome{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q does not send backups to destination %q", siteName, destinationName), nil)
+	site, storageConfig, err := a.incrementalSiteDestination(siteName, destinationName)
+	if err != nil {
+		return backup.CheckOutcome{}, err
 	}
 	return (&backup.Checker{ServerID: a.configuration.BackupNamespace(), Engine: a.checker}).CheckSite(ctx, destinationName, readData, site, storageConfig)
 }
@@ -511,24 +474,9 @@ func (a *App) CheckRepository(ctx context.Context, siteName, destinationName str
 // must exist, be enabled, use incremental mode, and actually send backups to
 // the destination. Nothing is written to history and no storage.Store is resolved.
 func (a *App) RepairIndex(ctx context.Context, siteName, destinationName string) (backup.RepairOutcome, error) {
-	site, ok := a.configuration.Site(siteName)
-	if !ok {
-		return backup.RepairOutcome{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q was not found", siteName), nil)
-	}
-	if !site.Enabled {
-		return backup.RepairOutcome{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q is disabled", siteName), nil)
-	}
-	if site.BackupMode != "incremental" {
-		return backup.RepairOutcome{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf(
-			"site %q uses full backup mode; use 'bqckup history list --site %s --details' to inspect stored archives",
-			siteName, siteName), nil)
-	}
-	storageConfig, ok := a.configuration.Storages[destinationName]
-	if !ok {
-		return backup.RepairOutcome{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("storage destination %q was not found", destinationName), nil)
-	}
-	if !siteUsesDestination(site, destinationName) {
-		return backup.RepairOutcome{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q does not send backups to destination %q", siteName, destinationName), nil)
+	site, storageConfig, err := a.incrementalSiteDestination(siteName, destinationName)
+	if err != nil {
+		return backup.RepairOutcome{}, err
 	}
 	return (&backup.Repairer{ServerID: a.configuration.BackupNamespace(), Engine: a.repairer}).RepairSite(ctx, destinationName, site, storageConfig)
 }
@@ -537,51 +485,47 @@ func (a *App) RepairIndex(ctx context.Context, siteName, destinationName string)
 // target directory. Validation mirrors ListSiteSnapshots; the confirm
 // callback is passed through to the engine unchanged.
 func (a *App) RestoreSnapshot(ctx context.Context, siteName, destinationName, snapshotRef, target string, confirm incremental.RestoreOverwrite) (backup.RestoreResult, error) {
+	site, storageConfig, err := a.incrementalSiteDestination(siteName, destinationName)
+	if err != nil {
+		return backup.RestoreResult{}, err
+	}
+	return (&backup.Restorer{ServerID: a.configuration.BackupNamespace(), Snapshots: a.snapshots, Engine: a.restorer}).RestoreSiteSnapshot(ctx, destinationName, snapshotRef, target, site, storageConfig, confirm)
+}
+
+func (a *App) incrementalSiteDestination(siteName, destinationName string) (config.Site, config.Storage, error) {
 	site, ok := a.configuration.Site(siteName)
 	if !ok {
-		return backup.RestoreResult{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q was not found", siteName), nil)
+		return config.Site{}, config.Storage{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q was not found", siteName), nil)
 	}
 	if !site.Enabled {
-		return backup.RestoreResult{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q is disabled", siteName), nil)
+		return config.Site{}, config.Storage{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q is disabled", siteName), nil)
 	}
 	if site.BackupMode != "incremental" {
-		return backup.RestoreResult{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf(
+		return config.Site{}, config.Storage{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf(
 			"site %q uses full backup mode; use 'bqckup history list --site %s --details' to inspect stored archives",
 			siteName, siteName), nil)
 	}
 	storageConfig, ok := a.configuration.Storages[destinationName]
 	if !ok {
-		return backup.RestoreResult{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("storage destination %q was not found", destinationName), nil)
+		return config.Site{}, config.Storage{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("storage destination %q was not found", destinationName), nil)
 	}
 	if !siteUsesDestination(site, destinationName) {
-		return backup.RestoreResult{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q does not send backups to destination %q", siteName, destinationName), nil)
+		return config.Site{}, config.Storage{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q does not send backups to destination %q", siteName, destinationName), nil)
 	}
-	return (&backup.Restorer{ServerID: a.configuration.BackupNamespace(), Snapshots: a.snapshots, Engine: a.restorer}).RestoreSiteSnapshot(ctx, destinationName, snapshotRef, target, site, storageConfig, confirm)
+	return site, storageConfig, nil
 }
 
 // parseSiteFromKey extracts the site name from a download-link key. Current
 // keys are namespaced as bqckup/<backup_prefix>/<server_id>/<site>/... . The
 // legacy bqckup/<site>/... form remains valid when neither value is configured.
-func parseSiteFromKey(key, serverID string) (string, error) {
-	parts := strings.Split(key, "/")
-	if len(parts) == 0 || parts[0] != "bqckup" {
-		return "", fmt.Errorf("key %q must start with bqckup/", key)
+func parseSiteFromKey(key, namespace string) (string, error) {
+	prefix := path.Join("bqckup", namespace) + "/"
+	remainder, ok := strings.CutPrefix(key, prefix)
+	site, suffix, cut := strings.Cut(remainder, "/")
+	if !ok || !cut || site == "" || suffix == "" {
+		return "", fmt.Errorf("key %q must start with %s<site>/", key, prefix)
 	}
-	if serverID != "" {
-		namespace := path.Join("bqckup", serverID) + "/"
-		if !strings.HasPrefix(key, namespace) {
-			return "", fmt.Errorf("key %q must start with bqckup/%s/<site>/", key, serverID)
-		}
-		parts = strings.Split(strings.TrimPrefix(key, namespace), "/")
-		if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
-			return "", fmt.Errorf("key %q must start with bqckup/%s/<site>/", key, serverID)
-		}
-		return parts[0], nil
-	}
-	if len(parts) < 3 || parts[1] == "" || parts[2] == "" {
-		return "", fmt.Errorf("key %q must start with bqckup/<site>/", key)
-	}
-	return parts[1], nil
+	return site, nil
 }
 
 // Link creates a temporary download link for one package of a remote

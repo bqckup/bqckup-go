@@ -28,7 +28,7 @@ func TestCreateExcludesConfiguredSubtree(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(source, "cache", "b.txt"), []byte("drop"), 0o600))
 	out := filepath.Join(t.TempDir(), "files.tar.gz")
 
-	pkg, err := New().Create(context.Background(), backup.FileSource{
+	pkg, err := new(Archiver).Create(context.Background(), backup.FileSource{
 		Include: []string{source},
 		Exclude: []string{filepath.Join(source, "cache")},
 	}, out)
@@ -51,7 +51,7 @@ func TestCreateSupportsRelativeExcludePatterns(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(source, "cache", "deep", "secret"), []byte("secret"), 0o600))
 
 	destination := filepath.Join(t.TempDir(), "archive.tar.gz")
-	_, err := New().Create(ctx, backup.FileSource{
+	_, err := new(Archiver).Create(ctx, backup.FileSource{
 		Include: []string{source},
 		Exclude: []string{"*.tmp", "cache/**"},
 	}, destination)
@@ -71,7 +71,7 @@ func TestCreateSkipsMissingChildSourceAsPartialArchive(t *testing.T) {
 	require.NoError(t, os.Symlink("missing-target.txt", filepath.Join(source, "volatile-link")))
 	out := filepath.Join(t.TempDir(), "files.tar.gz")
 
-	pkg, err := New().Create(context.Background(), backup.FileSource{
+	pkg, err := new(Archiver).Create(context.Background(), backup.FileSource{
 		Include:        []string{source},
 		FollowSymlinks: true,
 	}, out)
@@ -106,7 +106,7 @@ func TestCreateDisambiguatesDuplicateSourceBasenames(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(second, "second.txt"), []byte("second"), 0o600))
 	out := filepath.Join(t.TempDir(), "files.tar.gz")
 
-	_, err := New().Create(context.Background(), backup.FileSource{
+	_, err := new(Archiver).Create(context.Background(), backup.FileSource{
 		Include: []string{first, second},
 	}, out)
 	require.NoError(t, err)
@@ -124,7 +124,7 @@ func TestCreateStoresSymlinkWithoutFollowingByDefault(t *testing.T) {
 	require.NoError(t, os.Symlink("target.txt", filepath.Join(source, "link.txt")))
 	out := filepath.Join(t.TempDir(), "files.tar.gz")
 
-	_, err := New().Create(context.Background(), backup.FileSource{Include: []string{source}}, out)
+	_, err := new(Archiver).Create(context.Background(), backup.FileSource{Include: []string{source}}, out)
 	require.NoError(t, err)
 
 	entries := archiveEntries(t, out)
@@ -135,7 +135,7 @@ func TestCreateRemovesPartialOutputOnCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	out := filepath.Join(t.TempDir(), "files.tar.gz")
-	_, err := New().Create(ctx, backup.FileSource{Include: []string{t.TempDir()}}, out)
+	_, err := new(Archiver).Create(ctx, backup.FileSource{Include: []string{t.TempDir()}}, out)
 	require.ErrorIs(t, err, context.Canceled)
 	_, statErr := os.Stat(out)
 	assert.ErrorIs(t, statErr, os.ErrNotExist)

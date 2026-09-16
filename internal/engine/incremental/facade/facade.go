@@ -26,8 +26,6 @@ import (
 // needs no restic binary.
 type Engine struct{}
 
-func NewEngine() *Engine { return &Engine{} }
-
 // EnsureRepository initializes a repository (idempotent), local or
 // S3-compatible depending on the URL.
 func (e *Engine) EnsureRepository(ctx context.Context, repo backupincremental.RepoConfig) error {

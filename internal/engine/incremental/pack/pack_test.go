@@ -35,7 +35,7 @@ func addBlob(t *testing.T, b *Builder, master *crypto.MasterKey, blobType increm
 
 func TestBuildParseRoundTrip(t *testing.T) {
 	master := testMaster(t)
-	b := NewBuilder()
+	b := new(Builder)
 	plaintexts := [][]byte{
 		[]byte("first data blob"),
 		bytes.Repeat([]byte{0x42}, 1024),
@@ -87,7 +87,7 @@ func TestBuildParseRoundTrip(t *testing.T) {
 
 func TestHeaderTrailerValidated(t *testing.T) {
 	master := testMaster(t)
-	b := NewBuilder()
+	b := new(Builder)
 	addBlob(t, b, master, incremental.DataBlob, []byte("payload"))
 	packData, err := b.Finalize(master)
 	if err != nil {
@@ -102,7 +102,7 @@ func TestHeaderTrailerValidated(t *testing.T) {
 
 func TestCorruptedHeaderRejected(t *testing.T) {
 	master := testMaster(t)
-	b := NewBuilder()
+	b := new(Builder)
 	addBlob(t, b, master, incremental.DataBlob, bytes.Repeat([]byte{7}, 4096))
 	packData, err := b.Finalize(master)
 	if err != nil {
@@ -118,7 +118,7 @@ func TestCorruptedHeaderRejected(t *testing.T) {
 
 func TestEmptyPackRejected(t *testing.T) {
 	master := testMaster(t)
-	b := NewBuilder()
+	b := new(Builder)
 	if _, err := b.Finalize(master); err == nil {
 		t.Fatal("want error finalizing an empty pack")
 	}
@@ -136,7 +136,7 @@ func TestEmptyPackRejected(t *testing.T) {
 
 func TestTruncatedPackRejected(t *testing.T) {
 	master := testMaster(t)
-	b := NewBuilder()
+	b := new(Builder)
 	addBlob(t, b, master, incremental.DataBlob, []byte("payload"))
 	packData, err := b.Finalize(master)
 	if err != nil {
@@ -151,7 +151,7 @@ func TestTruncatedPackRejected(t *testing.T) {
 
 func TestLargeBlobRoundTrip(t *testing.T) {
 	master := testMaster(t)
-	b := NewBuilder()
+	b := new(Builder)
 	big := make([]byte, 8*1024*1024) // one max-size chunk
 	if _, err := rand.Read(big); err != nil {
 		t.Fatal(err)

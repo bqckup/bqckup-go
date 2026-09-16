@@ -25,9 +25,6 @@ func (c Config) BackupNamespace() string {
 	if c.BackupPrefix == "" {
 		return c.ServerID
 	}
-	if c.ServerID == "" {
-		return c.BackupPrefix
-	}
 	return path.Join(c.BackupPrefix, c.ServerID)
 }
 
@@ -77,21 +74,12 @@ type Route struct {
 // Reports is the optional top-level reports section. Absent in YAML it stays
 // the zero value and scheduled reports are off.
 type Reports struct {
-	Daily   DailyReport   `mapstructure:"daily" yaml:"daily"`
-	Monthly MonthlyReport `mapstructure:"monthly" yaml:"monthly"`
+	Daily   ReportConfig `mapstructure:"daily" yaml:"daily"`
+	Monthly ReportConfig `mapstructure:"monthly" yaml:"monthly"`
 }
 
-// DailyReport configures the daily backup summary report.
-type DailyReport struct {
-	Enabled           bool           `mapstructure:"enabled" yaml:"enabled"`
-	Timezone          string         `mapstructure:"timezone" yaml:"timezone"`
-	Schedule          ReportSchedule `mapstructure:"schedule" yaml:"schedule"`
-	NotificationRoute string         `mapstructure:"notification_route" yaml:"notification_route"`
-	IncludeEmptyDays  bool           `mapstructure:"include_empty_days" yaml:"include_empty_days"`
-}
-
-// MonthlyReport configures the monthly consolidated backup report.
-type MonthlyReport struct {
+// ReportConfig configures a scheduled backup summary report.
+type ReportConfig struct {
 	Enabled           bool           `mapstructure:"enabled" yaml:"enabled"`
 	Timezone          string         `mapstructure:"timezone" yaml:"timezone"`
 	Schedule          ReportSchedule `mapstructure:"schedule" yaml:"schedule"`

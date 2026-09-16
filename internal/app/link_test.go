@@ -26,40 +26,28 @@ func (a *appLinkStore) PresignLink(_ context.Context, key string, expires time.D
 	return a.link, a.err
 }
 
-func TestLinkResolvesSiteFromKeyAndReturnsTheLink(t *testing.T) {
-	store := &appLinkStore{link: storage.DownloadLink{URL: "https://example.test/signed"}}
-	application := listingApp(t, remoteSite(), map[string]config.Storage{"s3-primary": {Type: "s3"}}, map[string]storage.Store{"s3-primary": store})
+func TestLinkResolvesSiteFromSupportedKeyLayouts(t *testing.T) {
+	tests := []struct {
+		name, serverID, backupPrefix, key string
+	}{
+		{name: "legacy", key: "bqckup/site-a/2026-08-05T00-00-00Z/files.tar.gz"},
+		{name: "server", serverID: "127.0.0.1", key: "bqckup/127.0.0.1/site-a/30-August-2026/04-42-59/files.tar.gz"},
+		{name: "prefixed server", serverID: "194.233.87.182", backupPrefix: "hosting_client", key: "bqckup/hosting_client/194.233.87.182/site-a/30-August-2026/04-42-59/files.tar.gz"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			store := &appLinkStore{link: storage.DownloadLink{URL: "https://example.test/signed"}}
+			application := listingApp(t, remoteSite(), map[string]config.Storage{"s3-primary": {Type: "s3"}}, map[string]storage.Store{"s3-primary": store})
+			application.configuration.ServerID = test.serverID
+			application.configuration.BackupPrefix = test.backupPrefix
 
-	link, err := application.Link(context.Background(), "s3-primary", "bqckup/site-a/2026-08-05T00-00-00Z/files.tar.gz", time.Hour)
-	require.NoError(t, err)
-	assert.Equal(t, "https://example.test/signed", link.URL)
-	assert.Equal(t, "bqckup/site-a/2026-08-05T00-00-00Z/files.tar.gz", store.gotKey)
-	assert.Equal(t, time.Hour, store.gotExp)
-}
-
-func TestLinkResolvesNamespacedSiteFromKey(t *testing.T) {
-	store := &appLinkStore{link: storage.DownloadLink{URL: "https://example.test/signed"}}
-	application := listingApp(t, remoteSite(), map[string]config.Storage{"s3-primary": {Type: "s3"}}, map[string]storage.Store{"s3-primary": store})
-	application.configuration.ServerID = "127.0.0.1"
-
-	key := "bqckup/127.0.0.1/site-a/30-August-2026/04-42-59/files.tar.gz"
-	link, err := application.Link(context.Background(), "s3-primary", key, time.Hour)
-	require.NoError(t, err)
-	assert.Equal(t, "https://example.test/signed", link.URL)
-	assert.Equal(t, key, store.gotKey)
-}
-
-func TestLinkResolvesPrefixedNamespacedSiteFromKey(t *testing.T) {
-	store := &appLinkStore{link: storage.DownloadLink{URL: "https://example.test/signed"}}
-	application := listingApp(t, remoteSite(), map[string]config.Storage{"s3-primary": {Type: "s3"}}, map[string]storage.Store{"s3-primary": store})
-	application.configuration.ServerID = "194.233.87.182"
-	application.configuration.BackupPrefix = "hosting_client"
-
-	key := "bqckup/hosting_client/194.233.87.182/site-a/30-August-2026/04-42-59/files.tar.gz"
-	link, err := application.Link(context.Background(), "s3-primary", key, time.Hour)
-	require.NoError(t, err)
-	assert.Equal(t, "https://example.test/signed", link.URL)
-	assert.Equal(t, key, store.gotKey)
+			link, err := application.Link(context.Background(), "s3-primary", test.key, time.Hour)
+			require.NoError(t, err)
+			assert.Equal(t, "https://example.test/signed", link.URL)
+			assert.Equal(t, test.key, store.gotKey)
+			assert.Equal(t, time.Hour, store.gotExp)
+		})
+	}
 }
 
 func TestLinkRejectsMalformedKeys(t *testing.T) {
