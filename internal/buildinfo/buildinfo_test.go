@@ -4,8 +4,8 @@ import "testing"
 
 func TestCurrentUsesDevelopmentDefaults(t *testing.T) {
 	info := Current()
-	if info.Version != "v1.0.10" {
-		t.Fatalf("version = %q, want v1.0.10", info.Version)
+	if info.Version != "v1.0.11" {
+		t.Fatalf("version = %q, want v1.0.11", info.Version)
 	}
 	if info.Commit != "" {
 		t.Fatalf("commit = %q, want empty", info.Commit)

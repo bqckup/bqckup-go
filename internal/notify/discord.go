@@ -77,18 +77,10 @@ func (d *Discord) Send(ctx context.Context, payload Payload) error {
 	}
 
 	if payload.Status == string(backup.StatusFailed) || payload.Status == string(backup.StatusPartial) || payload.Status == string(backup.StatusNoChange) {
-		label, message := failureBlock(payload)
-		fields = append(fields,
-			discordField{Name: "Consecutive Failures", Value: fmt.Sprintf("%d", payload.FailureStreak), Inline: true},
-			discordField{Name: "Problem faced", Value: label, Inline: true},
-			discordField{Name: "\u200b", Value: "\u200b", Inline: true},
-		)
-		if message != "" {
-			fields = append(fields, discordField{Name: "What went wrong", Value: message})
+		fields = append(fields, discordField{Name: "Consecutive Failures", Value: fmt.Sprintf("%d", payload.FailureStreak), Inline: true})
+		if message := failureMessage(payload); message != "" {
+			fields = append(fields, discordField{Name: "Failure", Value: message})
 		}
-		fields = append(fields,
-			discordField{Name: "Try this", Value: tryThis(payload)},
-		)
 	}
 
 	body := discordPayload{

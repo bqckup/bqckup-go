@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/bqckup/bqckup-go/internal/apperror"
@@ -359,11 +358,7 @@ func description(payload Payload) string {
 		case string(apperror.CategoryPreflight):
 			base = "The backup did not start. A check before the backup failed."
 		case string(apperror.CategoryExecution):
-			startedStr := payload.StartedAt
-			if t, err := time.Parse(time.RFC3339, payload.StartedAt); err == nil {
-				startedStr = t.Local().Format("02 Jan 15:04")
-			}
-			base = "Started " + startedStr + " but never finished. It likely timed out or the process crashed."
+			base = "The backup ended with an execution error."
 		case string(apperror.CategoryStorage):
 			base = "The backup ran but could not be saved to its destination."
 		case string(apperror.CategoryPersistence):
@@ -386,96 +381,15 @@ func description(payload Payload) string {
 	return base
 }
 
-// formatDestinationTargets formats the list of storage targets (bucket for s3/r2, path for local, or name).
-func formatDestinationTargets(destinations []DestinationInfo) string {
-	if len(destinations) == 0 {
-		return ""
-	}
-	parts := make([]string, len(destinations))
-	for i, d := range destinations {
-		if d.Bucket != "" {
-			parts[i] = d.Bucket
-		} else if d.Path != "" {
-			parts[i] = d.Path
-		} else {
-			parts[i] = d.Name
-		}
-	}
-	return strings.Join(parts, ", ")
-}
-
-// tryThis returns the actionable numbered fix suggestions for a run.
-func tryThis(payload Payload) string {
-	bucket := formatDestinationTargets(payload.Destinations)
-	site := payload.Site
-
-	var template string
-	switch {
-	case payload.Status == string(backup.StatusPartial):
-		template = "1. Check the source data and local logs for unreadable entries.\n2. Run `bqckup backup run {site} --force` to complete the snapshot."
-	case payload.Status == string(backup.StatusNoChange) || payload.ErrorCategory == "no_change":
-		if payload.HasDatabaseSources {
-			template = "1. Check the storage bucket {bucket}. If the database size is less than 1 KB or looks unusual, the backup likely did not finish correctly.\n2. Run `bqckup backup run {site} --force` to make sure the backup process works."
-		} else {
-			template = "1. Check the storage bucket {bucket}. If the backup size looks unusual, the backup likely did not finish correctly.\n2. Run `bqckup backup run {site} --force` to make sure the backup process works."
-		}
-	case payload.ErrorCategory == string(apperror.CategoryConfig):
-		template = "1. Check the site's settings in bqckup.yaml. If the configuration was rejected, the backup did not run.\n2. Run `bqckup config validate` to see the problem."
-	case payload.ErrorCategory == string(apperror.CategoryPreflight):
-		template = "1. Check the database host and credentials. If a check before the backup failed, the backup did not start.\n2. Run `bqckup backup run {site} --force` to try again."
-	case payload.ErrorCategory == string(apperror.CategoryExecution):
-		template = "1. Check the site's data and logs. If the backup started but never finished, confirm that no backup process for the site is still running.\n2. Once no backup is active, run `bqckup backup run {site} --force` and watch the output."
-	case payload.ErrorCategory == string(apperror.CategoryStorage):
-		template = "1. Check the storage credentials and endpoint. If the backup ran but could not be saved, the storage is the likely cause.\n2. Run `bqckup doctor` to check the storage."
-	case payload.ErrorCategory == string(apperror.CategoryPersistence):
-		template = "1. Check disk space and permissions for the state database.\n2. Run `bqckup backup run {site} --force` and watch for the same error."
-	case payload.ErrorCategory == string(apperror.CategoryInternal):
-		template = "1. Note the error message above.\n2. Report the problem at github.com/bqckup/bqckup-go/issues."
-	default:
-		template = "1. Note the error message above.\n2. Report the problem at github.com/bqckup/bqckup-go/issues."
-	}
-
-	result := strings.ReplaceAll(template, "{site}", site)
-	result = strings.ReplaceAll(result, "{bucket}", bucket)
-	return result
-}
-
 // monitoringFooter renders the standard footer text for human channels.
 func monitoringFooter(now time.Time) string {
 	return "Bqckup Backup Monitoring · " + now.Local().Format("15:04 MST · 02 Jan 2006")
 }
 
-// categoryPhrase softens an error category into a phrase a non-IT reader
-// can act on. Unknown or empty categories fall back to a non-empty phrase.
-func categoryPhrase(category string) string {
-	switch category {
-	case "source":
-		return "Some source data was not backed up"
-	case "no_change":
-		return "No changes detected"
-	case string(apperror.CategoryConfig):
-		return "A setting needs attention"
-	case string(apperror.CategoryPreflight):
-		return "The backup did not start"
-	case string(apperror.CategoryExecution):
-		return "Something went wrong"
-	case string(apperror.CategoryStorage):
-		return "The backup could not be saved"
-	case string(apperror.CategoryPersistence):
-		return "The backup history could not be saved"
-	case string(apperror.CategoryInternal):
-		return "Unexpected problem"
-	default:
-		return "Something went wrong"
-	}
-}
-
-// failureBlock returns the warning or failure block's label and text: the
-// category phrase as label and the sanitized message as body. Success and
-// cancelled runs get "" for both.
-func failureBlock(payload Payload) (label, message string) {
+// failureMessage returns the sanitized terminal error recorded for the run.
+func failureMessage(payload Payload) string {
 	if payload.Status != string(backup.StatusFailed) && payload.Status != string(backup.StatusPartial) && payload.Status != string(backup.StatusNoChange) {
-		return "", ""
+		return ""
 	}
-	return categoryPhrase(payload.ErrorCategory), payload.ErrorMessage
+	return payload.ErrorMessage
 }

@@ -53,7 +53,7 @@ func TestDiscordEmbedFailed(t *testing.T) {
 	require.NotNil(t, embed.Footer)
 	assert.True(t, strings.HasPrefix(embed.Footer.Text, "Bqckup Backup Monitoring · "))
 
-	require.Len(t, embed.Fields, 8)
+	require.Len(t, embed.Fields, 5)
 
 	// Row 1 (grid inline)
 	assert.Equal(t, "Server", embed.Fields[0].Name)
@@ -68,27 +68,14 @@ func TestDiscordEmbedFailed(t *testing.T) {
 	assert.Equal(t, "1 min", embed.Fields[2].Value)
 	assert.True(t, embed.Fields[2].Inline)
 
-	// Row 2 (grid inline: 2 + filler)
+	// Terminal run facts followed by the recorded error.
 	assert.Equal(t, "Consecutive Failures", embed.Fields[3].Name)
 	assert.Equal(t, "3", embed.Fields[3].Value)
 	assert.True(t, embed.Fields[3].Inline)
 
-	assert.Equal(t, "Problem faced", embed.Fields[4].Name)
-	assert.Equal(t, "Something went wrong", embed.Fields[4].Value)
-	assert.True(t, embed.Fields[4].Inline)
-
-	assert.Equal(t, "\u200b", embed.Fields[5].Name)
-	assert.Equal(t, "\u200b", embed.Fields[5].Value)
-	assert.True(t, embed.Fields[5].Inline)
-
-	// Full-width fields
-	assert.Equal(t, "What went wrong", embed.Fields[6].Name)
-	assert.Equal(t, "could not create the file archive", embed.Fields[6].Value)
-	assert.False(t, embed.Fields[6].Inline)
-
-	assert.Equal(t, "Try this", embed.Fields[7].Name)
-	assert.Equal(t, "1. Check the site's data and logs. If the backup started but never finished, confirm that no backup process for the site is still running.\n2. Once no backup is active, run `bqckup backup run example.org --force` and watch the output.", embed.Fields[7].Value)
-	assert.False(t, embed.Fields[7].Inline)
+	assert.Equal(t, "Failure", embed.Fields[4].Name)
+	assert.Equal(t, "could not create the file archive", embed.Fields[4].Value)
+	assert.False(t, embed.Fields[4].Inline)
 }
 
 func TestDiscordNoChangeEmbed(t *testing.T) {
@@ -129,13 +116,9 @@ func TestDiscordNoChangeEmbed(t *testing.T) {
 	assert.Contains(t, embed.Description, "The new backup is identical to the last one")
 	assert.Contains(t, embed.Description, "Likely an idle app")
 
-	require.Len(t, embed.Fields, 8)
-	assert.Equal(t, "Problem faced", embed.Fields[4].Name)
-	assert.Equal(t, "No changes detected", embed.Fields[4].Value)
-	assert.Equal(t, "What went wrong", embed.Fields[6].Name)
-	assert.Equal(t, "2 items are unchanged from the previous run.", embed.Fields[6].Value)
-	assert.Equal(t, "Try this", embed.Fields[7].Name)
-	assert.Contains(t, embed.Fields[7].Value, "1. Check the storage bucket my-backups.")
+	require.Len(t, embed.Fields, 5)
+	assert.Equal(t, "Failure", embed.Fields[4].Name)
+	assert.Equal(t, "2 items are unchanged from the previous run.", embed.Fields[4].Value)
 }
 
 func TestDiscordEmbedFailedWithoutErrorMessage(t *testing.T) {
@@ -169,15 +152,11 @@ func TestDiscordEmbedFailedWithoutErrorMessage(t *testing.T) {
 	assert.Equal(t, "Last Successful Backup", embed.Fields[1].Name)
 	assert.Equal(t, "No successful backup yet", embed.Fields[1].Value)
 
-	// Problem faced still shows phrase
-	assert.Equal(t, "Problem faced", embed.Fields[4].Name)
-	assert.Equal(t, "The backup could not be saved", embed.Fields[4].Value)
-
-	// What went wrong must be omitted
+	// A missing terminal error is not replaced with a generic guess.
 	for _, field := range embed.Fields {
-		assert.NotEqual(t, "What went wrong", field.Name)
+		assert.NotEqual(t, "Failure", field.Name)
 	}
-	require.Len(t, embed.Fields, 7)
+	require.Len(t, embed.Fields, 4)
 }
 
 func TestDiscordCancelledEmbedHasNoFailureBlock(t *testing.T) {

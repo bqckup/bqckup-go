@@ -2,6 +2,11 @@
 
 All notable changes to Bqckup are documented in this file.
 
+## v1.0.11
+
+- Make failed-backup notifications report only terminal facts: remove generic
+  crash/timeout claims, category filler, and unconditional rerun advice.
+
 ## v1.0.10
 
 - Fix storage listing and retention for backups with a multi-segment

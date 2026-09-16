@@ -261,9 +261,7 @@ func TestSMTPDeliversPlainMessageWithoutAuth(t *testing.T) {
 	assert.Contains(t, message, ">Duration</td>")
 	assert.Contains(t, message, ">Consecutive Failures</td>")
 	assert.Contains(t, message, ">2</td>")
-	assert.Contains(t, message, ">Problem faced</td>")
-	assert.Contains(t, message, ">Something went wrong</td>")
-	assert.Contains(t, message, ">What went wrong</td>")
+	assert.Contains(t, message, ">Failure</td>")
 	assert.Contains(t, message, ">could not export database</td>")
 	assert.NotContains(t, message, ">Try this</td>")
 	assert.Contains(t, message, "Bqckup Backup Monitoring · ")
@@ -300,9 +298,7 @@ func TestSMTPRendersNoChange(t *testing.T) {
 	assert.Contains(t, message, "background:#F1C40F;")
 	assert.Contains(t, message, "The new backup is identical to the last one")
 	assert.Contains(t, message, "Likely an idle app")
-	assert.Contains(t, message, ">Problem faced</td>")
-	assert.Contains(t, message, ">No changes detected</td>")
-	assert.Contains(t, message, ">What went wrong</td>")
+	assert.Contains(t, message, ">Failure</td>")
 	assert.Contains(t, message, ">1 item is unchanged from the previous run.</td>")
 	assert.NotContains(t, message, ">Try this</td>")
 }
@@ -402,9 +398,9 @@ func TestSMTPRendersCancelledSubset(t *testing.T) {
 	assert.Contains(t, message, ">Last Successful Backup</td>")
 	assert.Contains(t, message, ">Duration</td>")
 	assert.NotContains(t, message, ">Consecutive Failures</td>")
-	assert.NotContains(t, message, ">Problem faced</td>")
+	assert.NotContains(t, message, ">Failure</td>")
 	assert.NotContains(t, message, ">Error Category</td>")
-	assert.NotContains(t, message, ">What went wrong</td>")
+	assert.NotContains(t, message, ">Failure</td>")
 	assert.NotContains(t, message, ">Try this</td>")
 	assert.Contains(t, message, "Bqckup Backup Monitoring · ")
 }
@@ -428,9 +424,7 @@ func TestSMTPOmitsWhatWentWrongWhenEmpty(t *testing.T) {
 
 	_, message, _ := server.snapshot()
 	assert.Contains(t, message, "Subject: Backup failed for example.org")
-	assert.Contains(t, message, ">Problem faced</td>")
-	assert.Contains(t, message, ">A setting needs attention</td>")
-	assert.NotContains(t, message, ">What went wrong</td>")
+	assert.NotContains(t, message, ">Failure</td>")
 	assert.NotContains(t, message, ">Try this</td>")
 }
 

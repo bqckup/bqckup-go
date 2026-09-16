@@ -249,8 +249,7 @@ func TestDescription(t *testing.T) {
 			PackageCount:  3,
 			SizeBytes:     2254857830,
 		}
-		expectedStarted := started.Local().Format("02 Jan 15:04")
-		assert.Equal(t, "Started "+expectedStarted+" but never finished. It likely timed out or the process crashed. 3 items (2.1 GiB) were prepared.", description(p))
+		assert.Equal(t, "The backup ended with an execution error. 3 items (2.1 GiB) were prepared.", description(p))
 	})
 
 	t.Run("failed execution unparseable startedAt falls back to raw", func(t *testing.T) {
@@ -259,7 +258,7 @@ func TestDescription(t *testing.T) {
 			ErrorCategory: "execution",
 			StartedAt:     "invalid-timestamp",
 		}
-		assert.Equal(t, "Started invalid-timestamp but never finished. It likely timed out or the process crashed.", description(p))
+		assert.Equal(t, "The backup ended with an execution error.", description(p))
 	})
 
 	t.Run("failed storage", func(t *testing.T) {
@@ -318,101 +317,15 @@ func TestDescription(t *testing.T) {
 	})
 }
 
-func TestTryThis(t *testing.T) {
-	site := "example.org"
-	s3Dest := []DestinationInfo{{Name: "s3-primary", Bucket: "my-backups"}}
-	localDest := []DestinationInfo{{Name: "local-primary", Path: "/var/backups"}}
-	mixedDest := []DestinationInfo{
-		{Name: "s3-primary", Bucket: "my-backups"},
-		{Name: "local-primary", Path: "/var/backups"},
-	}
-
-	t.Run("no_change with databases", func(t *testing.T) {
-		p := Payload{Status: "no_change", Site: site, HasDatabaseSources: true, Destinations: s3Dest}
-		assert.Equal(t, "1. Check the storage bucket my-backups. If the database size is less than 1 KB or looks unusual, the backup likely did not finish correctly.\n2. Run `bqckup backup run example.org --force` to make sure the backup process works.", tryThis(p))
-	})
-
-	t.Run("no_change without databases", func(t *testing.T) {
-		p := Payload{Status: "no_change", Site: site, HasDatabaseSources: false, Destinations: localDest}
-		assert.Equal(t, "1. Check the storage bucket /var/backups. If the backup size looks unusual, the backup likely did not finish correctly.\n2. Run `bqckup backup run example.org --force` to make sure the backup process works.", tryThis(p))
-	})
-
-	t.Run("no_change mixed destinations", func(t *testing.T) {
-		p := Payload{Status: "no_change", Site: site, HasDatabaseSources: false, Destinations: mixedDest}
-		assert.Equal(t, "1. Check the storage bucket my-backups, /var/backups. If the backup size looks unusual, the backup likely did not finish correctly.\n2. Run `bqckup backup run example.org --force` to make sure the backup process works.", tryThis(p))
-	})
-
-	t.Run("config", func(t *testing.T) {
-		p := Payload{Status: "failed", ErrorCategory: "config", Site: site}
-		assert.Equal(t, "1. Check the site's settings in bqckup.yaml. If the configuration was rejected, the backup did not run.\n2. Run `bqckup config validate` to see the problem.", tryThis(p))
-	})
-
-	t.Run("preflight", func(t *testing.T) {
-		p := Payload{Status: "failed", ErrorCategory: "preflight", Site: site}
-		assert.Equal(t, "1. Check the database host and credentials. If a check before the backup failed, the backup did not start.\n2. Run `bqckup backup run example.org --force` to try again.", tryThis(p))
-	})
-
-	t.Run("execution", func(t *testing.T) {
-		p := Payload{Status: "failed", ErrorCategory: "execution", Site: site}
-		assert.Equal(t, "1. Check the site's data and logs. If the backup started but never finished, confirm that no backup process for the site is still running.\n2. Once no backup is active, run `bqckup backup run example.org --force` and watch the output.", tryThis(p))
-	})
-
-	t.Run("storage", func(t *testing.T) {
-		p := Payload{Status: "failed", ErrorCategory: "storage", Site: site}
-		assert.Equal(t, "1. Check the storage credentials and endpoint. If the backup ran but could not be saved, the storage is the likely cause.\n2. Run `bqckup doctor` to check the storage.", tryThis(p))
-	})
-
-	t.Run("persistence", func(t *testing.T) {
-		p := Payload{Status: "failed", ErrorCategory: "persistence", Site: site}
-		assert.Equal(t, "1. Check disk space and permissions for the state database.\n2. Run `bqckup backup run example.org --force` and watch for the same error.", tryThis(p))
-	})
-
-	t.Run("internal", func(t *testing.T) {
-		p := Payload{Status: "failed", ErrorCategory: "internal", Site: site}
-		assert.Equal(t, "1. Note the error message above.\n2. Report the problem at github.com/bqckup/bqckup-go/issues.", tryThis(p))
-	})
-
-	t.Run("default fallback", func(t *testing.T) {
-		p := Payload{Status: "failed", ErrorCategory: "unknown", Site: site}
-		assert.Equal(t, "1. Note the error message above.\n2. Report the problem at github.com/bqckup/bqckup-go/issues.", tryThis(p))
-	})
-}
-
 func TestMonitoringFooter(t *testing.T) {
 	now := time.Date(2026, 8, 26, 14, 5, 0, 0, time.UTC)
 	expected := "Bqckup Backup Monitoring · " + now.Local().Format("15:04 MST · 02 Jan 2006")
 	assert.Equal(t, expected, monitoringFooter(now))
 }
 
-func TestCategoryPhrase(t *testing.T) {
-	assert.Equal(t, "No changes detected", categoryPhrase("no_change"))
-	assert.Equal(t, "A setting needs attention", categoryPhrase("config"))
-	assert.Equal(t, "The backup did not start", categoryPhrase("preflight"))
-	assert.Equal(t, "Something went wrong", categoryPhrase("execution"))
-	assert.Equal(t, "The backup could not be saved", categoryPhrase("storage"))
-	assert.Equal(t, "The backup history could not be saved", categoryPhrase("persistence"))
-	assert.Equal(t, "Unexpected problem", categoryPhrase("internal"))
-	assert.Equal(t, "Something went wrong", categoryPhrase(""))
-	assert.Equal(t, "Something went wrong", categoryPhrase("mystery"))
-}
-
-func TestFailureBlock(t *testing.T) {
-	label, message := failureBlock(Payload{Status: "failed", ErrorCategory: "execution", ErrorMessage: "could not export database"})
-	assert.Equal(t, "Something went wrong", label)
-	assert.Equal(t, "could not export database", message)
-	label, message = failureBlock(Payload{Status: "failed", ErrorCategory: "storage", ErrorMessage: "no space left"})
-	assert.Equal(t, "The backup could not be saved", label)
-	assert.Equal(t, "no space left", message)
-	label, message = failureBlock(Payload{Status: "no_change", ErrorCategory: "no_change", ErrorMessage: "1 item is unchanged from the previous run."})
-	assert.Equal(t, "No changes detected", label)
-	assert.Equal(t, "1 item is unchanged from the previous run.", message)
-	label, message = failureBlock(Payload{Status: "success"})
-	assert.Empty(t, label)
-	assert.Empty(t, message)
-	label, message = failureBlock(Payload{Status: "cancelled", ErrorCategory: "cancellation", ErrorMessage: "backup was cancelled"})
-	assert.Empty(t, label)
-	assert.Empty(t, message)
-	label, message = failureBlock(Payload{Status: "failed", ErrorCategory: "config"})
-	assert.Equal(t, "A setting needs attention", label)
-	assert.Empty(t, message)
+func TestFailureMessage(t *testing.T) {
+	assert.Equal(t, "could not export database", failureMessage(Payload{Status: "failed", ErrorMessage: "could not export database"}))
+	assert.Equal(t, "1 item is unchanged from the previous run.", failureMessage(Payload{Status: "no_change", ErrorMessage: "1 item is unchanged from the previous run."}))
+	assert.Empty(t, failureMessage(Payload{Status: "success", ErrorMessage: "unused"}))
+	assert.Empty(t, failureMessage(Payload{Status: "cancelled", ErrorMessage: "backup was cancelled"}))
 }

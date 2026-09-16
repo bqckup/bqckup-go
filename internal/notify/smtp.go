@@ -194,7 +194,7 @@ func (s *SMTP) renderMessage(subject string, payload Payload) string {
 // renderHTML builds the branded email body: a dark navy header bar with the
 // Bqckup logo, a status color accent line, the headline title, description
 // paragraph, vertical table rows with row dividers, and on failure a What went
-// wrong row, Try this suggestion, and closing monitoring footer. No remote
+// failure row and closing monitoring footer. No remote
 // assets and no endpoints.
 func (s *SMTP) renderHTML(subject string, payload Payload, logoSrc ...string) string {
 	if payload.ReportData != nil {
@@ -221,15 +221,10 @@ func (s *SMTP) renderHTML(subject string, payload Payload, logoSrc ...string) st
 		{"Duration", durationHuman(payload.DurationSeconds)},
 	}
 
-	var label, message string
 	if payload.Status == string(backup.StatusFailed) || payload.Status == string(backup.StatusPartial) || payload.Status == string(backup.StatusNoChange) {
-		label, message = failureBlock(payload)
-		rows = append(rows,
-			struct{ name, value string }{"Consecutive Failures", fmt.Sprintf("%d", payload.FailureStreak)},
-			struct{ name, value string }{"Problem faced", label},
-		)
-		if message != "" {
-			rows = append(rows, struct{ name, value string }{"What went wrong", message})
+		rows = append(rows, struct{ name, value string }{"Consecutive Failures", fmt.Sprintf("%d", payload.FailureStreak)})
+		if message := failureMessage(payload); message != "" {
+			rows = append(rows, struct{ name, value string }{"Failure", message})
 		}
 	}
 
