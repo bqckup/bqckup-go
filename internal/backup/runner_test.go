@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -31,9 +32,26 @@ func TestRunnerCompletesBackupLifecycle(t *testing.T) {
 	require.Len(t, deps.repository.packages, 1)
 	assert.Equal(t, "bqckup/example/2026-07-23/03-45-00-run1-files.tar.gz", deps.repository.packages[0].ObjectKey)
 	assert.Equal(t, 1, deps.retainer.calls)
+	store := deps.stores["local-primary"].(*fakeStore)
+	require.Len(t, store.keys, 2)
+	assert.Equal(t, "bqckup/example/2026-07-23/03-45-00-run1-.bqckup-complete", store.keys[1])
 	assert.Equal(t, 1, deps.lock.unlockCalls)
 	_, statErr := os.Stat(deps.archiver.workspace)
 	assert.ErrorIs(t, statErr, os.ErrNotExist)
+}
+
+func TestRunnerDoesNotApplyRetentionWhenCompletionMarkerFails(t *testing.T) {
+	deps := successfulDependencies(t)
+	store := deps.stores["local-primary"].(*fakeStore)
+	store.putErr = errors.New("marker upload failed")
+	store.failKeySuffix = "-.bqckup-complete"
+
+	result, err := NewRunner(deps.dependencies()).Run(context.Background(), validSite(), false)
+	require.Error(t, err)
+	assert.Equal(t, StatusFailed, result.Status)
+	assert.Equal(t, history.StatusFailed, deps.repository.finishedStatus)
+	assert.Equal(t, 0, deps.retainer.calls)
+	assert.Equal(t, 2, store.putCalls)
 }
 
 func TestRunnerMarksFullArchiveWithSkippedFilesPartial(t *testing.T) {
@@ -142,8 +160,8 @@ func TestRunnerRequiresEveryDestination(t *testing.T) {
 	result, err := NewRunner(deps.dependencies()).Run(context.Background(), site, false)
 	require.NoError(t, err)
 	assert.Equal(t, StatusSuccess, result.Status)
-	assert.Equal(t, 1, deps.stores["local-primary"].(*fakeStore).putCalls)
-	assert.Equal(t, 1, deps.stores["secondary"].(*fakeStore).putCalls)
+	assert.Equal(t, 2, deps.stores["local-primary"].(*fakeStore).putCalls)
+	assert.Equal(t, 2, deps.stores["secondary"].(*fakeStore).putCalls)
 	assert.Len(t, deps.repository.packages, 2)
 	assert.Equal(t, 2, deps.retainer.calls)
 }
@@ -186,9 +204,10 @@ func TestRunnerExportsEnabledDatabasesToEveryDestination(t *testing.T) {
 	result, err := NewRunner(deps.dependencies()).Run(context.Background(), site, false)
 	require.NoError(t, err)
 	assert.Equal(t, StatusSuccess, result.Status)
-	assert.Len(t, store.keys, 3)
+	assert.Len(t, store.keys, 4)
 	assert.Contains(t, store.keys, "bqckup/example/2026-07-23/03-45-00-run1-application-mysql.sql.gz")
 	assert.Contains(t, store.keys, "bqckup/example/2026-07-23/03-45-00-run1-application-postgres.sql.gz")
+	assert.Contains(t, store.keys, "bqckup/example/2026-07-23/03-45-00-run1-.bqckup-complete")
 	assert.Len(t, deps.repository.packages, 3)
 }
 
@@ -458,15 +477,16 @@ func (f *fakeArchiver) Create(_ context.Context, _ FileSource, destination strin
 }
 
 type fakeStore struct {
-	putCalls int
-	putErr   error
-	keys     []string
+	putCalls      int
+	putErr        error
+	failKeySuffix string
+	keys          []string
 }
 
 func (f *fakeStore) Put(_ context.Context, pkg storage.Package, key string) (storage.StoredPackage, error) {
 	f.putCalls++
 	f.keys = append(f.keys, key)
-	if f.putErr != nil {
+	if f.putErr != nil && (f.failKeySuffix == "" || strings.HasSuffix(key, f.failKeySuffix)) {
 		return storage.StoredPackage{}, f.putErr
 	}
 	return storage.StoredPackage{Key: key, Size: pkg.Size, SHA256: pkg.SHA256}, nil
@@ -765,7 +785,8 @@ func TestRunnerIncrementalSourceErrorsProducePartialResult(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, Status("partial"), result.Status)
 	assert.Equal(t, history.RunStatus("partial"), deps.repository.finishedStatus)
-	assert.Equal(t, 1, deps.incremental.retentionCalls, "a usable partial snapshot still receives normal retention")
+	assert.Equal(t, 0, deps.incremental.retentionCalls, "partial snapshots must not evict complete restore points")
+	assert.Equal(t, 0, deps.retainer.calls, "partial package sets must not evict complete restore points")
 	require.Len(t, deps.notifier.calls, 1)
 	assert.Equal(t, "backup_partial", deps.notifier.calls[0].Event)
 }

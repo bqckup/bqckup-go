@@ -206,6 +206,45 @@ func (s *Store) LocalPath(key string) (string, error) {
 	return s.resolve(key)
 }
 
+// VerifyPackage checks that one recorded package still exists at its expected
+// size. With readData it also reads every byte and verifies the recorded hash.
+func (s *Store) VerifyPackage(ctx context.Context, key string, expectedSize int64, expectedSHA256 string, readData bool) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	resolved, err := s.resolve(key)
+	if err != nil {
+		return err
+	}
+	info, err := os.Stat(resolved)
+	if err != nil {
+		return fmt.Errorf("inspect package: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return errors.New("package is not a regular file")
+	}
+	if info.Size() != expectedSize {
+		return fmt.Errorf("stored size does not match: expected %d, got %d", expectedSize, info.Size())
+	}
+	if !readData {
+		return nil
+	}
+	file, err := os.Open(resolved)
+	if err != nil {
+		return fmt.Errorf("open package: %w", err)
+	}
+	defer file.Close()
+	hash := sha256.New()
+	if _, err := ctxcopy.Copy(ctx, hash, file); err != nil {
+		return fmt.Errorf("read package: %w", err)
+	}
+	actual := hex.EncodeToString(hash.Sum(nil))
+	if !strings.EqualFold(actual, expectedSHA256) {
+		return errors.New("stored checksum does not match")
+	}
+	return nil
+}
+
 func (s *Store) ListBackupSets(ctx context.Context, sitePrefix string) ([]storage.BackupSet, error) {
 	directory, err := s.resolve(sitePrefix)
 	if err != nil {
@@ -260,7 +299,11 @@ func (s *Store) ListBackupSets(ctx context.Context, sitePrefix string) ([]storag
 				continue
 			}
 			setKey := path.Join(sitePrefix, setName)
-			setsByKey[setKey] = storage.BackupSet{Key: setKey, CreatedAt: createdAt}
+			set := setsByKey[setKey]
+			set.Key = setKey
+			set.CreatedAt = createdAt
+			set.Complete = set.Complete || storage.IsCompletionMarker(run.Name())
+			setsByKey[setKey] = set
 		}
 	}
 	sets := make([]storage.BackupSet, 0, len(setsByKey))

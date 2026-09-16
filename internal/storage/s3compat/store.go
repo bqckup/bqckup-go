@@ -47,6 +47,10 @@ type objectAPI interface {
 	DeleteObjects(context.Context, *s3.DeleteObjectsInput, ...func(*s3.Options)) (*s3.DeleteObjectsOutput, error)
 }
 
+type objectReaderAPI interface {
+	GetObject(context.Context, *s3.GetObjectInput, ...func(*s3.Options)) (*s3.GetObjectOutput, error)
+}
+
 type presignerAPI interface {
 	PresignGetObject(context.Context, *s3.GetObjectInput, ...func(*s3.PresignOptions)) (*signerv4.PresignedHTTPRequest, error)
 }
@@ -72,6 +76,49 @@ func (s *Store) Put(ctx context.Context, pkg storage.Package, key string) (stora
 // object key or metadata; the local verification read pass is not counted.
 func (s *Store) PutWithProgress(ctx context.Context, pkg storage.Package, key string, progress func(int64)) (storage.StoredPackage, error) {
 	return s.put(ctx, pkg, key, progress)
+}
+
+// VerifyPackage checks remote size and upload metadata, then optionally reads
+// and hashes the entire object.
+func (s *Store) VerifyPackage(ctx context.Context, key string, expectedSize int64, expectedSHA256 string, readData bool) error {
+	finalKey, err := storage.JoinPrefix(s.prefix, key)
+	if err != nil {
+		return err
+	}
+	head, err := s.client.HeadObject(ctx, &s3.HeadObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(finalKey)})
+	if err != nil {
+		return remoteOperationError("could not inspect remote backup package", err)
+	}
+	if err := verifyRemote(head, expectedSize, expectedSHA256); err != nil {
+		return err
+	}
+	if !readData {
+		return nil
+	}
+	reader, ok := s.client.(objectReaderAPI)
+	if !ok {
+		return errors.New("remote storage does not support reading package data")
+	}
+	object, err := reader.GetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(finalKey)})
+	if err != nil {
+		return remoteOperationError("could not read remote backup package", err)
+	}
+	if object == nil || object.Body == nil {
+		return errors.New("remote package returned no data")
+	}
+	defer object.Body.Close()
+	hash := sha256.New()
+	size, err := ctxcopy.Copy(ctx, hash, object.Body)
+	if err != nil {
+		return err
+	}
+	if size != expectedSize {
+		return errors.New("stored size does not match after reading data")
+	}
+	if !strings.EqualFold(hex.EncodeToString(hash.Sum(nil)), expectedSHA256) {
+		return errors.New("stored checksum does not match after reading data")
+	}
+	return nil
 }
 
 func (s *Store) put(ctx context.Context, pkg storage.Package, key string, progress func(int64)) (storage.StoredPackage, error) {
@@ -412,7 +459,11 @@ func (s *Store) ListBackupSets(ctx context.Context, sitePrefix string) ([]storag
 				continue
 			}
 			setKey := path.Join(sitePrefix, setName)
-			setsByKey[setKey] = storage.BackupSet{Key: setKey, CreatedAt: createdAt}
+			set := setsByKey[setKey]
+			set.Key = setKey
+			set.CreatedAt = createdAt
+			set.Complete = set.Complete || storage.IsCompletionMarker(key)
+			setsByKey[setKey] = set
 		}
 		if !aws.ToBool(output.IsTruncated) {
 			break
@@ -472,6 +523,9 @@ func (s *Store) ListPackages(ctx context.Context, setPrefix string) ([]storage.R
 			}
 			remainder := strings.TrimPrefix(key, requestPrefix)
 			if flatRun != "" && !strings.HasPrefix(remainder, flatRun) {
+				continue
+			}
+			if storage.IsCompletionMarker(remainder) {
 				continue
 			}
 			packages = append(packages, storage.RemotePackage{

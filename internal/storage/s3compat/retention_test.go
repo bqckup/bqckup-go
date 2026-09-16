@@ -37,6 +37,23 @@ func TestListBackupSetsPaginatesAndFilters(t *testing.T) {
 	assert.Equal(t, "next", aws.ToString(client.listInputs[1].ContinuationToken))
 }
 
+func TestListBackupSetsMarksOnlyCompletedFlatRuns(t *testing.T) {
+	client := &fakeClient{listOutputs: []*s3.ListObjectsV2Output{
+		{Contents: []types.Object{
+			{Key: aws.String("company/bqckup/site/2026-09-16/01-00-00-aaaaaaaa-files.tar.gz")},
+			{Key: aws.String("company/bqckup/site/2026-09-16/01-00-00-aaaaaaaa-.bqckup-complete")},
+			{Key: aws.String("company/bqckup/site/2026-09-16/02-00-00-bbbbbbbb-files.tar.gz")},
+		}},
+	}}
+	store := newWithClients(Options{Bucket: "backups", Prefix: "company"}, &fakeUploader{}, client, nil)
+
+	sets, err := store.ListBackupSets(context.Background(), "bqckup/site")
+	require.NoError(t, err)
+	require.Len(t, sets, 2)
+	assert.True(t, sets[0].Complete)
+	assert.False(t, sets[1].Complete)
+}
+
 func TestDeletePaginatesAndBatchesAtOneThousand(t *testing.T) {
 	objects := make([]types.Object, 1001)
 	for index := range objects {

@@ -175,15 +175,13 @@ func TestBackupCheckRequiresSite(t *testing.T) {
 	assert.Equal(t, 2, ExitCode(err))
 }
 
-func TestBackupCheckFullModeSiteFails(t *testing.T) {
+func TestBackupCheckFullModeReportsMissingBackup(t *testing.T) {
 	configDir, _ := writeCLIConfig(t)
-	root, _, _ := commandForTest(t, "--config-dir", configDir, "backup", "check", "example", "--destination", "local-primary")
+	root, stdout, _ := commandForTest(t, "--config-dir", configDir, "backup", "check", "example", "--destination", "local-primary")
 	err := root.Execute()
-	require.Error(t, err)
-	assert.Equal(t, 2, ExitCode(err))
-	message := apperror.UserMessage(err)
-	assert.Contains(t, message, "history list")
-	assert.Contains(t, message, "--details")
+	require.ErrorIs(t, err, errCheckProblems)
+	assert.Equal(t, 1, ExitCode(err))
+	assert.Contains(t, stdout.String(), "1 missing_backup")
 }
 
 func TestBackupCheckMissingPasswordFails(t *testing.T) {

@@ -158,6 +158,7 @@ bqckup doctor [--site <name>]
 bqckup backup list
 bqckup backup summary [--site <name>]
 bqckup backup run <site> [--force]
+bqckup backup check <site> --destination <name> [--read-data]
 bqckup backup unlock <site>
 bqckup backup snapshots <site> --destination <name>
 bqckup backup restore <site> --destination <name> --target <directory>
@@ -185,6 +186,11 @@ exports.
 
 `backup run --force` ignores only the configured minimum backup interval. It
 does not bypass the per-site lock while another backup of that site is active.
+
+`backup check` supports both modes. For full backups it verifies every package
+from the latest successful run at the selected destination; `--read-data`
+streams each package and verifies its SHA-256. For incremental backups it
+checks repository metadata and optionally authenticates all stored data.
 
 ## Notifications
 
@@ -220,7 +226,12 @@ for one site could look like this:
 
 ```cron
 0 2 * * * root /usr/bin/bqckup backup run example
+0 5 * * 0 root /usr/bin/bqckup backup check example --destination local-primary --read-data
 ```
+
+Run the integrity check after the backup window, not concurrently with the
+same site's backup. A check complements—but does not replace—a regular restore
+drill into an isolated directory and test database.
 
 ## Help and contributing
 

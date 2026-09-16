@@ -63,13 +63,12 @@ func TestCheckRepositoryDisabledSiteFailsAsConfigError(t *testing.T) {
 	assert.Equal(t, apperror.CategoryConfig, apperror.CategoryOf(err))
 }
 
-func TestCheckRepositoryFullModeSiteFailsAsConfigErrorPointingAtHistory(t *testing.T) {
+func TestCheckRepositoryFullModeRequiresConfiguredStore(t *testing.T) {
 	application := checkApp(t, remoteSite(), &appRepositoryChecker{})
 	_, err := application.CheckRepository(context.Background(), "site-a", "s3-primary", false)
 	require.Error(t, err)
-	assert.Equal(t, apperror.CategoryConfig, apperror.CategoryOf(err))
-	assert.Contains(t, err.Error(), "full backup mode")
-	assert.Contains(t, err.Error(), "history list")
+	assert.Equal(t, apperror.CategoryInternal, apperror.CategoryOf(err))
+	assert.Contains(t, err.Error(), "storage destination is unavailable")
 }
 
 func TestCheckRepositoryUnknownDestinationFailsAsConfigError(t *testing.T) {

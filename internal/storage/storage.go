@@ -15,13 +15,14 @@ const (
 	BackupRunLayout = "15-04-05"
 	// TimestampLayout is the logical run prefix used by retention.
 	TimestampLayout = BackupDateLayout + "/" + BackupRunLayout
-
-	ReadableSecondsLayout = BackupDateLayout + "/" + BackupRunLayout
+	// CompletionMarkerName is stored last for a flat backup set. Retention only
+	// counts sets carrying this marker, so failed or partial runs cannot evict a
+	// known-good backup.
+	CompletionMarkerName = ".bqckup-complete"
 )
 
-// FormatBackupSet returns the canonical directory path for a new archive set.
-func FormatBackupSet(createdAt time.Time) string {
-	return createdAt.UTC().Format(TimestampLayout)
+func IsCompletionMarker(key string) bool {
+	return strings.HasSuffix(key, "-"+CompletionMarkerName)
 }
 
 // FormatPackageKey returns the date-relative object name for a full backup
@@ -69,10 +70,7 @@ func IsFlatBackupSet(value string) bool {
 // names remain configurable.
 func ParseBackupPackage(value string) (time.Time, error) {
 	// The time prefix is exactly HH-mm-ss, followed by a separating dash.
-	if len(value) < len("00-00-00-") || value[8] != '-' {
-		return time.Time{}, errors.New("invalid backup package name")
-	}
-	if value[8] != '-' || len(value) <= 9 {
+	if len(value) <= len("00-00-00-") || value[8] != '-' {
 		return time.Time{}, errors.New("invalid backup package name")
 	}
 	return time.Parse(BackupRunLayout, value[:8])
@@ -112,6 +110,7 @@ type Package struct {
 type BackupSet struct {
 	Key       string
 	CreatedAt time.Time
+	Complete  bool
 }
 
 // DownloadLink is a temporary signed URL for one stored object. Key is

@@ -22,11 +22,17 @@ func Apply(ctx context.Context, store Store, sitePrefix string, keepLast int) er
 	if err != nil {
 		return fmt.Errorf("list backup sets for retention: %w", err)
 	}
-	sort.Slice(sets, func(i, j int) bool { return sets[i].CreatedAt.Before(sets[j].CreatedAt) })
-	excess := len(sets) - keepLast
+	complete := sets[:0]
+	for _, set := range sets {
+		if set.Complete {
+			complete = append(complete, set)
+		}
+	}
+	sort.Slice(complete, func(i, j int) bool { return complete[i].CreatedAt.Before(complete[j].CreatedAt) })
+	excess := len(complete) - keepLast
 	for i := 0; i < excess; i++ {
-		if err := store.Delete(ctx, sets[i].Key); err != nil {
-			return fmt.Errorf("delete expired backup set %q: %w", sets[i].Key, err)
+		if err := store.Delete(ctx, complete[i].Key); err != nil {
+			return fmt.Errorf("delete expired backup set %q: %w", complete[i].Key, err)
 		}
 	}
 	return nil

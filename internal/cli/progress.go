@@ -7,22 +7,21 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/schollz/progressbar/v3"
 )
 
-// CLIProgress implements backup.Progress using github.com/schollz/progressbar/v3.
-// It renders to the specified writer (usually stderr in text mode).
+// CLIProgress renders backup.Progress to the specified writer (usually stderr
+// in text mode).
 type CLIProgress struct {
 	out         io.Writer
 	terminal    bool
 	mu          sync.Mutex
-	bar         *progressbar.ProgressBar
 	spinnerStop chan struct{}
 	spinnerDone chan struct{}
 	labelWidth  int
 	activeLabel string
 	activeTotal int64
+	activeCount int64
+	activeStart time.Time
 }
 
 // NewCLIProgress constructs a new CLIProgress renderer.
@@ -79,6 +78,8 @@ func (p *CLIProgress) StartStage(label string, total int64) {
 	displayLabel := formatStageTitle(label)
 	p.activeLabel = displayLabel
 	p.activeTotal = total
+	p.activeCount = 0
+	p.activeStart = time.Now()
 
 	if !p.terminal {
 		if total > 0 {
@@ -90,23 +91,6 @@ func (p *CLIProgress) StartStage(label string, total int64) {
 	}
 
 	if total > 0 {
-		p.bar = progressbar.NewOptions64(
-			total,
-			progressbar.OptionSetWriter(io.Discard),
-			progressbar.OptionEnableColorCodes(false),
-			progressbar.OptionSetWidth(24),
-			progressbar.OptionSetDescription(fmt.Sprintf("%-*s", p.labelWidth, displayLabel)),
-			progressbar.OptionSetTheme(progressbar.Theme{
-				Saucer:        "█",
-				SaucerHead:    "█",
-				SaucerPadding: "░",
-				BarStart:      "[",
-				BarEnd:        "]",
-			}),
-			progressbar.OptionShowCount(),
-			progressbar.OptionSetRenderBlankState(true),
-			progressbar.OptionSetPredictTime(true),
-		)
 		p.renderTerminalLocked()
 		return
 	}
@@ -142,8 +126,8 @@ func (p *CLIProgress) Add(units int64) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if p.bar != nil && units > 0 {
-		_ = p.bar.Add64(units)
+	if p.activeTotal > 0 && units > 0 {
+		p.activeCount = min(p.activeCount+units, p.activeTotal)
 		p.renderTerminalLocked()
 	}
 }
@@ -173,15 +157,18 @@ func (p *CLIProgress) Done() {
 }
 
 func (p *CLIProgress) renderTerminalLocked() {
-	if p.bar == nil || !p.terminal || p.activeLabel == "" {
+	if !p.terminal || p.activeLabel == "" || p.activeTotal <= 0 {
 		return
 	}
-	state := p.bar.State()
-	if state.Max <= 0 {
-		return
+	elapsed := time.Since(p.activeStart).Seconds()
+	rate := float64(0)
+	eta := float64(0)
+	if elapsed > 0 && p.activeCount > 0 {
+		rate = float64(p.activeCount) / elapsed
+		eta = float64(p.activeTotal-p.activeCount) / rate
 	}
-	percentFloat := math.Min(1.0, math.Max(0, state.CurrentPercent)) * 100
-	_, _ = fmt.Fprint(p.out, formatProgressLine(p.labelWidth, p.activeLabel, percentFloat, int64(state.CurrentNum), int64(state.Max), state.KBsPerSecond*1024, state.SecondsLeft))
+	percent := math.Min(100, math.Max(0, float64(p.activeCount)/float64(p.activeTotal)*100))
+	_, _ = fmt.Fprint(p.out, formatProgressLine(p.labelWidth, p.activeLabel, percent, p.activeCount, p.activeTotal, rate, eta))
 }
 
 func formatProgressLine(labelWidth int, label string, percent float64, current, total int64, rate float64, eta float64) string {
@@ -263,24 +250,22 @@ func (p *CLIProgress) finishActiveStageLocked(completed bool) {
 		}
 	}
 
-	if p.bar != nil {
+	if p.activeTotal > 0 {
 		if completed {
-			_ = p.bar.Finish()
+			p.activeCount = p.activeTotal
 			p.renderTerminalLocked()
 			_, _ = fmt.Fprintln(p.out)
-		} else {
-			_ = p.bar.Clear()
-			if p.terminal {
-				_, _ = fmt.Fprint(p.out, "\r\033[2K")
-			}
+		} else if p.terminal {
+			_, _ = fmt.Fprint(p.out, "\r\033[2K")
 		}
-		p.bar = nil
 	}
 
 	// Clear stale label bookkeeping even when a bar was already removed by the
 	// caller or when a previous stage was interrupted in the middle of upload.
 	p.activeLabel = ""
 	p.activeTotal = 0
+	p.activeCount = 0
+	p.activeStart = time.Time{}
 }
 
 type progressHeartbeat struct {
