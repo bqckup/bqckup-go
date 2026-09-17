@@ -97,6 +97,49 @@ func TestRestoreRoundTrip(t *testing.T) {
 	assert.True(t, emptyInfo.IsDir())
 }
 
+func TestRestoreSingleFileSource(t *testing.T) {
+	repo := newTestRepository(t)
+	source := filepath.Join(t.TempDir(), "single.txt")
+	require.NoError(t, os.WriteFile(source, []byte("single file"), 0o640))
+	snap := backupTree(t, repo, source)
+
+	target := filepath.Join(t.TempDir(), "restore")
+	summary, err := New(repo).Restore(context.Background(), snap, []string{source}, target, proceed)
+	require.NoError(t, err)
+	assert.Equal(t, 1, summary.FilesRestored)
+	assert.Empty(t, summary.SkippedPaths)
+	data, err := os.ReadFile(restoredPath(target, source, ""))
+	require.NoError(t, err)
+	assert.Equal(t, "single file", string(data))
+}
+
+func TestRestoreMultipleRootsWithSameBasename(t *testing.T) {
+	repo := newTestRepository(t)
+	root := t.TempDir()
+	one := filepath.Join(root, "left", "shared")
+	two := filepath.Join(root, "right", "shared")
+	require.NoError(t, os.MkdirAll(one, 0o755))
+	require.NoError(t, os.MkdirAll(two, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(one, "one.txt"), []byte("one"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(two, "two.txt"), []byte("two"), 0o644))
+	snapID, _, err := archiver.New(repo).Backup(context.Background(), archiver.BackupSpec{Paths: []string{one, two}})
+	require.NoError(t, err)
+	entry, err := repo.LoadSnapshot(context.Background(), snapID)
+	require.NoError(t, err)
+
+	target := filepath.Join(t.TempDir(), "restore")
+	summary, err := New(repo).Restore(context.Background(), entry.Snapshot, []string{one, two}, target, proceed)
+	require.NoError(t, err)
+	assert.Equal(t, 2, summary.FilesRestored)
+	assert.Empty(t, summary.SkippedPaths)
+	data, err := os.ReadFile(restoredPath(target, one, "one.txt"))
+	require.NoError(t, err)
+	assert.Equal(t, "one", string(data))
+	data, err = os.ReadFile(restoredPath(target, two, "two.txt"))
+	require.NoError(t, err)
+	assert.Equal(t, "two", string(data))
+}
+
 func TestRestoreFiltersToConfiguredPaths(t *testing.T) {
 	repo := newTestRepository(t)
 	one := t.TempDir()

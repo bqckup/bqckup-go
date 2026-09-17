@@ -86,21 +86,15 @@ func (r *Restorer) Restore(ctx context.Context, snap snapshot.Snapshot, paths []
 	for _, p := range cleaned {
 		state.matched[p] = false
 	}
+	rootPaths := snapshotRootPaths(snap.Paths)
 	for _, node := range rootTree.Nodes {
 		if err := ctx.Err(); err != nil {
 			return Summary{}, err
 		}
-		// Anchor each root node at the snapshot path with a matching
-		// basename (the archiver names root nodes after their path base;
-		// synthetic multi-root names like "data-1" match nothing and are
-		// skipped, like restic).
-		anchor := ""
-		for _, p := range snap.Paths {
-			if filepath.Base(p) == node.Name {
-				anchor = filepath.Clean(p)
-				break
-			}
-		}
+		// Anchor each root node at the snapshot path represented by its unique
+		// root name. Duplicate basenames use the same numeric suffixes written
+		// by the archiver (for example, data and data-1).
+		anchor := rootPaths[node.Name]
 		if anchor == "" {
 			continue
 		}
@@ -113,7 +107,7 @@ func (r *Restorer) Restore(ctx context.Context, snap snapshot.Snapshot, paths []
 			if err != nil {
 				return Summary{}, err
 			}
-			if len(subtree.Nodes) == 1 && subtree.Nodes[0].Name == node.Name {
+			if len(subtree.Nodes) == 1 && subtree.Nodes[0].Name == filepath.Base(anchor) {
 				effective = subtree.Nodes[0]
 			}
 		}
@@ -161,6 +155,23 @@ func (r *Restorer) Restore(ctx context.Context, snap snapshot.Snapshot, paths []
 	return Summary{FilesRestored: state.files, BytesRestored: state.bytes, SkippedPaths: skipped}, nil
 }
 
+func snapshotRootPaths(paths []string) map[string]string {
+	rootPaths := make(map[string]string, len(paths))
+	for _, sourcePath := range paths {
+		cleaned := filepath.Clean(sourcePath)
+		base := filepath.Base(cleaned)
+		name := base
+		for suffix := 1; ; suffix++ {
+			if _, exists := rootPaths[name]; !exists {
+				break
+			}
+			name = fmt.Sprintf("%s-%d", base, suffix)
+		}
+		rootPaths[name] = cleaned
+	}
+	return rootPaths
+}
+
 // restoreNode writes one node (when it belongs to a configured path) and
 // recurses into its subtree. The absolute snapshot path of the node is
 // passed down from the anchored root; the target layout mirrors it
@@ -183,6 +194,9 @@ func (r *Restorer) restoreNode(ctx context.Context, st *restoreState, staging, a
 		}
 	}
 	if included {
+		if err := os.MkdirAll(filepath.Dir(stagingPath), 0o755); err != nil {
+			return fmt.Errorf("restorer: create parent directory %s: %w", filepath.Dir(stagingPath), err)
+		}
 		switch node.Type {
 		case tree.TypeDir:
 			// The synthetic multi-root wrapper nodes the archiver writes

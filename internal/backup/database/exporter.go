@@ -186,6 +186,7 @@ func (e *ProcessExporter) arguments(source config.DatabaseSource) []string {
 			"--quick",
 			"--routines",
 			"--triggers",
+			"--events",
 			source.Database,
 		}
 	}

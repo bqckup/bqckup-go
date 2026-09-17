@@ -32,6 +32,7 @@ func TestMySQLExporterWritesCompressedVerifiedPackage(t *testing.T) {
 	assert.Contains(t, runner.spec.Args, "--quick")
 	assert.Contains(t, runner.spec.Args, "--routines")
 	assert.Contains(t, runner.spec.Args, "--triggers")
+	assert.Contains(t, runner.spec.Args, "--events")
 	assert.NotContains(t, strings.Join(runner.spec.Args, " "), source.Password)
 	assert.Equal(t, source.Password, environmentValue(runner.spec.Env, "MYSQL_PWD"))
 	assert.Equal(t, "database", pkg.SourceKind)

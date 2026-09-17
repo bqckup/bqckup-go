@@ -6,6 +6,9 @@ All notable changes to Bqckup are documented in this file.
 
 - Make failed-backup notifications report only terminal facts: remove generic
   crash/timeout claims, category filler, and unconditional rerun advice.
+- Restore incremental snapshots correctly when a configured source is a single
+  file or multiple source roots share the same basename.
+- Include MySQL/MariaDB Event Scheduler definitions in database dumps.
 
 ## v1.0.10
 
