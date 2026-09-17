@@ -158,3 +158,10 @@ type Store interface {
 	ListBackupSets(ctx context.Context, sitePrefix string) ([]BackupSet, error)
 	Probe(ctx context.Context) error
 }
+
+// Replacer atomically updates mutable metadata objects such as protected
+// configuration copies. Backup artifacts continue to use Store.Put and remain
+// write-once.
+type Replacer interface {
+	Replace(ctx context.Context, pkg Package, key string) (StoredPackage, error)
+}

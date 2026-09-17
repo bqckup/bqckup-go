@@ -513,6 +513,13 @@ Ignore `minimum_interval` for one run:
 bqckup backup run website --force
 ```
 
+Before running site jobs, the command synchronizes every file from `sites/`,
+including disabled sites, to
+`bqckup/<backup_prefix>/<server_id>/config/<filename>.yaml` in each storage
+referenced by a site. The fixed config objects are replaced atomically on later
+runs; normal backup artifacts remain write-once. A config-copy failure is
+reported after the data backups are still attempted.
+
 Text output immediately shows which site and backup mode are running, then
 prints each site's result when it finishes. A batch can finish out of
 configuration order because one full and one incremental site may run at the
@@ -741,4 +748,6 @@ Exit codes:
 - Use a dedicated operating-system user for scheduled backups.
 - Keep incremental repository passwords only in protected site YAML files.
 - Treat backup destinations and SQLite history as sensitive data.
+- Site YAML recovery copies are stored as plaintext; keep their buckets and
+  local destinations private and tightly access-controlled.
 - Test restore regularly using an isolated destination.

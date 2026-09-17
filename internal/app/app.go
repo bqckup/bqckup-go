@@ -239,7 +239,20 @@ func (a *App) SetBackupProgress(progress backup.Progress) {
 }
 
 func (a *App) RunBackup(ctx context.Context, siteName string, force bool) (backup.RunResult, error) {
-	return a.runBackup(ctx, siteName, force, nil)
+	configErr := a.backupSiteConfigs(ctx)
+	result, runErr := a.runBackup(ctx, siteName, force, nil)
+	return result, errors.Join(configErr, runErr)
+}
+
+func (a *App) backupSiteConfigs(ctx context.Context) error {
+	if err := syncSiteConfigs(ctx, a.configuration, a.stores); err != nil {
+		wrapped := apperror.Wrap(apperror.CategoryStorage, "could not back up site configurations", err)
+		if a.logger != nil {
+			a.logger.write(logError, "config_backup_failed", "category", apperror.CategoryOf(wrapped), "error", apperror.UserMessage(wrapped))
+		}
+		return wrapped
+	}
+	return nil
 }
 
 func (a *App) runBackup(ctx context.Context, siteName string, force bool, progress backup.Progress) (backup.RunResult, error) {
@@ -358,10 +371,12 @@ type BackupRunObserver func(BackupRunProgress)
 // is passed to active runs. The optional observer is called synchronously with
 // sanitized site progress.
 func (a *App) RunEnabledBackups(ctx context.Context, force bool, observer BackupRunObserver) ([]backup.RunResult, error) {
-	return runEnabledBackups(ctx, a.configuration.Sites, force, observer,
+	configErr := a.backupSiteConfigs(ctx)
+	results, runErr := runEnabledBackups(ctx, a.configuration.Sites, force, observer,
 		func(ctx context.Context, siteName string, force bool) (backup.RunResult, error) {
 			return a.runBackup(ctx, siteName, force, backup.NoopProgress{})
 		})
+	return results, errors.Join(configErr, runErr)
 }
 
 type batchRunFunc func(context.Context, string, bool) (backup.RunResult, error)

@@ -133,6 +133,9 @@ func formatErrorMessage(err error) string {
 			message += ": " + text
 			previous = text
 		}
+		if _, hidden := e.(*apperror.Hidden); hidden {
+			return
+		}
 		walk(errors.Unwrap(e))
 	}
 	if joined, ok := err.(interface{ Unwrap() []error }); ok {

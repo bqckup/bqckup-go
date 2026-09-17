@@ -75,3 +75,12 @@ func TestFormatErrorMessageAvoidsRepeatedWrappedPathErrors(t *testing.T) {
 	err := apperror.Wrap(apperror.CategoryExecution, "could not create the file archive", cause)
 	assert.Equal(t, "could not create the file archive: inspect archive source /missing: file does not exist", formatErrorMessage(err))
 }
+
+func TestFormatErrorMessageDoesNotExposeHiddenCause(t *testing.T) {
+	err := apperror.Wrap(apperror.CategoryStorage, "could not back up site configurations",
+		apperror.Hide("could not upload site configuration", errors.New("provider body password=supersecret")))
+
+	message := formatErrorMessage(err)
+	assert.Equal(t, "could not back up site configurations: could not upload site configuration", message)
+	assert.NotContains(t, message, "supersecret")
+}

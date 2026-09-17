@@ -87,6 +87,19 @@ func TestPutReturnsStableCollisionError(t *testing.T) {
 	assert.NotContains(t, err.Error(), "provider secret response")
 }
 
+func TestReplaceAllowsExistingConfigObject(t *testing.T) {
+	pkg := sourcePackage(t, []byte("site config"))
+	uploader := &fakeUploader{}
+	client := &fakeClient{headOutput: verifiedHead(pkg)}
+	store := newWithClients(Options{Bucket: "backups", Prefix: "company"}, uploader, client, nil)
+
+	stored, err := store.Replace(context.Background(), pkg, "bqckup/server/config/example.yaml")
+	require.NoError(t, err)
+	assert.Nil(t, uploader.input.IfNoneMatch)
+	assert.Equal(t, "company/bqckup/server/config/example.yaml", aws.ToString(uploader.input.Key))
+	assert.Equal(t, "company/bqckup/server/config/example.yaml", stored.Key)
+}
+
 func TestPutCleansUpExactObjectWhenRemoteVerificationFails(t *testing.T) {
 	pkg := sourcePackage(t, []byte("backup"))
 	client := &fakeClient{headOutput: &s3.HeadObjectOutput{

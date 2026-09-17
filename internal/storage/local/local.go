@@ -41,17 +41,21 @@ func New(root string) (*Store, error) {
 }
 
 func (s *Store) Put(ctx context.Context, pkg storage.Package, key string) (stored storage.StoredPackage, err error) {
-	return s.put(ctx, pkg, key, nil)
+	return s.put(ctx, pkg, key, nil, false)
+}
+
+func (s *Store) Replace(ctx context.Context, pkg storage.Package, key string) (stored storage.StoredPackage, err error) {
+	return s.put(ctx, pkg, key, nil, true)
 }
 
 // PutWithProgress is like Put but reports the number of bytes copied so far
 // through progress. It reports only bytes actually written to the staging
 // file (the archive/package payload), never the object key or SHA-256.
 func (s *Store) PutWithProgress(ctx context.Context, pkg storage.Package, key string, progress func(int64)) (stored storage.StoredPackage, err error) {
-	return s.put(ctx, pkg, key, progress)
+	return s.put(ctx, pkg, key, progress, false)
 }
 
-func (s *Store) put(ctx context.Context, pkg storage.Package, key string, progress func(int64)) (stored storage.StoredPackage, err error) {
+func (s *Store) put(ctx context.Context, pkg storage.Package, key string, progress func(int64), replace bool) (stored storage.StoredPackage, err error) {
 	if err := ctx.Err(); err != nil {
 		return stored, err
 	}
@@ -65,10 +69,12 @@ func (s *Store) put(ctx context.Context, pkg storage.Package, key string, progre
 	if _, err := hex.DecodeString(pkg.SHA256); err != nil {
 		return stored, fmt.Errorf("package SHA-256 is invalid: %w", err)
 	}
-	if _, err := os.Lstat(finalPath); err == nil {
-		return stored, fmt.Errorf("storage object %q already exists", key)
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return stored, fmt.Errorf("inspect storage object %q: %w", key, err)
+	if !replace {
+		if _, err := os.Lstat(finalPath); err == nil {
+			return stored, fmt.Errorf("storage object %q already exists", key)
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return stored, fmt.Errorf("inspect storage object %q: %w", key, err)
+		}
 	}
 
 	parent := filepath.Dir(finalPath)
@@ -118,11 +124,17 @@ func (s *Store) put(ctx context.Context, pkg storage.Package, key string, progre
 	if err := ctx.Err(); err != nil {
 		return stored, err
 	}
-	if err := unix.Renameat2(unix.AT_FDCWD, stagingPath, unix.AT_FDCWD, finalPath, unix.RENAME_NOREPLACE); err != nil {
-		if errors.Is(err, unix.EEXIST) {
-			return stored, fmt.Errorf("storage object %q already exists", key)
+	if replace {
+		if err := os.Rename(stagingPath, finalPath); err != nil {
+			return stored, fmt.Errorf("replace storage object %q: %w", key, err)
 		}
-		return stored, fmt.Errorf("finalize storage object %q: %w", key, err)
+	} else {
+		if err := unix.Renameat2(unix.AT_FDCWD, stagingPath, unix.AT_FDCWD, finalPath, unix.RENAME_NOREPLACE); err != nil {
+			if errors.Is(err, unix.EEXIST) {
+				return stored, fmt.Errorf("storage object %q already exists", key)
+			}
+			return stored, fmt.Errorf("finalize storage object %q: %w", key, err)
+		}
 	}
 	if err := syncDirectory(parent); err != nil {
 		return stored, err

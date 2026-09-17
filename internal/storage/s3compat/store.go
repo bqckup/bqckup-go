@@ -68,14 +68,18 @@ func newWithClients(options Options, uploader uploaderAPI, client objectAPI, pre
 }
 
 func (s *Store) Put(ctx context.Context, pkg storage.Package, key string) (storage.StoredPackage, error) {
-	return s.put(ctx, pkg, key, nil)
+	return s.put(ctx, pkg, key, nil, false)
+}
+
+func (s *Store) Replace(ctx context.Context, pkg storage.Package, key string) (storage.StoredPackage, error) {
+	return s.put(ctx, pkg, key, nil, true)
 }
 
 // PutWithProgress is like Put but reports how many bytes the uploader has
 // consumed so far through progress. Only body bytes are counted, never the
 // object key or metadata; the local verification read pass is not counted.
 func (s *Store) PutWithProgress(ctx context.Context, pkg storage.Package, key string, progress func(int64)) (storage.StoredPackage, error) {
-	return s.put(ctx, pkg, key, progress)
+	return s.put(ctx, pkg, key, progress, false)
 }
 
 // VerifyPackage checks remote size and upload metadata, then optionally reads
@@ -121,7 +125,7 @@ func (s *Store) VerifyPackage(ctx context.Context, key string, expectedSize int6
 	return nil
 }
 
-func (s *Store) put(ctx context.Context, pkg storage.Package, key string, progress func(int64)) (storage.StoredPackage, error) {
+func (s *Store) put(ctx context.Context, pkg storage.Package, key string, progress func(int64), replace bool) (storage.StoredPackage, error) {
 	if err := ctx.Err(); err != nil {
 		return storage.StoredPackage{}, err
 	}
@@ -147,18 +151,21 @@ func (s *Store) put(ctx context.Context, pkg storage.Package, key string, progre
 	if progress != nil {
 		body = countingReader{next: body, progress: progress}
 	}
-	_, err = s.uploader.UploadObject(ctx, &transfermanager.UploadObjectInput{
+	upload := &transfermanager.UploadObjectInput{
 		Bucket:        aws.String(s.bucket),
 		Key:           aws.String(finalKey),
 		Body:          body,
 		ContentLength: aws.Int64(size),
-		IfNoneMatch:   aws.String("*"),
 		MpuObjectSize: aws.Int64(size),
 		Metadata: map[string]string{
 			checksumMetadata: checksum,
 			sizeMetadata:     strconv.FormatInt(size, 10),
 		},
-	}, func(options *transfermanager.Options) {
+	}
+	if !replace {
+		upload.IfNoneMatch = aws.String("*")
+	}
+	_, err = s.uploader.UploadObject(ctx, upload, func(options *transfermanager.Options) {
 		options.PartSizeBytes = partSize
 	})
 	if err != nil {
@@ -182,9 +189,11 @@ func (s *Store) put(ctx context.Context, pkg storage.Package, key string, progre
 		} else {
 			verificationErr = apperror.Hide("remote package verification failed", err)
 		}
-		_, cleanupErr := s.client.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(finalKey)})
-		if cleanupErr != nil {
-			verificationErr = apperror.Hide(verificationErr.Error(), errors.Join(verificationErr, cleanupErr))
+		if !replace {
+			_, cleanupErr := s.client.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(finalKey)})
+			if cleanupErr != nil {
+				verificationErr = apperror.Hide(verificationErr.Error(), errors.Join(verificationErr, cleanupErr))
+			}
 		}
 		return storage.StoredPackage{}, verificationErr
 	}

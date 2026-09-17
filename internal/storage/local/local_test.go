@@ -88,6 +88,22 @@ func TestPutDoesNotOverwriteExistingObject(t *testing.T) {
 	assert.Equal(t, []byte("existing"), contents)
 }
 
+func TestReplaceAtomicallyUpdatesConfigObject(t *testing.T) {
+	root := t.TempDir()
+	store, err := New(root)
+	require.NoError(t, err)
+	key := "bqckup/hosting_client/server/config/example.yaml"
+
+	_, err = store.Replace(context.Background(), sourcePackage(t, []byte("old config")), key)
+	require.NoError(t, err)
+	_, err = store.Replace(context.Background(), sourcePackage(t, []byte("new config")), key)
+	require.NoError(t, err)
+
+	contents, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(key)))
+	require.NoError(t, err)
+	assert.Equal(t, []byte("new config"), contents)
+}
+
 func TestPutPersistsVerifiedPackageWithPrivatePermissions(t *testing.T) {
 	root := t.TempDir()
 	store, err := New(root)

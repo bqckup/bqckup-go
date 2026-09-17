@@ -108,6 +108,11 @@ The installer creates `/var/log/bqckup` and configures
 Credential-bearing YAML files must be regular files, not symbolic links, and
 must have mode `0600`. Never commit real passwords or storage keys.
 
+Each `backup run` also copies every site YAML, including disabled sites, to
+`bqckup/<backup_prefix>/<server_id>/config/<filename>.yaml` in every storage
+referenced by a site. These are plaintext recovery copies and are replaced
+atomically; keep every destination private.
+
 To convert a legacy configuration tree, install PyYAML and run:
 
 ```bash

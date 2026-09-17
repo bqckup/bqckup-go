@@ -20,6 +20,7 @@ import (
 	"github.com/bqckup/bqckup-go/internal/config"
 	"github.com/bqckup/bqckup-go/internal/notify"
 	"github.com/bqckup/bqckup-go/internal/process"
+	"github.com/bqckup/bqckup-go/internal/storage"
 	"github.com/bqckup/bqckup-go/internal/storage/s3compat"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -341,6 +342,9 @@ func TestOpenWiresAWorkingLocalBackupApplication(t *testing.T) {
 	matches, err := filepath.Glob(filepath.Join(backupRoot, "bqckup", "example", "*", "*-files.tar.gz"))
 	require.NoError(t, err)
 	assert.Len(t, matches, 1)
+	configCopy, err := os.ReadFile(filepath.Join(backupRoot, "bqckup", "config", "example.yaml"))
+	require.NoError(t, err)
+	assert.Contains(t, string(configCopy), "name: example")
 	runs, err := application.ListRuns(context.Background(), "example", 10)
 	require.NoError(t, err)
 	require.Len(t, runs, 1)
@@ -358,6 +362,31 @@ func TestOpenWiresAWorkingLocalBackupApplication(t *testing.T) {
 	assert.Contains(t, text, `"object_key":"bqckup/example/`)
 	assert.Contains(t, text, `"event":"backup_finished","site":"example"`)
 	assert.NotContains(t, text, filepath.Join(filepath.Dir(configDir), "source"))
+}
+
+type failingConfigReplacer struct {
+	storage.Store
+}
+
+func (failingConfigReplacer) Replace(context.Context, storage.Package, string) (storage.StoredPackage, error) {
+	return storage.StoredPackage{}, errors.New("provider rejected config")
+}
+
+func TestRunBackupContinuesWhenConfigSyncFails(t *testing.T) {
+	configDir, backupRoot := writeApplicationConfig(t)
+	application, err := Open(context.Background(), configDir)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, application.Close()) })
+	application.stores["local-primary"] = failingConfigReplacer{Store: application.stores["local-primary"]}
+
+	result, err := application.RunBackup(context.Background(), "example", true)
+	require.Error(t, err)
+	assert.Equal(t, backup.StatusSuccess, result.Status)
+	assert.Equal(t, "could not back up site configurations", err.Error())
+	assert.NotContains(t, err.Error(), "provider rejected config")
+	matches, globErr := filepath.Glob(filepath.Join(backupRoot, "bqckup", "example", "*", "*-files.tar.gz"))
+	require.NoError(t, globErr)
+	assert.Len(t, matches, 1)
 }
 
 func TestBuildNotifierConstructsChannelsFromConfiguration(t *testing.T) {

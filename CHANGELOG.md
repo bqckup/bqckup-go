@@ -14,6 +14,8 @@ All notable changes to Bqckup are documented in this file.
   the failure as a bounded code block for readability.
 - Sort incremental multi-root wrapper nodes so source paths do not fail backup
   when their configured order is not alphabetical.
+- Copy all site YAML files, including disabled sites, to the server-level
+  `config/` folder in each referenced destination on every backup run.
 
 ## v1.0.10
 
