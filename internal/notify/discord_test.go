@@ -36,7 +36,7 @@ func TestDiscordEmbedFailed(t *testing.T) {
 		LastSuccessfulAt: lastSuccess,
 		FailureStreak:    3,
 		ErrorCategory:    "execution",
-		ErrorMessage:     "could not create the file archive",
+		ErrorMessage:     `could not create incremental file backup: repository: could not create the incremental backup: archiver: combine roots: tree: nodes are not sorted by name: "eprints" after "mysql"`,
 	}
 	payload := NewPayload(input)
 	payload.Hostname = "web-01"
@@ -74,8 +74,15 @@ func TestDiscordEmbedFailed(t *testing.T) {
 	assert.True(t, embed.Fields[3].Inline)
 
 	assert.Equal(t, "Failure", embed.Fields[4].Name)
-	assert.Equal(t, "could not create the file archive", embed.Fields[4].Value)
+	assert.Equal(t, "```text\n"+`could not create incremental file backup: repository: could not create the incremental backup: archiver: combine roots: tree: nodes are not sorted by name: "eprints" after "mysql"`+"\n```", embed.Fields[4].Value)
 	assert.False(t, embed.Fields[4].Inline)
+}
+
+func TestDiscordFailureCodeBlockFitsFieldLimit(t *testing.T) {
+	value := discordFailureBlock(strings.Repeat("a", 2000))
+	assert.LessOrEqual(t, len([]rune(value)), 1024)
+	assert.True(t, strings.HasPrefix(value, "```text\n"))
+	assert.True(t, strings.HasSuffix(value, "…\n```"))
 }
 
 func TestDiscordNoChangeEmbed(t *testing.T) {

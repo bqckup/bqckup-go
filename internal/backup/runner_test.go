@@ -848,13 +848,10 @@ func TestRunnerIncrementalBackupFailureDoesNotRetain(t *testing.T) {
 	assert.Equal(t, []string{"backing up to local-primary"}, progress.failed)
 }
 
-// TestRunnerIncrementalFailureNotifiesCleanMessage: the top-level apperror
-// message stays hand-written; engine text and paths live only in the cause
-// chain, so the notification payload is clean by construction.
-func TestRunnerIncrementalFailureNotifiesCleanMessage(t *testing.T) {
+func TestRunnerIncrementalFailureNotifiesDetailedMessage(t *testing.T) {
 	deps := successfulDependencies(t)
 	deps.notifier = &fakeNotifier{}
-	deps.incremental.backupErr = errors.New("restic: snapshot failed: /srv/example/secret.txt")
+	deps.incremental.backupErr = errors.New(`repository: could not create the incremental backup: archiver: combine roots: tree: nodes are not sorted by name: "eprints" after "mysql"`)
 	runner := NewRunner(deps.dependencies())
 
 	site := validSite()
@@ -866,13 +863,32 @@ func TestRunnerIncrementalFailureNotifiesCleanMessage(t *testing.T) {
 	assert.Equal(t, StatusFailed, result.Status)
 	assert.Equal(t, "could not create incremental file backup", err.Error())
 	require.NotNil(t, errors.Unwrap(err), "engine error must stay the wrapped cause")
-	assert.Contains(t, errors.Unwrap(err).Error(), "restic")
+	assert.Contains(t, errors.Unwrap(err).Error(), "nodes are not sorted")
 
 	require.Len(t, deps.notifier.calls, 1)
 	call := deps.notifier.calls[0]
-	assert.Equal(t, "could not create incremental file backup", call.ErrorMessage)
-	assert.NotContains(t, call.ErrorMessage, "restic")
-	assert.NotContains(t, call.ErrorMessage, "secret.txt")
+	assert.Equal(t,
+		`could not create incremental file backup: repository: could not create the incremental backup: archiver: combine roots: tree: nodes are not sorted by name: "eprints" after "mysql"`,
+		call.ErrorMessage,
+	)
+}
+
+func TestRunnerIncrementalFailureNotificationHidesSecretCause(t *testing.T) {
+	deps := successfulDependencies(t)
+	deps.notifier = &fakeNotifier{}
+	deps.incremental.backupErr = apperror.Hide("repository operation failed", errors.New("password=supersecret"))
+	runner := NewRunner(deps.dependencies())
+
+	site := validSite()
+	site.BackupMode = "incremental"
+	site.Incremental = config.Incremental{Password: "test-secret-password"}
+
+	_, err := runner.Run(context.Background(), site, false)
+	require.Error(t, err)
+	require.Len(t, deps.notifier.calls, 1)
+	message := deps.notifier.calls[0].ErrorMessage
+	assert.Equal(t, "could not create incremental file backup: repository operation failed", message)
+	assert.NotContains(t, message, "supersecret")
 }
 
 // cancelAfterPutStore cancels the shared context right after a successful
@@ -958,7 +974,7 @@ func TestRunnerNotifiesFailureWhenRepositoryQueriesFail(t *testing.T) {
 	assert.True(t, call.LastSuccessfulAt.IsZero())
 }
 
-func TestRunnerNotifiesFailureWithCategoryAndRedactedMessage(t *testing.T) {
+func TestRunnerNotifiesFailureWithCategoryAndDetailedMessage(t *testing.T) {
 	deps := successfulDependencies(t)
 	deps.notifier = &fakeNotifier{}
 	deps.archiver.err = errors.New("source vanished")
@@ -971,8 +987,7 @@ func TestRunnerNotifiesFailureWithCategoryAndRedactedMessage(t *testing.T) {
 	call := deps.notifier.calls[0]
 	assert.Equal(t, config.EventBackupFailed, call.Event)
 	assert.Equal(t, "execution", call.ErrorCategory)
-	assert.Equal(t, "could not create the file archive", call.ErrorMessage)
-	assert.NotContains(t, call.ErrorMessage, "source vanished")
+	assert.Equal(t, "could not create the file archive: source vanished", call.ErrorMessage)
 }
 
 func TestRunnerNotifiesCancellation(t *testing.T) {
@@ -988,6 +1003,7 @@ func TestRunnerNotifiesCancellation(t *testing.T) {
 	call := deps.notifier.calls[0]
 	assert.Equal(t, config.EventBackupCancelled, call.Event)
 	assert.Equal(t, "cancellation", call.ErrorCategory)
+	assert.Equal(t, "backup was cancelled", call.ErrorMessage)
 }
 
 func TestRunnerNotifiesPersistenceWhenSuccessFinishRunFails(t *testing.T) {

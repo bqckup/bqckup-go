@@ -429,6 +429,33 @@ func TestBackupMultipleRootsWithSameBasename(t *testing.T) {
 	}
 }
 
+func TestBackupMultipleRootsSortsWrapperNodes(t *testing.T) {
+	ctx := context.Background()
+	arch, local, root := newArchiver(t, ctx)
+	mysql := filepath.Join(root, "mysql")
+	eprints := filepath.Join(root, "eprints")
+	writeFile(t, filepath.Join(mysql, "database.sql"), []byte("mysql"))
+	writeFile(t, filepath.Join(eprints, "document.txt"), []byte("eprints"))
+
+	_, _, err := arch.Backup(ctx, BackupSpec{Paths: []string{mysql, eprints}})
+	if err != nil {
+		t.Fatalf("non-alphabetical roots must back up: %v", err)
+	}
+
+	repo := openRepo(t, ctx, local)
+	snapshots, err := repo.ListSnapshots(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootTree, err := repo.LoadTree(ctx, *snapshots[0].Snapshot.Tree)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := []string{rootTree.Nodes[0].Name, rootTree.Nodes[1].Name}; got[0] != "eprints" || got[1] != "mysql" {
+		t.Fatalf("root nodes = %v, want [eprints mysql]", got)
+	}
+}
+
 func TestSecondBackupReusesMultipleRoots(t *testing.T) {
 	ctx := context.Background()
 	arch, local, _ := newArchiver(t, ctx)

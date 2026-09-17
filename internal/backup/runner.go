@@ -271,10 +271,14 @@ func (r *Runner) run(ctx context.Context, site config.Site, force bool) (result 
 			result.Status = StatusFailed
 			return result, errors.Join(operationErr, apperror.Wrap(apperror.CategoryPersistence, "could not finalize backup history", finishErr))
 		}
+		notificationMessage := apperror.UserMessage(operationErr)
+		if event == config.EventBackupFailed {
+			notificationMessage = apperror.NotificationMessage(operationErr)
+		}
 		r.notify(context.WithoutCancel(ctx), NotifyInput{
 			Event: event, RunID: run.ID, SiteName: site.Name, Status: result.Status,
 			StartedAt: now, FinishedAt: finished,
-			ErrorCategory: string(category), ErrorMessage: apperror.UserMessage(operationErr),
+			ErrorCategory: string(category), ErrorMessage: notificationMessage,
 			Destinations:       buildNotifyDestinations(site, r.dependencies.Storages),
 			HasDatabaseSources: hasEnabledDatabaseSources(site),
 		})

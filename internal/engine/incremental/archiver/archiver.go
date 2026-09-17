@@ -610,10 +610,20 @@ func (s *backupState) combineRoots(ctx context.Context) (*incremental.ID, error)
 		id := s.rootTrees[0]
 		return &id, nil
 	}
+	type namedRoot struct {
+		name string
+		id   incremental.ID
+	}
+	names := uniqueRootNames(s.spec.Paths)
+	roots := make([]namedRoot, len(names))
+	for i, name := range names {
+		roots[i] = namedRoot{name: name, id: s.rootTrees[i]}
+	}
+	sort.Slice(roots, func(i, j int) bool { return roots[i].name < roots[j].name })
 	tr := &tree.Tree{}
-	for i, name := range uniqueRootNames(s.spec.Paths) {
-		subtree := s.rootTrees[i]
-		if err := tr.Add(&tree.Node{Name: name, Type: tree.TypeDir, Subtree: &subtree}); err != nil {
+	for _, root := range roots {
+		subtree := root.id
+		if err := tr.Add(&tree.Node{Name: root.name, Type: tree.TypeDir, Subtree: &subtree}); err != nil {
 			return nil, fmt.Errorf("archiver: combine roots: %w", err)
 		}
 	}

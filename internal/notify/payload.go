@@ -126,7 +126,7 @@ type Payload struct {
 }
 
 // NewPayload builds the shared payload from a run's facts. ErrorCategory and
-// ErrorMessage must already be redacted (apperror.UserMessage).
+// ErrorMessage must already be safe for an external notification.
 func NewPayload(input backup.NotifyInput) Payload {
 	started := input.StartedAt.UTC()
 	finished := input.FinishedAt.UTC()

@@ -53,6 +53,7 @@ func UserMessage(err error) string {
 var (
 	diagnosticURL    = regexp.MustCompile(`https?://[^\s]+`)
 	diagnosticSecret = regexp.MustCompile(`(?i)(password|secret|access[_-]?key|webhook[_-]?url)=([^\s,;]+)`)
+	diagnosticPath   = regexp.MustCompile(`(^|[\s("'=])(/[^\s,;:)"']+)`)
 )
 
 // DiagnosticMessage returns a deduplicated, redacted error chain suitable for
@@ -85,6 +86,53 @@ func DiagnosticMessage(err error) string {
 		case interface{ Unwrap() error }:
 			walk(unwrapped.Unwrap())
 		}
+	}
+	walk(err)
+	return strings.Join(parts, ": ")
+}
+
+// NotificationMessage returns the useful error chain for operator
+// notifications while stopping at Hidden, whose wrapped cause may contain
+// credentials, provider responses, or other secret-adjacent details.
+func NotificationMessage(err error) string {
+	if err == nil {
+		return ""
+	}
+	parts := make([]string, 0, 3)
+	seen := make(map[string]struct{})
+	previous := ""
+	appendMessage := func(message string) {
+		message = strings.TrimSpace(message)
+		message = diagnosticURL.ReplaceAllString(message, "<redacted-url>")
+		message = diagnosticSecret.ReplaceAllString(message, "$1=<redacted>")
+		message = diagnosticPath.ReplaceAllString(message, "$1<redacted-path>")
+		if message == "" || strings.Contains(previous, message) {
+			return
+		}
+		if _, ok := seen[message]; ok {
+			return
+		}
+		seen[message] = struct{}{}
+		parts = append(parts, message)
+		previous = message
+	}
+	var walk func(error)
+	walk = func(current error) {
+		if current == nil {
+			return
+		}
+		if hidden, ok := current.(*Hidden); ok {
+			appendMessage(hidden.Public)
+			return
+		}
+		if joined, ok := current.(interface{ Unwrap() []error }); ok {
+			for _, cause := range joined.Unwrap() {
+				walk(cause)
+			}
+			return
+		}
+		appendMessage(current.Error())
+		walk(errors.Unwrap(current))
 	}
 	walk(err)
 	return strings.Join(parts, ": ")

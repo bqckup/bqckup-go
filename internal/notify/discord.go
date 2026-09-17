@@ -79,6 +79,9 @@ func (d *Discord) Send(ctx context.Context, payload Payload) error {
 	if payload.Status == string(backup.StatusFailed) || payload.Status == string(backup.StatusPartial) || payload.Status == string(backup.StatusNoChange) {
 		fields = append(fields, discordField{Name: "Consecutive Failures", Value: fmt.Sprintf("%d", payload.FailureStreak), Inline: true})
 		if message := failureMessage(payload); message != "" {
+			if payload.Status == string(backup.StatusFailed) || payload.Status == string(backup.StatusPartial) {
+				message = discordFailureBlock(message)
+			}
 			fields = append(fields, discordField{Name: "Failure", Value: message})
 		}
 	}
@@ -99,6 +102,21 @@ func (d *Discord) Send(ctx context.Context, payload Payload) error {
 		return fmt.Errorf("encode embed: %w", err)
 	}
 	return postJSON(ctx, d.client, d.webhookURL, raw)
+}
+
+func discordFailureBlock(message string) string {
+	const (
+		prefix   = "```text\n"
+		suffix   = "\n```"
+		maxRunes = 1024
+	)
+	message = strings.ReplaceAll(message, "```", "'''")
+	runes := []rune(message)
+	contentLimit := maxRunes - len([]rune(prefix)) - len([]rune(suffix))
+	if len(runes) > contentLimit {
+		runes = append(runes[:contentLimit-1], '…')
+	}
+	return prefix + string(runes) + suffix
 }
 
 // sendReport posts a Discord embed for a daily or monthly report payload.

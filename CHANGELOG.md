@@ -9,6 +9,11 @@ All notable changes to Bqckup are documented in this file.
 - Restore incremental snapshots correctly when a configured source is a single
   file or multiple source roots share the same basename.
 - Include MySQL/MariaDB Event Scheduler definitions in database dumps.
+- Include the redacted cause chain in failed-backup notifications so operators
+  can see the actual repository, archiver, or storage failure; Discord renders
+  the failure as a bounded code block for readability.
+- Sort incremental multi-root wrapper nodes so source paths do not fail backup
+  when their configured order is not alphabetical.
 
 ## v1.0.10
 
