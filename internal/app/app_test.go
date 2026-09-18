@@ -407,13 +407,13 @@ func TestBuildNotifierConstructsChannelsFromConfiguration(t *testing.T) {
 		},
 	}
 
-	notifier := buildNotifier(configuration.Notifications)
+	notifier := buildNotifier(configuration.Notifications, "test-server")
 	require.NotNil(t, notifier)
 	assert.IsType(t, &notify.Dispatcher{}, notifier)
 }
 
 func TestBuildNotifierReturnsNilWithoutNotifications(t *testing.T) {
-	assert.Nil(t, buildNotifier(config.Notifications{}))
+	assert.Nil(t, buildNotifier(config.Notifications{}, ""))
 }
 
 func TestOpenDeliversBackupFailedThroughConfiguredWebhook(t *testing.T) {
@@ -427,7 +427,8 @@ func TestOpenDeliversBackupFailedThroughConfiguredWebhook(t *testing.T) {
 	rootPath := filepath.Join(configDir, "bqckup.yaml")
 	root, err := os.ReadFile(rootPath)
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(rootPath, append(root, []byte(`notifications:
+	require.NoError(t, os.WriteFile(rootPath, append(root, []byte(`server_id: test-server-id
+notifications:
   channels:
     webhook:
       type: webhook
@@ -436,6 +437,11 @@ func TestOpenDeliversBackupFailedThroughConfiguredWebhook(t *testing.T) {
     - events: [backup_failed]
       channels: [webhook]
 `)...), 0o600))
+
+	binDir := t.TempDir()
+	fakeDump := filepath.Join(binDir, "mysqldump")
+	require.NoError(t, os.WriteFile(fakeDump, []byte("#!/bin/sh\nexit 1\n"), 0o755))
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	// Add an unreachable database to trigger a backup execution failure.
 	require.NoError(t, os.WriteFile(filepath.Join(configDir, "sites", "example.yaml"), fmt.Appendf(nil, `version: 2
@@ -473,6 +479,7 @@ site:
 	require.NotNil(t, received)
 	assert.Equal(t, "backup_failed", received["event"])
 	assert.Equal(t, "example", received["site"])
+	assert.Equal(t, "test-server-id", received["server_id"])
 	assert.Equal(t, "execution", received["error_category"])
 }
 

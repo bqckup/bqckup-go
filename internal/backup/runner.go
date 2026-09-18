@@ -603,6 +603,14 @@ func (r *Runner) run(ctx context.Context, site config.Site, force bool) (result 
 	}
 	result.Status = StatusSuccess
 	result.FinishedAt = finished
+
+	r.notify(context.WithoutCancel(ctx), NotifyInput{
+		Event: config.EventBackupSucceeded, RunID: run.ID, SiteName: site.Name, Status: result.Status,
+		StartedAt: now, FinishedAt: finished,
+		Destinations:       buildNotifyDestinations(site, r.dependencies.Storages),
+		HasDatabaseSources: hasEnabledDatabaseSources(site),
+	})
+
 	return result, nil
 }
 

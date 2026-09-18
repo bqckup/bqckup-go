@@ -105,6 +105,7 @@ type ReportData struct {
 type Payload struct {
 	Event              Event             `json:"event"`
 	RunID              string            `json:"run_id"`
+	ServerID           string            `json:"server_id"`
 	Site               string            `json:"site"`
 	Hostname           string            `json:"hostname"`
 	ServerIP           string            `json:"server_ip"`

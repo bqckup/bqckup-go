@@ -92,7 +92,7 @@ Common options:
 | `site.backup_mode` | `full` (default), `incremental` |
 | `database.engine` | `mysql`, `postgres` |
 | `notifications.channels.<name>.type` | `smtp`, `webhook`, `discord` |
-| `notifications.routes[].events[]` | `all`, `backup_failed`, `backup_partial`, `backup_cancelled`, `backup_no_change` |
+| `notifications.routes[].events[]` | `all`, `backup_failed`, `backup_partial`, `backup_cancelled`, `backup_no_change`, `backup_succeeded` |
 
 In examples, replace placeholders such as `<site>`, `<password>`, `<bucket>`,
 and `<webhook-url>` with real values. Do not copy angle-bracket placeholders
@@ -230,13 +230,14 @@ notifications:
       from: <sender-address>
       to: [<recipient-address>]
   routes:
-    # events: all | backup_failed | backup_partial | backup_cancelled | backup_no_change
+    # events: all | backup_failed | backup_partial | backup_cancelled | backup_no_change | backup_succeeded
     - events: [backup_failed]
       channels: [email]
 ```
 
 Available channel types are `smtp`, `webhook`, and `discord`. Partial runs use
-the `backup_partial` event. Successful runs, skips, and preflight failures stay
+the `backup_partial` event. Successful runs emit `backup_succeeded`; route it
+to receive recovery signals after a failure. Skips and preflight failures stay
 silent. Delivery is best effort and never changes the run result or history.
 Keep credential-bearing root YAML at mode `0600`; `config validate` checks URL
 format and permissions.

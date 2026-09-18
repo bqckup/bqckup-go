@@ -18,6 +18,10 @@ All notable changes to Bqckup are documented in this file.
   `config/` folder in each referenced destination on every backup run.
 - Ignore Unix sockets such as PM2's `pub.sock` during full archive creation,
   while recording the ignored-socket count in the final JSON backup log.
+- Emit `backup_succeeded` notifications after successful backup runs so
+  webhook consumers can observe recovery after a failure.
+- Include the configured `server_id` in all notification and scheduled report
+  payloads to provide a stable host identity across network and container changes.
 
 ## v1.0.10
 

@@ -148,7 +148,7 @@ func sendLiveNotification(t *testing.T, input backup.NotifyInput) {
 			}
 		}
 
-		if err := NewDispatcher(channels, cfg.Notifications.Routes).Notify(ctx, input); err != nil {
+		if err := NewDispatcher(channels, cfg.Notifications.Routes, "").Notify(ctx, input); err != nil {
 			t.Fatalf("failed to deliver notification: %v", err)
 		}
 		t.Logf("live %s notification dispatched using %s", input.Event, configDir)

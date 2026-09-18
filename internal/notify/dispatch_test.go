@@ -43,7 +43,7 @@ func TestDispatcherFansOutToEveryMatchingChannel(t *testing.T) {
 	}, []config.Route{
 		{Events: []string{config.EventBackupFailed}, Channels: []string{"email", "discord"}},
 		{Events: []string{config.EventBackupCancelled}, Channels: []string{"webhook"}},
-	})
+	}, "test-server")
 
 	require.NoError(t, dispatcher.Notify(context.Background(), notifyInput(config.EventBackupFailed)))
 	require.Len(t, email.payloads, 1)
@@ -65,7 +65,7 @@ func TestDispatcherUnmatchedEventSendsNothing(t *testing.T) {
 	email := &recordingChannel{name: "email"}
 	dispatcher := NewDispatcher(map[string]Channel{"email": email}, []config.Route{
 		{Events: []string{config.EventBackupFailed}, Channels: []string{"email"}},
-	})
+	}, "test-server")
 
 	unmatchedInput := notifyInput(config.EventBackupCancelled)
 	unmatchedInput.Status = backup.StatusCancelled
@@ -77,7 +77,7 @@ func TestDispatcherAllEventMatchesEveryNotification(t *testing.T) {
 	discord := &recordingChannel{name: "discord"}
 	dispatcher := NewDispatcher(map[string]Channel{"discord": discord}, []config.Route{
 		{Events: []string{config.EventAll}, Channels: []string{"discord"}},
-	})
+	}, "test-server")
 
 	for _, event := range []string{config.EventBackupFailed, config.EventBackupPartial, config.EventBackupCancelled, config.EventBackupNoChange} {
 		require.NoError(t, dispatcher.Notify(context.Background(), notifyInput(event)))
@@ -90,7 +90,7 @@ func TestDispatcherSendsChannelOnceAcrossRoutes(t *testing.T) {
 	dispatcher := NewDispatcher(map[string]Channel{"email": email}, []config.Route{
 		{Events: []string{config.EventBackupFailed}, Channels: []string{"email"}},
 		{Events: []string{config.EventBackupFailed}, Channels: []string{"email"}},
-	})
+	}, "test-server")
 
 	require.NoError(t, dispatcher.Notify(context.Background(), notifyInput(config.EventBackupFailed)))
 	require.Len(t, email.payloads, 1)
@@ -101,7 +101,7 @@ func TestDispatcherOneFailureDoesNotStopOtherChannels(t *testing.T) {
 	email := &recordingChannel{name: "email"}
 	dispatcher := NewDispatcher(map[string]Channel{"broken": broken, "email": email}, []config.Route{
 		{Events: []string{config.EventBackupFailed}, Channels: []string{"broken", "email"}},
-	})
+	}, "test-server")
 
 	err := dispatcher.Notify(context.Background(), notifyInput(config.EventBackupFailed))
 	require.Error(t, err)
@@ -112,12 +112,12 @@ func TestDispatcherOneFailureDoesNotStopOtherChannels(t *testing.T) {
 func TestDispatcherSkipsUnknownChannelDefensively(t *testing.T) {
 	dispatcher := NewDispatcher(map[string]Channel{}, []config.Route{
 		{Events: []string{config.EventBackupFailed}, Channels: []string{"missing"}},
-	})
+	}, "test-server")
 
 	require.NoError(t, dispatcher.Notify(context.Background(), notifyInput(config.EventBackupFailed)))
 }
 
 func TestDispatcherWithoutChannelsSendsNothing(t *testing.T) {
-	dispatcher := NewDispatcher(nil, nil)
+	dispatcher := NewDispatcher(nil, nil, "")
 	require.NoError(t, dispatcher.Notify(context.Background(), notifyInput(config.EventBackupFailed)))
 }

@@ -69,6 +69,7 @@ func TestNewPayloadMarshalsToExactSpecSchema(t *testing.T) {
 	}
 
 	payload := NewPayload(input)
+	payload.ServerID = "ojt-zaku"
 	payload.Hostname = "web-01"
 	payload.ServerIP = "203.0.113.7"
 	raw, err := json.Marshal(payload)
@@ -76,6 +77,7 @@ func TestNewPayloadMarshalsToExactSpecSchema(t *testing.T) {
 	assert.JSONEq(t, `{
 		"event": "backup_failed",
 		"run_id": "c699eaba-4928-48e8-a9db-6e3d6121d07f",
+		"server_id": "ojt-zaku",
 		"site": "example.org",
 		"hostname": "web-01",
 		"server_ip": "203.0.113.7",

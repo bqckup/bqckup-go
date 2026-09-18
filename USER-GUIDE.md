@@ -13,7 +13,7 @@ scheduling, restore, and common failures. It is written for operators of the
 | `backup_mode` | `full` (default), `incremental` |
 | database `engine` | `mysql`, `postgres` |
 | notification channel `type` | `smtp`, `webhook`, `discord` |
-| notification route `events` | `all`, `backup_failed`, `backup_partial`, `backup_cancelled`, `backup_no_change`, `daily_report`, `monthly_report` |
+| notification route `events` | `all`, `backup_failed`, `backup_partial`, `backup_cancelled`, `backup_no_change`, `backup_succeeded`, `daily_report`, `monthly_report` |
 | `reports.daily.enabled` | `true`, `false` |
 | `reports.monthly.enabled` | `true`, `false` |
 
@@ -369,18 +369,51 @@ notifications:
       from: <sender-address>
       to: [<recipient-address>]
   routes:
-    # events options: all | backup_failed | backup_partial | backup_cancelled | backup_no_change
+    # events options: all | backup_failed | backup_partial | backup_cancelled | backup_no_change | backup_succeeded
     - events: [backup_failed]
       channels: [email]
 ```
 
 Channel `type` options are `smtp`, `webhook`, and `discord`. Route `events`
 options are `all`, `backup_failed`, `backup_partial`, `backup_cancelled`,
-`backup_no_change`, `daily_report`, and `monthly_report`. Partial snapshots
-send `backup_partial`; successful runs, skipped runs, and preflight failures
-send no notification. Delivery is best effort and never changes backup
-history or the run result. Keep the root file at mode `0600` when it contains
-credentials or URLs.
+`backup_no_change`, `backup_succeeded`, `daily_report`, and `monthly_report`.
+Partial snapshots send `backup_partial`; successful runs emit
+`backup_succeeded`. Skipped runs and preflight failures send no notification.
+Delivery is best effort and never changes backup history or the run result.
+Keep the root file at mode `0600` when it contains credentials or URLs.
+
+### Webhook payload
+
+Generic webhook channels receive a JSON payload. Every payload includes
+`server_id` from the configured `server_id` in `bqckup.yaml`, plus diagnostic
+fields `hostname` and `server_ip` resolved at runtime. Use `server_id` as the
+stable server identity; `hostname` and `server_ip` may change after container
+or network changes. When `server_id` is empty (legacy configuration), it is
+serialized as an empty string.
+
+```json
+{
+  "event": "backup_succeeded",
+  "run_id": "c699eaba-4928-48e8-a9db-6e3d6121d07f",
+  "server_id": "<server-id>",
+  "site": "<site>",
+  "hostname": "web-01",
+  "server_ip": "203.0.113.7",
+  "status": "success",
+  "started_at": "2026-08-23T01:46:56Z",
+  "finished_at": "2026-08-23T01:48:38Z",
+  "duration_seconds": 102,
+  "last_successful_at": "2026-08-22T01:00:00Z",
+  "failure_streak": 0,
+  "package_count": 2,
+  "size_bytes": 18038864691,
+  "packages": [
+    "bqckup/<server-id>/<site>/2026-08-23T01-46-56Z/files.tar.gz",
+    "bqckup/<server-id>/<site>/2026-08-23T01-46-56Z/app.sql.gz"
+  ]
+}
+```
+
 
 ## Scheduled reports
 
