@@ -49,6 +49,9 @@ type RunResult struct {
 	// file backup. With multiple incremental destinations, it is the largest
 	// count reported by any destination rather than a duplicate sum.
 	FilesSkipped int `json:"files_skipped,omitempty"`
+	// SocketsIgnored is the number of Unix sockets intentionally omitted from
+	// a full archive. They are live process endpoints, not backup data.
+	SocketsIgnored int `json:"sockets_ignored,omitempty"`
 	// ReclaimedBytes is the space freed by incremental retention (prune).
 	ReclaimedBytes int64 `json:"reclaimed_bytes,omitempty"`
 	// Warnings contains post-backup maintenance problems that did not prevent
@@ -380,6 +383,7 @@ func (r *Runner) run(ctx context.Context, site config.Site, force bool) (result 
 			return fail(apperror.Wrap(apperror.CategoryExecution, "could not create the file archive", err))
 		}
 		result.FilesSkipped = archive.FilesSkipped
+		result.SocketsIgnored = archive.SocketsIgnored
 		r.progress.FinishStage()
 
 		objectKey := path.Join(sitePrefix, storage.FormatPackageKey(now, "files.tar.gz", run.ID))

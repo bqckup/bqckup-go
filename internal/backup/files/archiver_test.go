@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"sort"
@@ -79,6 +80,23 @@ func TestCreateSkipsMissingChildSourceAsPartialArchive(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, 1, pkg.FilesSkipped)
+	assert.Equal(t, []string{"source/keep.txt"}, archiveMembers(t, out))
+}
+
+func TestCreateIgnoresUnixSocket(t *testing.T) {
+	source := filepath.Join(t.TempDir(), "source")
+	require.NoError(t, os.MkdirAll(source, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(source, "keep.txt"), []byte("keep"), 0o600))
+	listener, err := net.Listen("unix", filepath.Join(source, "pub.sock"))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, listener.Close()) })
+
+	out := filepath.Join(t.TempDir(), "files.tar.gz")
+	pkg, err := new(Archiver).Create(context.Background(), backup.FileSource{Include: []string{source}}, out)
+
+	require.NoError(t, err)
+	assert.Zero(t, pkg.FilesSkipped)
+	assert.Equal(t, 1, pkg.SocketsIgnored)
 	assert.Equal(t, []string{"source/keep.txt"}, archiveMembers(t, out))
 }
 

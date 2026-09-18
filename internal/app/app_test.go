@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -326,6 +327,9 @@ func TestListSiteSnapshotsSucceedsWithLocalStorageDocument(t *testing.T) {
 
 func TestOpenWiresAWorkingLocalBackupApplication(t *testing.T) {
 	configDir, backupRoot := writeApplicationConfig(t)
+	listener, err := net.Listen("unix", filepath.Join(filepath.Dir(configDir), "source", "pub.sock"))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, listener.Close()) })
 	logPath := filepath.Join(filepath.Dir(configDir), "bqckup.log")
 	rootPath := filepath.Join(configDir, "bqckup.yaml")
 	root, err := os.ReadFile(rootPath)
@@ -361,6 +365,7 @@ func TestOpenWiresAWorkingLocalBackupApplication(t *testing.T) {
 	assert.Contains(t, text, `"event":"package_stored","site":"example"`)
 	assert.Contains(t, text, `"object_key":"bqckup/example/`)
 	assert.Contains(t, text, `"event":"backup_finished","site":"example"`)
+	assert.Contains(t, text, `"sockets_ignored":1`)
 	assert.NotContains(t, text, filepath.Join(filepath.Dir(configDir), "source"))
 }
 

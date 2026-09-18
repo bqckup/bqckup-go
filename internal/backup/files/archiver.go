@@ -86,7 +86,7 @@ func (a *Archiver) Create(ctx context.Context, source backup.FileSource, destina
 	success = true
 	return backup.Package{
 		Path: destination, Size: info.Size(), SHA256: hex.EncodeToString(digest.Sum(nil)),
-		SourceKind: "files", SourceName: "files", FilesSkipped: state.filesSkipped,
+		SourceKind: "files", SourceName: "files", FilesSkipped: state.filesSkipped, SocketsIgnored: state.socketsIgnored,
 	}, nil
 }
 
@@ -132,10 +132,11 @@ func archiveRootName(include, base string, used map[string]struct{}, preservePat
 }
 
 type archiveState struct {
-	ctx          context.Context
-	writer       *tar.Writer
-	source       backup.FileSource
-	filesSkipped int
+	ctx            context.Context
+	writer         *tar.Writer
+	source         backup.FileSource
+	filesSkipped   int
+	socketsIgnored int
 }
 
 func (s *archiveState) add(realPath, archivePath string, active map[string]bool, optional bool) error {
@@ -222,6 +223,13 @@ func (s *archiveState) add(realPath, archivePath string, active map[string]bool,
 	}
 
 	if !info.Mode().IsRegular() {
+		// Unix sockets are live process endpoints, not restorable file content.
+		// Ignore them so runtime artifacts such as PM2 sockets do not fail a
+		// complete archive.
+		if info.Mode()&os.ModeSocket != 0 {
+			s.socketsIgnored++
+			return nil
+		}
 		return fmt.Errorf("unsupported archive source type at %s", realPath)
 	}
 	file, err := retryMissing(s.ctx, func() (*os.File, error) {

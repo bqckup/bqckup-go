@@ -16,6 +16,8 @@ All notable changes to Bqckup are documented in this file.
   when their configured order is not alphabetical.
 - Copy all site YAML files, including disabled sites, to the server-level
   `config/` folder in each referenced destination on every backup run.
+- Ignore Unix sockets such as PM2's `pub.sock` during full archive creation,
+  while recording the ignored-socket count in the final JSON backup log.
 
 ## v1.0.10
 

@@ -339,6 +339,7 @@ func (a *App) logBackupFinished(siteName string, result backup.RunResult, starte
 		"status", result.Status,
 		"duration_ms", time.Since(started).Milliseconds(),
 		"files_skipped", result.FilesSkipped,
+		"sockets_ignored", result.SocketsIgnored,
 		"reclaimed_bytes", result.ReclaimedBytes,
 		"warning_count", len(result.Warnings),
 		"skip_reason", result.SkipReason,
