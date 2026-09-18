@@ -157,22 +157,34 @@ def convert(args: argparse.Namespace) -> int:
             warnings.append(f"storage {name!r} provider {provider!r} mapped to s3")
         item = {
             "type": storage_type,
-            "bucket": str(old.get("bucket") or ""),
-            "access_key_id": str(old.get("access_key_id") or ""),
-            "secret_access_key": str(old.get("secret_access_key") or ""),
-            "region": str(old.get("region") or ""),
-            "endpoint": str(old.get("endpoint") or ""),
             "primary": as_bool(old.get("primary")),
         }
+        remote_url = str(old.get("remote_url") or "").strip()
+        if remote_url:
+            item["credentials"] = {"source": "remote", "url": remote_url}
+        else:
+            item.update(
+                {
+                    "bucket": str(old.get("bucket") or ""),
+                    "access_key_id": str(old.get("access_key_id") or ""),
+                    "secret_access_key": str(old.get("secret_access_key") or ""),
+                    "region": str(old.get("region") or ""),
+                    "endpoint": str(old.get("endpoint") or ""),
+                }
+            )
         storages[str(name)] = {key: value for key, value in item.items() if value != ""}
 
-    root = {"server_id": "", "app": {
-        "state_database": "/var/lib/bqckup/bqckup.db",
-        "temporary_directory": "/var/lib/bqckup/tmp",
-        "lock_directory": "/var/lib/bqckup/locks",
-        "log_level": "info",
-        "log_file": "/var/log/bqckup/bqckup.log",
-    }}
+    root = {
+        "server_id": "",
+        "backup_prefix": "",
+        "app": {
+            "state_database": "/var/lib/bqckup/bqckup.db",
+            "temporary_directory": "/var/lib/bqckup/tmp",
+            "lock_directory": "/var/lib/bqckup/locks",
+            "log_level": "info",
+            "log_file": "/var/log/bqckup/bqckup.log",
+        },
+    }
     cnf_path = source / "bqckup.cnf"
     if cnf_path.exists():
         parser = configparser.ConfigParser()

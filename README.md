@@ -125,8 +125,11 @@ sudo bqckup --config-dir /etc/bqckup config validate
 Without arguments, it reads `/etc/bqckup_old` and writes `/etc/bqckup`. If old
 files are still in `/etc/bqckup`, they are preserved first. Use `--input-dir`
 and `--output-dir` for another layout. The converter never prints credentials,
-does not modify the preserved tree, skips existing schema-v2 files, and maps
-legacy database type `postgresql` to `postgres`.
+does not modify the preserved tree, skips existing schema-v2 files, maps
+legacy `remote_url` storage entries to the v2 `credentials.source: remote`
+form, and maps legacy database type `postgresql` to `postgres`. The generated
+root file includes an empty `backup_prefix` so the namespace can be set
+explicitly without changing the legacy layout by default.
 
 ## Backup modes
 

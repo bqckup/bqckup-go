@@ -4,6 +4,8 @@ All notable changes to Bqckup are documented in this file.
 
 ## v1.0.11
 
+- Convert legacy `remote_url` storage entries to the v2 remote credentials
+  form and include an empty `backup_prefix` in generated root configuration.
 - Make failed-backup notifications report only terminal facts: remove generic
   crash/timeout claims, category filler, and unconditional rerun advice.
 - Restore incremental snapshots correctly when a configured source is a single
