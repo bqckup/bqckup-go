@@ -23,18 +23,20 @@ type Dispatcher struct {
 	channels map[string]notify.Channel
 	routes   []config.Route
 	repo     reportRepository
+	serverID string
 	hostname string
 	serverIP string
 }
 
 // NewDispatcher creates a Dispatcher. channels and routes come from the same
 // notification configuration used by the backup notifier.
-func NewDispatcher(channels map[string]notify.Channel, routes []config.Route, repo reportRepository) *Dispatcher {
+func NewDispatcher(channels map[string]notify.Channel, routes []config.Route, repo reportRepository, serverID string) *Dispatcher {
 	hostname, serverIP := notify.ServerIdentity()
 	return &Dispatcher{
 		channels: channels,
 		routes:   routes,
 		repo:     repo,
+		serverID: serverID,
 		hostname: hostname,
 		serverIP: serverIP,
 	}
@@ -44,14 +46,14 @@ func NewDispatcher(channels map[string]notify.Channel, routes []config.Route, re
 // given date. routeName must match a route's name field in the configuration.
 func (d *Dispatcher) SendDaily(ctx context.Context, data DailyReportData, routeName string) error {
 	period := data.Date.Format("2006-01-02")
-	return d.send(ctx, "daily", period, routeName, dailyPayload(data, d.hostname, d.serverIP))
+	return d.send(ctx, "daily", period, routeName, dailyPayload(data, d.serverID, d.hostname, d.serverIP))
 }
 
 // SendMonthly sends a monthly report if it has not already been delivered for
 // the given month. routeName must match a route's name field in the configuration.
 func (d *Dispatcher) SendMonthly(ctx context.Context, data MonthlyReportData, routeName string) error {
 	period := data.Month.Format("2006-01")
-	return d.send(ctx, "monthly", period, routeName, monthlyPayload(data, d.hostname, d.serverIP))
+	return d.send(ctx, "monthly", period, routeName, monthlyPayload(data, d.serverID, d.hostname, d.serverIP))
 }
 
 func (d *Dispatcher) send(ctx context.Context, reportType, period, routeName string, payload notify.Payload) error {
@@ -104,9 +106,10 @@ func (d *Dispatcher) channelsFor(routeName string) []notify.Channel {
 
 // dailyPayload converts DailyReportData into a notify.Payload suitable for
 // delivery through existing channels. The event field uses config.EventDailyReport.
-func dailyPayload(data DailyReportData, hostname, serverIP string) notify.Payload {
+func dailyPayload(data DailyReportData, serverID, hostname, serverIP string) notify.Payload {
 	return notify.Payload{
 		Event:    notify.Event(config.EventDailyReport),
+		ServerID: serverID,
 		Hostname: hostname,
 		ServerIP: serverIP,
 		Status:   "daily_report",
@@ -121,9 +124,10 @@ func dailyPayload(data DailyReportData, hostname, serverIP string) notify.Payloa
 }
 
 // monthlyPayload converts MonthlyReportData into a notify.Payload.
-func monthlyPayload(data MonthlyReportData, hostname, serverIP string) notify.Payload {
+func monthlyPayload(data MonthlyReportData, serverID, hostname, serverIP string) notify.Payload {
 	return notify.Payload{
 		Event:    notify.Event(config.EventMonthlyReport),
+		ServerID: serverID,
 		Hostname: hostname,
 		ServerIP: serverIP,
 		Status:   "monthly_report",

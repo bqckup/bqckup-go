@@ -36,6 +36,7 @@ const (
 	EventBackupPartial   = "backup_partial"
 	EventBackupCancelled = "backup_cancelled"
 	EventBackupNoChange  = "backup_no_change"
+	EventBackupSucceeded = "backup_succeeded"
 	EventDailyReport     = "daily_report"
 	EventMonthlyReport   = "monthly_report"
 )

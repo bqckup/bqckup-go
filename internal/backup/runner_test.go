@@ -927,14 +927,15 @@ func TestRunnerSuccessFinishRunSurvivesLateCancellation(t *testing.T) {
 	assert.NoError(t, deps.repository.finishCtxErr, "FinishRun must not observe the cancelled context")
 }
 
-func TestRunnerNeverNotifiesOnSuccess(t *testing.T) {
+func TestRunnerNotifiesOnSuccess(t *testing.T) {
 	deps := successfulDependencies(t)
 	deps.notifier = &fakeNotifier{}
 
 	result, err := NewRunner(deps.dependencies()).Run(context.Background(), validSite(), false)
 	require.NoError(t, err)
 	assert.Equal(t, StatusSuccess, result.Status)
-	assert.Empty(t, deps.notifier.calls, "success runs must never notify")
+	require.Len(t, deps.notifier.calls, 1, "success runs must notify")
+	assert.Equal(t, config.EventBackupSucceeded, deps.notifier.calls[0].Event)
 }
 
 func TestRunnerNotifiesFailureWithStreakAndLastSuccessful(t *testing.T) {
@@ -1258,7 +1259,8 @@ func TestRunnerDegradesToSuccessWhenAnchorQueryFails(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, StatusSuccess, result.Status)
 	assert.Equal(t, history.StatusSuccess, deps.repository.finishedStatus)
-	assert.Empty(t, deps.notifier.calls)
+	require.Len(t, deps.notifier.calls, 1)
+	assert.Equal(t, config.EventBackupSucceeded, deps.notifier.calls[0].Event)
 }
 
 func TestRunnerDegradesToSuccessWhenRunPackagesQueryFails(t *testing.T) {
@@ -1276,7 +1278,8 @@ func TestRunnerDegradesToSuccessWhenRunPackagesQueryFails(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, StatusSuccess, result.Status)
 	assert.Equal(t, history.StatusSuccess, deps.repository.finishedStatus)
-	assert.Empty(t, deps.notifier.calls)
+	require.Len(t, deps.notifier.calls, 1)
+	assert.Equal(t, config.EventBackupSucceeded, deps.notifier.calls[0].Event)
 }
 
 func TestRunnerIncrementalNeverClassifiesAsNoChange(t *testing.T) {
@@ -1310,7 +1313,8 @@ func TestRunnerIncrementalNeverClassifiesAsNoChange(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, StatusSuccess, result.Status)
 	assert.Equal(t, history.StatusSuccess, deps.repository.finishedStatus)
-	assert.Empty(t, deps.notifier.calls)
+	require.Len(t, deps.notifier.calls, 1)
+	assert.Equal(t, config.EventBackupSucceeded, deps.notifier.calls[0].Event)
 }
 
 type fakeNotifier struct {
