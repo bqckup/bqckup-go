@@ -36,6 +36,8 @@ func TestWebhookPostsExactPayload(t *testing.T) {
 	assert.Equal(t, "backup_failed", received.body["event"])
 	assert.Equal(t, "example.org", received.body["site"])
 	assert.Equal(t, "failed", received.body["status"])
+	assert.Equal(t, "execution", received.body["error_category"])
+	assert.Equal(t, "something went wrong", received.body["error_message"])
 }
 
 func TestWebhookReturnsNon2xxStatus(t *testing.T) {

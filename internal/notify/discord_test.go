@@ -53,7 +53,7 @@ func TestDiscordEmbedFailed(t *testing.T) {
 	require.NotNil(t, embed.Footer)
 	assert.True(t, strings.HasPrefix(embed.Footer.Text, "Bqckup Backup Monitoring · "))
 
-	require.Len(t, embed.Fields, 5)
+	require.Len(t, embed.Fields, 4)
 
 	// Row 1 (grid inline)
 	assert.Equal(t, "Server", embed.Fields[0].Name)
@@ -72,17 +72,10 @@ func TestDiscordEmbedFailed(t *testing.T) {
 	assert.Equal(t, "Consecutive Failures", embed.Fields[3].Name)
 	assert.Equal(t, "3", embed.Fields[3].Value)
 	assert.True(t, embed.Fields[3].Inline)
-
-	assert.Equal(t, "Failure", embed.Fields[4].Name)
-	assert.Equal(t, "```text\n"+`could not create incremental file backup: repository: could not create the incremental backup: archiver: combine roots: tree: nodes are not sorted by name: "eprints" after "mysql"`+"\n```", embed.Fields[4].Value)
-	assert.False(t, embed.Fields[4].Inline)
-}
-
-func TestDiscordFailureCodeBlockFitsFieldLimit(t *testing.T) {
-	value := discordFailureBlock(strings.Repeat("a", 2000))
-	assert.LessOrEqual(t, len([]rune(value)), 1024)
-	assert.True(t, strings.HasPrefix(value, "```text\n"))
-	assert.True(t, strings.HasSuffix(value, "…\n```"))
+	for _, field := range embed.Fields {
+		assert.NotEqual(t, "Failure", field.Name)
+		assert.NotContains(t, field.Value, "could not create incremental file backup")
+	}
 }
 
 func TestDiscordNoChangeEmbed(t *testing.T) {
@@ -123,9 +116,11 @@ func TestDiscordNoChangeEmbed(t *testing.T) {
 	assert.Contains(t, embed.Description, "The new backup is identical to the last one")
 	assert.Contains(t, embed.Description, "Likely an idle app")
 
-	require.Len(t, embed.Fields, 5)
-	assert.Equal(t, "Failure", embed.Fields[4].Name)
-	assert.Equal(t, "2 items are unchanged from the previous run.", embed.Fields[4].Value)
+	require.Len(t, embed.Fields, 4)
+	for _, field := range embed.Fields {
+		assert.NotEqual(t, "Failure", field.Name)
+		assert.NotEqual(t, "2 items are unchanged from the previous run.", field.Value)
+	}
 }
 
 func TestDiscordEmbedFailedWithoutErrorMessage(t *testing.T) {

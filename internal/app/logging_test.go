@@ -3,11 +3,15 @@ package app
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/bqckup/bqckup-go/internal/apperror"
+	"github.com/bqckup/bqckup-go/internal/backup"
 	"github.com/bqckup/bqckup-go/internal/config"
 	"github.com/stretchr/testify/require"
 )
@@ -64,4 +68,21 @@ func TestAppLoggerWritesDebugAtConfiguredLevel(t *testing.T) {
 	require.NoError(t, json.Unmarshal(bytes.TrimSpace(output.Bytes()), &event))
 	require.Equal(t, "DEBUG", event["level"])
 	require.Equal(t, "backup_plan_detail", event["event"])
+}
+
+func TestLogBackupFinishedRecordsFailureDetails(t *testing.T) {
+	var output bytes.Buffer
+	application := &App{logger: newAppLogger(&output, logInfo)}
+	err := apperror.Wrap(apperror.CategoryExecution, "could not export database", errors.New("mysqldump failed"))
+
+	application.logBackupFinished("example", backup.RunResult{
+		RunID:  "run-1",
+		Status: backup.StatusFailed,
+	}, time.Now().Add(-time.Second), err)
+
+	text := output.String()
+	require.Contains(t, text, `"event":"backup_finished"`)
+	require.Contains(t, text, `"status":"failed"`)
+	require.Contains(t, text, `"category":"execution"`)
+	require.Contains(t, text, `"error":"could not export database: mysqldump failed"`)
 }

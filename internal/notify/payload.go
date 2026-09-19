@@ -217,6 +217,8 @@ func serverIdentity() (hostname, serverIP string) {
 // statusColor returns the channel color for a payload status.
 func statusColor(status string) int {
 	switch status {
+	case string(backup.StatusSuccess):
+		return 0x2ECC71
 	case string(backup.StatusPartial), string(backup.StatusCancelled), string(backup.StatusNoChange):
 		return 0xF1C40F
 	default:
@@ -241,6 +243,8 @@ func formatBytes(bytes int64) string {
 // humanStatus renders a backup status as a headline verb for non-IT readers.
 func humanStatus(status string) string {
 	switch backup.Status(status) {
+	case backup.StatusSuccess:
+		return "Backup succeeded"
 	case backup.StatusFailed:
 		return "Backup failed"
 	case backup.StatusPartial:
@@ -332,6 +336,18 @@ func itemsSizeLine(count int, size int64) string {
 
 // description returns the human explanation paragraph for the run.
 func description(payload Payload) string {
+	if payload.Status == string(backup.StatusSuccess) {
+		base := "The backup completed successfully."
+		if payload.PackageCount > 0 {
+			items := itemsSizeLine(payload.PackageCount, payload.SizeBytes)
+			if payload.PackageCount == 1 {
+				base += " " + items + " was prepared."
+			} else {
+				base += " " + items + " were prepared."
+			}
+		}
+		return base
+	}
 	if payload.Status == string(backup.StatusPartial) {
 		return fmt.Sprintf("The snapshot was saved, but %d source entries could not be read. Run the backup again to complete it.", payload.FilesSkipped)
 	}

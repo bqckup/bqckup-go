@@ -180,12 +180,14 @@ func TestNewPayloadClampsNegativeDurationAndUsesUTC(t *testing.T) {
 }
 
 func TestHumanStatus(t *testing.T) {
+	assert.Equal(t, "Backup succeeded", humanStatus("success"))
 	assert.Equal(t, "Backup failed", humanStatus("failed"))
 	assert.Equal(t, "Backup cancelled", humanStatus("cancelled"))
 	assert.Equal(t, "mystery", humanStatus("mystery"))
 }
 
 func TestStatusColor(t *testing.T) {
+	assert.Equal(t, 0x2ECC71, statusColor("success"))
 	assert.Equal(t, 0xF1C40F, statusColor("cancelled"))
 	assert.Equal(t, 0xF1C40F, statusColor("no_change"))
 	assert.Equal(t, 0xE74C3C, statusColor("failed"))
@@ -193,9 +195,20 @@ func TestStatusColor(t *testing.T) {
 }
 
 func TestHeadline(t *testing.T) {
+	assert.Equal(t, "Backup succeeded for example.org", headline(Payload{Status: "success", Site: "example.org"}))
 	assert.Equal(t, "Backup failed for example.org", headline(Payload{Status: "failed", Site: "example.org"}))
 	assert.Equal(t, "Backup cancelled for example.org", headline(Payload{Status: "cancelled", Site: "example.org"}))
 	assert.Equal(t, "No changes detected for example.org", headline(Payload{Status: "no_change", Site: "example.org"}))
+}
+
+func TestSuccessDescriptionDoesNotReportAnUnexpectedProblem(t *testing.T) {
+	payload := Payload{
+		Status:       "success",
+		PackageCount: 2,
+		SizeBytes:    2254857830,
+	}
+
+	assert.Equal(t, "The backup completed successfully. 2 items (2.1 GiB) were prepared.", description(payload))
 }
 
 func TestLastSuccessfulLine(t *testing.T) {
