@@ -53,7 +53,7 @@ func TestDiscordEmbedFailed(t *testing.T) {
 	require.NotNil(t, embed.Footer)
 	assert.True(t, strings.HasPrefix(embed.Footer.Text, "Bqckup Backup Monitoring · "))
 
-	require.Len(t, embed.Fields, 4)
+	require.Len(t, embed.Fields, 5)
 
 	// Row 1 (grid inline)
 	assert.Equal(t, "Server", embed.Fields[0].Name)
@@ -72,13 +72,47 @@ func TestDiscordEmbedFailed(t *testing.T) {
 	assert.Equal(t, "Consecutive Failures", embed.Fields[3].Name)
 	assert.Equal(t, "3", embed.Fields[3].Value)
 	assert.True(t, embed.Fields[3].Inline)
-	for _, field := range embed.Fields {
-		assert.NotEqual(t, "Failure", field.Name)
-		assert.NotContains(t, field.Value, "could not create incremental file backup")
+	assert.Equal(t, "Failure", embed.Fields[4].Name)
+	assert.Equal(t, "```text\n"+`could not create incremental file backup: repository: could not create the incremental backup: archiver: combine roots: tree: nodes are not sorted by name: "eprints" after "mysql"`+"\n```", embed.Fields[4].Value)
+	assert.False(t, embed.Fields[4].Inline)
+}
+
+func TestDiscordFailureCodeBlockFitsFieldLimit(t *testing.T) {
+	value := discordFailureBlock(strings.Repeat("a", 2000))
+	assert.LessOrEqual(t, len([]rune(value)), 1024)
+	assert.True(t, strings.HasPrefix(value, "```text\n"))
+	assert.True(t, strings.HasSuffix(value, "…\n```"))
+}
+
+func TestDiscordSuccessBackupIsNotSent(t *testing.T) {
+	received := make(chan discordPayload, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body discordPayload
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		received <- body
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(server.Close)
+
+	discord := NewDiscord("discord", server.URL)
+	payload := NewPayload(backup.NotifyInput{
+		Event:        config.EventBackupSucceeded,
+		SiteName:     "example.org",
+		Status:       backup.StatusSuccess,
+		StartedAt:    time.Date(2026, 8, 23, 1, 46, 56, 0, time.UTC),
+		FinishedAt:   time.Date(2026, 8, 23, 1, 48, 38, 0, time.UTC),
+		ErrorMessage: "stale error must not be rendered as a failure",
+	})
+	require.NoError(t, discord.Send(context.Background(), payload))
+
+	select {
+	case <-received:
+		t.Fatal("success backup must not be sent to Discord")
+	case <-time.After(200 * time.Millisecond):
 	}
 }
 
-func TestDiscordNoChangeEmbed(t *testing.T) {
+func TestDiscordNoChangeBackupIsNotSent(t *testing.T) {
 	received := make(chan discordPayload, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body discordPayload
@@ -108,18 +142,10 @@ func TestDiscordNoChangeEmbed(t *testing.T) {
 	payload.ServerIP = "203.0.113.7"
 	require.NoError(t, discord.Send(context.Background(), payload))
 
-	body := <-received
-	require.Len(t, body.Embeds, 1)
-	embed := body.Embeds[0]
-	assert.Equal(t, "No changes detected for example.org", embed.Title)
-	assert.Equal(t, 0xF1C40F, embed.Color)
-	assert.Contains(t, embed.Description, "The new backup is identical to the last one")
-	assert.Contains(t, embed.Description, "Likely an idle app")
-
-	require.Len(t, embed.Fields, 4)
-	for _, field := range embed.Fields {
-		assert.NotEqual(t, "Failure", field.Name)
-		assert.NotEqual(t, "2 items are unchanged from the previous run.", field.Value)
+	select {
+	case <-received:
+		t.Fatal("no-change backup must not be sent to Discord")
+	case <-time.After(200 * time.Millisecond):
 	}
 }
 
@@ -155,10 +181,10 @@ func TestDiscordEmbedFailedWithoutErrorMessage(t *testing.T) {
 	assert.Equal(t, "No successful backup yet", embed.Fields[1].Value)
 
 	// A missing terminal error is not replaced with a generic guess.
+	require.Len(t, embed.Fields, 4)
 	for _, field := range embed.Fields {
 		assert.NotEqual(t, "Failure", field.Name)
 	}
-	require.Len(t, embed.Fields, 4)
 }
 
 func TestDiscordCancelledEmbedHasNoFailureBlock(t *testing.T) {
