@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bqckup/bqckup-go/internal/buildinfo"
 	"github.com/bqckup/bqckup-go/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -59,7 +60,7 @@ func TestResolverLoadsRemoteStorageConfigurationIntoMemory(t *testing.T) {
 	assert.Equal(t, http.MethodGet, method)
 	assert.Equal(t, "application/json", accept)
 	assert.Equal(t, "identity", acceptEncoding)
-	assert.Equal(t, "bqckup/remote-config", userAgent)
+	assert.Equal(t, buildinfo.UserAgent(), userAgent)
 	assert.Equal(t, "remote-bucket", resolved["remote"].Bucket)
 	assert.Equal(t, "remote-key", resolved["remote"].AccessKeyID)
 	assert.Equal(t, "remote-secret", resolved["remote"].SecretAccessKey)

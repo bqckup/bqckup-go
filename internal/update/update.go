@@ -15,6 +15,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/bqckup/bqckup-go/internal/buildinfo"
 )
 
 const defaultRepository = "bqckup/bqckup-go"
@@ -136,6 +138,7 @@ func downloadWithProgress(ctx context.Context, client *http.Client, url string, 
 	if err != nil {
 		return nil, err
 	}
+	req.Header.Set("User-Agent", buildinfo.UserAgent())
 	response, err := client.Do(req)
 	if err != nil {
 		return nil, err
@@ -176,6 +179,7 @@ func download(ctx context.Context, client *http.Client, url string, progress Pro
 	if err != nil {
 		return nil, err
 	}
+	req.Header.Set("User-Agent", buildinfo.UserAgent())
 	response, err := client.Do(req)
 	if err != nil {
 		return nil, err

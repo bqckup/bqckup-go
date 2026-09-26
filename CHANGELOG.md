@@ -71,6 +71,11 @@ All notable changes to Bqckup are documented in this file.
 - Simplify backup progress, logging, and storage internals while removing the
   unused progress-bar dependencies without changing the CLI contract.
 
+- Send a standardized `bqckup/<version>` User-Agent header across all outbound
+  HTTP requests (remote storage configuration, webhook notifications, Discord
+  embeds, and self-update downloads), replacing Go's default client signature and
+  `bqckup/remote-config`.
+
 ## v1.0.3
 
 - Add optional `backup_prefix` namespace support so backup keys can use
