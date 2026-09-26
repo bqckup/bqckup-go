@@ -13,8 +13,8 @@ func TestCurrentUsesDevelopmentDefaults(t *testing.T) {
 }
 
 func TestUserAgent(t *testing.T) {
-	if got := UserAgent(); got != "bqckup/1.0.3" {
-		t.Fatalf("UserAgent() = %q, want %q", got, "bqckup/1.0.3")
+	if got := UserAgent(); got != "bqckup/1.0.11" {
+		t.Fatalf("UserAgent() = %q, want %q", got, "bqckup/1.0.11")
 	}
 }
 
