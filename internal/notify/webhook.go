@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/http"
 	"time"
+
+	"github.com/bqckup/bqckup-go/internal/buildinfo"
 )
 
 // postJSON sends one JSON body with an explicit content type and fails on
@@ -17,6 +19,7 @@ func postJSON(ctx context.Context, client *http.Client, url string, body []byte)
 		return fmt.Errorf("build request: %w", err)
 	}
 	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("User-Agent", buildinfo.UserAgent())
 	response, err := client.Do(request)
 	if err != nil {
 		return fmt.Errorf("post: %w", err)

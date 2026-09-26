@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bqckup/bqckup-go/internal/buildinfo"
 	"github.com/bqckup/bqckup-go/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -15,13 +16,15 @@ import (
 
 func TestWebhookPostsExactPayload(t *testing.T) {
 	var received struct {
-		method string
-		ctype  string
-		body   map[string]any
+		method    string
+		ctype     string
+		userAgent string
+		body      map[string]any
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		received.method = r.Method
 		received.ctype = r.Header.Get("Content-Type")
+		received.userAgent = r.Header.Get("User-Agent")
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&received.body))
 		w.WriteHeader(http.StatusNoContent)
 	}))
@@ -33,6 +36,7 @@ func TestWebhookPostsExactPayload(t *testing.T) {
 
 	assert.Equal(t, http.MethodPost, received.method)
 	assert.Equal(t, "application/json", received.ctype)
+	assert.Equal(t, buildinfo.UserAgent(), received.userAgent)
 	assert.Equal(t, "backup_failed", received.body["event"])
 	assert.Equal(t, "example.org", received.body["site"])
 	assert.Equal(t, "failed", received.body["status"])

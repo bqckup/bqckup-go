@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/bqckup/bqckup-go/internal/apperror"
+	"github.com/bqckup/bqckup-go/internal/buildinfo"
 	"github.com/bqckup/bqckup-go/internal/config"
 )
 
@@ -155,7 +156,7 @@ func (r *Resolver) fetch(ctx context.Context, providerURL string) (providerRespo
 	}
 	request.Header.Set("Accept", "application/json")
 	request.Header.Set("Accept-Encoding", "identity")
-	request.Header.Set("User-Agent", "bqckup/remote-config")
+	request.Header.Set("User-Agent", buildinfo.UserAgent())
 	response, err := r.client.Do(request)
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {

@@ -15,6 +15,7 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/bqckup/bqckup-go/internal/buildinfo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -84,7 +85,9 @@ func TestUpdateRunWithProgress(t *testing.T) {
 	assetName := fmt.Sprintf("bqckup_test_linux_%s.tar.gz", arch)
 	checksumsContent := fmt.Sprintf("%s  %s\n", archiveSHAHex, assetName)
 
+	var receivedUserAgents []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedUserAgents = append(receivedUserAgents, r.Header.Get("User-Agent"))
 		switch r.URL.Path {
 		case "/test/repo/releases/latest/download/checksums.txt":
 			w.WriteHeader(http.StatusOK)
@@ -132,6 +135,11 @@ func TestUpdateRunWithProgress(t *testing.T) {
 	content, err := os.ReadFile(targetFile)
 	require.NoError(t, err)
 	assert.Equal(t, newBinary, content)
+
+	require.NotEmpty(t, receivedUserAgents)
+	for _, ua := range receivedUserAgents {
+		assert.Equal(t, buildinfo.UserAgent(), ua)
+	}
 }
 
 type customTransport struct {
