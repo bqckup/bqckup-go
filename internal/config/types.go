@@ -149,14 +149,17 @@ type FileSource struct {
 }
 
 type DatabaseSource struct {
-	Name     string `mapstructure:"name" yaml:"name"`
-	Enabled  bool   `mapstructure:"enabled" yaml:"enabled"`
-	Engine   string `mapstructure:"engine" yaml:"engine"`
-	Host     string `mapstructure:"host" yaml:"host"`
-	Port     int    `mapstructure:"port" yaml:"port"`
-	Database string `mapstructure:"database" yaml:"database"`
-	Username string `mapstructure:"username" yaml:"username"`
-	Password string `mapstructure:"password" yaml:"password"`
+	Name    string `mapstructure:"name" yaml:"name"`
+	Enabled bool   `mapstructure:"enabled" yaml:"enabled"`
+	Engine  string `mapstructure:"engine" yaml:"engine"`
+	// AutoRepair opts into destructive MyISAM/Aria repair after a dump
+	// reports a table-corruption error. The zero value is intentionally false.
+	AutoRepair bool   `mapstructure:"auto_repair" yaml:"auto_repair"`
+	Host       string `mapstructure:"host" yaml:"host"`
+	Port       int    `mapstructure:"port" yaml:"port"`
+	Database   string `mapstructure:"database" yaml:"database"`
+	Username   string `mapstructure:"username" yaml:"username"`
+	Password   string `mapstructure:"password" yaml:"password"`
 }
 
 type Destination struct {

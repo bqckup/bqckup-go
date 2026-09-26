@@ -19,6 +19,8 @@ site:
         enabled: false
         # engine options: mysql | postgres
         engine: mysql
+        # Optional; omitted means false. REPAIR TABLE only applies to MyISAM/Aria.
+        # auto_repair: true
       - name: postgres-example
         enabled: false
         engine: postgres

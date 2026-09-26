@@ -14,6 +14,13 @@ const (
 	StatusNoChange  RunStatus = "no_change"
 )
 
+type RunScope string
+
+const (
+	RunScopeFull         RunScope = "full"
+	RunScopeDatabaseOnly RunScope = "database_only"
+)
+
 type PackageStatus string
 
 const (
@@ -24,6 +31,7 @@ const (
 type BackupRun struct {
 	ID             string     `gorm:"type:text;primaryKey" json:"id"`
 	SiteName       string     `gorm:"type:text;index;not null" json:"site_name"`
+	Scope          RunScope   `gorm:"type:text;not null;default:full;index" json:"scope"`
 	Status         RunStatus  `gorm:"type:text;index;not null" json:"status"`
 	Forced         bool       `gorm:"not null" json:"forced"`
 	StartedAt      time.Time  `gorm:"index;not null" json:"started_at"`

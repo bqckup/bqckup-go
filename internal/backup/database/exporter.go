@@ -7,11 +7,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/bqckup/bqckup-go/internal/apperror"
@@ -21,18 +23,33 @@ import (
 )
 
 type ProcessExporter struct {
-	process     process.ProcessRunner
-	command     string
-	passwordEnv string
-	engine      string
+	process      process.ProcessRunner
+	command      string
+	passwordEnv  string
+	engine       string
+	retryDelays  []time.Duration
+	autoRepairer AutoRepairer
 }
 
 func NewMySQL(runner process.ProcessRunner) *ProcessExporter {
-	return &ProcessExporter{process: runner, command: "mysqldump", passwordEnv: "MYSQL_PWD", engine: "mysql"}
+	return &ProcessExporter{
+		process: runner, command: "mysqldump", passwordEnv: "MYSQL_PWD", engine: "mysql",
+		retryDelays: []time.Duration{15 * time.Second, 60 * time.Second},
+	}
 }
 
 func NewPostgres(runner process.ProcessRunner) *ProcessExporter {
-	return &ProcessExporter{process: runner, command: "pg_dump", passwordEnv: "PGPASSWORD", engine: "postgres"}
+	return &ProcessExporter{
+		process: runner, command: "pg_dump", passwordEnv: "PGPASSWORD", engine: "postgres",
+		retryDelays: []time.Duration{15 * time.Second, 60 * time.Second},
+	}
+}
+
+// SetAutoRepairer wires the optional source-database maintenance capability.
+// It is intentionally separate from the constructor so existing library
+// callers and tests keep the safe default of no automatic repair.
+func (e *ProcessExporter) SetAutoRepairer(repairer AutoRepairer) {
+	e.autoRepairer = repairer
 }
 
 func (e *ProcessExporter) Preflight() error {
@@ -118,12 +135,46 @@ func (e *ProcessExporter) Export(ctx context.Context, source config.DatabaseSour
 	if err := e.Preflight(); err != nil {
 		return backup.Package{}, err
 	}
+	repaired := false
+	var repairWarnings []string
+	for attempt := 0; ; attempt++ {
+		pkg, err, retryable, corruption := e.exportOnce(ctx, source, destination)
+		if err != nil && source.AutoRepair && corruption && !repaired {
+			repaired = true
+			if e.autoRepairer == nil {
+				return backup.Package{}, errors.Join(err, errors.New("automatic database repair is enabled but unavailable"))
+			}
+			repairResult, repairErr := e.autoRepairer.RepairCorruptTables(ctx, source)
+			if repairErr != nil {
+				return backup.Package{}, errors.Join(err, fmt.Errorf("automatic database repair failed: %w", repairErr))
+			}
+			if len(repairResult.Repaired) == 0 {
+				return backup.Package{}, errors.Join(err, errors.New("automatic database repair found no repairable table"))
+			}
+			for _, repair := range repairResult.Repaired {
+				repairWarnings = append(repairWarnings, fmt.Sprintf("automatic database repair applied to table %q (%s): %s", repair.Table, repair.Engine, repair.Message))
+			}
+			continue
+		}
+		if err == nil || !retryable || attempt >= len(e.retryDelays) {
+			if err == nil {
+				pkg.Warnings = append(pkg.Warnings, repairWarnings...)
+			}
+			return pkg, err
+		}
+		if err := waitForRetry(ctx, e.retryDelays[attempt]); err != nil {
+			return backup.Package{}, err
+		}
+	}
+}
+
+func (e *ProcessExporter) exportOnce(ctx context.Context, source config.DatabaseSource, destination string) (backup.Package, error, bool, bool) {
 	if err := os.MkdirAll(filepath.Dir(destination), 0o700); err != nil {
-		return backup.Package{}, apperror.Hide("could not prepare database export", err)
+		return backup.Package{}, apperror.Hide("could not prepare database export", err), false, false
 	}
 	output, err := os.OpenFile(destination, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
-		return backup.Package{}, apperror.Hide("could not create database export", err)
+		return backup.Package{}, apperror.Hide("could not create database export", err), false, false
 	}
 	success := false
 	defer func() {
@@ -146,22 +197,23 @@ func (e *ProcessExporter) Export(ctx context.Context, source config.DatabaseSour
 	gzipErr := gzipWriter.Close()
 	if processErr != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			return backup.Package{}, ctxErr
+			return backup.Package{}, ctxErr, false, false
 		}
-		return backup.Package{}, apperror.Hide("could not export database", processErr)
+		transient := isTransientDatabaseError(processErr, stderr.String())
+		return backup.Package{}, apperror.Hide("could not export database", processErr), transient, !transient && isCorruptionDatabaseError(processErr, stderr.String())
 	}
 	if gzipErr != nil {
-		return backup.Package{}, apperror.Hide("could not finish database export", gzipErr)
+		return backup.Package{}, apperror.Hide("could not finish database export", gzipErr), false, false
 	}
 	if err := output.Sync(); err != nil {
-		return backup.Package{}, apperror.Hide("could not sync database export", err)
+		return backup.Package{}, apperror.Hide("could not sync database export", err), false, false
 	}
 	info, err := output.Stat()
 	if err != nil {
-		return backup.Package{}, apperror.Hide("could not stat database export", err)
+		return backup.Package{}, apperror.Hide("could not stat database export", err), false, false
 	}
 	if err := output.Close(); err != nil {
-		return backup.Package{}, apperror.Hide("could not close database export", err)
+		return backup.Package{}, apperror.Hide("could not close database export", err), false, false
 	}
 
 	success = true
@@ -171,7 +223,79 @@ func (e *ProcessExporter) Export(ctx context.Context, source config.DatabaseSour
 		SHA256:     hex.EncodeToString(digest.Sum(nil)),
 		SourceKind: "database",
 		SourceName: source.Name,
-	}, nil
+	}, nil, false, false
+}
+
+func waitForRetry(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func isTransientDatabaseError(processErr error, stderr string) bool {
+	if processErr == nil {
+		return false
+	}
+	message := strings.ToLower(processErr.Error() + "\n" + stderr)
+	for _, marker := range []string{
+		"timeout",
+		"timed out",
+		"deadlock",
+		"lock wait",
+		"too many connections",
+		"server has gone away",
+		"lost connection",
+		"connection reset",
+		"connection refused",
+		"can't connect",
+		"cannot connect",
+		"temporary failure",
+		"try again",
+		"resource temporarily unavailable",
+	} {
+		if strings.Contains(message, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func isCorruptionDatabaseError(processErr error, stderr string) bool {
+	if processErr == nil {
+		return false
+	}
+	message := strings.ToLower(processErr.Error() + "\n" + stderr)
+	for _, marker := range []string{
+		"table is marked as crashed",
+		"marked as crashed",
+		"incorrect key file",
+		"table is corrupted",
+		"table corrupt",
+		"corrupt table",
+		"checksum mismatch",
+		"error: 1034",
+		"error 1034",
+		"error: 126",
+		"error 126",
+		"error: 127",
+		"error 127",
+		"error: 134",
+		"error 134",
+		"error: 135",
+		"error 135",
+		"error: 145",
+		"error 145",
+	} {
+		if strings.Contains(message, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func (e *ProcessExporter) arguments(source config.DatabaseSource) []string {
@@ -245,6 +369,8 @@ func (e *ProcessExporter) probeArguments(source config.DatabaseSource) []string 
 			"--port=" + port,
 			"--user=" + source.Username,
 			"--no-data",
+			"--single-transaction",
+			"--quick",
 			source.Database,
 		}
 	}

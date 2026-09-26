@@ -21,6 +21,7 @@ type Package struct {
 	SourceName     string
 	FilesSkipped   int
 	SocketsIgnored int
+	Warnings       []string
 }
 
 type Exporter interface {

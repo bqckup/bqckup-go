@@ -64,6 +64,7 @@ func NewRoot(info buildinfo.Info) *cobra.Command {
 	root.AddCommand(newInitCommand(opts))
 	root.AddCommand(newConfigCommand(opts))
 	root.AddCommand(newBackupCommand(opts))
+	root.AddCommand(newDatabaseCommand(opts))
 	root.AddCommand(newDoctorCommand(opts))
 	root.AddCommand(newHistoryCommand(opts))
 	root.AddCommand(newReportCommand(opts))

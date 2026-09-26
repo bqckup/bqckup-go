@@ -2,8 +2,30 @@
 
 All notable changes to Bqckup are documented in this file.
 
+## Unreleased
+
+## v1.0.12
+
+- Add opt-in automatic MyISAM/Aria repair during a database backup after a
+  corruption-specific dump error, followed by a retry; omitted `auto_repair`
+  remains false and InnoDB is never repaired automatically.
+
+- Retry transient MySQL/MariaDB and PostgreSQL export failures sequentially
+  with cleanup between attempts, and use the same transaction-safe MySQL dump
+  options for doctor schema probes as normal database exports.
+- Allow database doctor probes up to 60 seconds for larger schemas such as
+  EPrints installations.
+- Add explicit MySQL/MariaDB source database checks and guarded MyISAM/Aria
+  table repair; InnoDB repair remains a recovery or restore operation.
+- Add `backup run <site> --database` to export enabled databases without
+  reprocessing full or incremental file backups. Database-only runs are tracked
+  separately, do not reset the full-backup interval, and do not prune full
+  backup sets.
+
 ## v1.0.11
 
+- Preserve actionable local archive paths in operator failure notifications
+  while keeping operational log diagnostics redacted.
 - Convert legacy `remote_url` storage entries to the v2 remote credentials
   form and include an empty `backup_prefix` in generated root configuration.
 - Make failed-backup notifications report only terminal facts: remove generic

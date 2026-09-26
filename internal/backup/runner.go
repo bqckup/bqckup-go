@@ -41,6 +41,7 @@ const (
 type RunResult struct {
 	RunID      string     `json:"run_id,omitempty"`
 	SiteName   string     `json:"site_name"`
+	Scope      string     `json:"scope"`
 	Status     Status     `json:"status"`
 	SkipReason SkipReason `json:"skip_reason,omitempty"`
 	StartedAt  time.Time  `json:"started_at,omitempty"`
@@ -183,7 +184,13 @@ func buildRepoConfig(site config.Site, storageConfig config.Storage, requirePass
 }
 
 func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result RunResult, returnedErr error) {
-	return r.run(ctx, site, force)
+	return r.run(ctx, site, force, false)
+}
+
+// RunDatabaseOnly exports configured database sources without processing file
+// sources or changing the retention set for full backups.
+func (r *Runner) RunDatabaseOnly(ctx context.Context, site config.Site, force bool) (RunResult, error) {
+	return r.run(ctx, site, force, true)
 }
 
 // RunWithProgress runs one backup with an isolated progress reporter. A
@@ -192,12 +199,24 @@ func (r *Runner) Run(ctx context.Context, site config.Site, force bool) (result 
 func (r *Runner) RunWithProgress(ctx context.Context, site config.Site, force bool, progress Progress) (RunResult, error) {
 	isolated := *r
 	isolated.progress = progressOrNoop(progress)
-	return isolated.run(ctx, site, force)
+	return isolated.run(ctx, site, force, false)
 }
 
-func (r *Runner) run(ctx context.Context, site config.Site, force bool) (result RunResult, returnedErr error) {
+// RunDatabaseOnlyWithProgress runs one database-only backup with an isolated
+// progress reporter.
+func (r *Runner) RunDatabaseOnlyWithProgress(ctx context.Context, site config.Site, force bool, progress Progress) (RunResult, error) {
+	isolated := *r
+	isolated.progress = progressOrNoop(progress)
+	return isolated.run(ctx, site, force, true)
+}
+
+func (r *Runner) run(ctx context.Context, site config.Site, force, databaseOnly bool) (result RunResult, returnedErr error) {
 	defer r.progress.Done()
 	result.SiteName = site.Name
+	result.Scope = string(history.RunScopeFull)
+	if databaseOnly {
+		result.Scope = string(history.RunScopeDatabaseOnly)
+	}
 	if err := r.validateDependencies(); err != nil {
 		result.Status = StatusFailed
 		return result, err
@@ -205,6 +224,10 @@ func (r *Runner) run(ctx context.Context, site config.Site, force bool) (result 
 	if err := ctx.Err(); err != nil {
 		result.Status = StatusCancelled
 		return result, apperror.Wrap(apperror.CategoryCancellation, "backup was cancelled", err)
+	}
+	if databaseOnly && !hasEnabledDatabaseSources(site) {
+		result.Status = StatusFailed
+		return result, apperror.Wrap(apperror.CategoryConfig, "database-only backup requires an enabled database source", nil)
 	}
 
 	unlock, acquired, err := r.dependencies.Locker.TryLock(ctx, site.Name)
@@ -241,9 +264,13 @@ func (r *Runner) run(ctx context.Context, site config.Site, force bool) (result 
 
 	run := &history.BackupRun{
 		SiteName:  site.Name,
+		Scope:     history.RunScopeFull,
 		Status:    history.StatusRunning,
 		Forced:    force,
 		StartedAt: now,
+	}
+	if databaseOnly {
+		run.Scope = history.RunScopeDatabaseOnly
 	}
 	if err := r.dependencies.Repository.CreateRun(ctx, run); err != nil {
 		result.Status = StatusFailed
@@ -290,6 +317,7 @@ func (r *Runner) run(ctx context.Context, site config.Site, force bool) (result 
 
 	sitePrefix := backupSitePrefix(site.Name, r.dependencies.ServerID)
 	retentionWarnings := make([]string, 0)
+	databaseWarnings := make([]string, 0)
 	recordRetentionWarning := func(destination, message string, cause error) {
 		message = fmt.Sprintf("%s for destination %q", message, destination)
 		warning := apperror.Wrap(apperror.CategoryStorage, message, cause)
@@ -298,7 +326,7 @@ func (r *Runner) run(ctx context.Context, site config.Site, force bool) (result 
 		result.Warnings = append(result.Warnings, message)
 	}
 
-	if site.BackupMode == "incremental" {
+	if !databaseOnly && site.BackupMode == "incremental" {
 		engine := r.dependencies.IncrementalEngine
 		if engine == nil {
 			return fail(apperror.Wrap(apperror.CategoryInternal, "incremental backup engine is unavailable", nil))
@@ -356,7 +384,7 @@ func (r *Runner) run(ctx context.Context, site config.Site, force bool) (result 
 			}
 		}
 		result.FilesSkipped = partialFiles
-	} else {
+	} else if !databaseOnly {
 		archiveTotal := estimateArchiveTotal(FileSource{
 			Include:        []string(site.Sources.Files.Include),
 			Exclude:        []string(site.Sources.Files.Exclude),
@@ -432,6 +460,10 @@ func (r *Runner) run(ctx context.Context, site config.Site, force bool) (result 
 				}
 				return fail(operationErr)
 			}
+			if len(databasePackage.Warnings) > 0 {
+				databaseWarnings = append(databaseWarnings, databasePackage.Warnings...)
+				result.Warnings = append(result.Warnings, databasePackage.Warnings...)
+			}
 			r.progress.FinishStage()
 			if err := r.storePackage(ctx, run.ID, databasePackage, databaseKey, site.Destinations); err != nil {
 				return fail(err)
@@ -439,7 +471,7 @@ func (r *Runner) run(ctx context.Context, site config.Site, force bool) (result 
 		}
 	}
 
-	if result.FilesSkipped == 0 && (site.BackupMode != "incremental" || hasEnabledDatabaseSources(site)) {
+	if !databaseOnly && result.FilesSkipped == 0 && (site.BackupMode != "incremental" || hasEnabledDatabaseSources(site)) {
 		markerKey := path.Join(sitePrefix, storage.FormatPackageKey(now, storage.CompletionMarkerName, run.ID))
 		if err := r.storeCompletionMarker(ctx, markerKey, run.ID, site.Destinations); err != nil {
 			return fail(err)
@@ -449,7 +481,7 @@ func (r *Runner) run(ctx context.Context, site config.Site, force bool) (result 
 	// A partial backup must never trigger pruning: its snapshot or flat
 	// packages are preserved for diagnosis, but they do not displace a
 	// previously completed recovery point.
-	if result.FilesSkipped == 0 {
+	if !databaseOnly && result.FilesSkipped == 0 {
 		for _, destination := range site.Destinations {
 			store, ok := r.dependencies.Stores[destination.Storage]
 			if !ok || store == nil {
@@ -488,7 +520,7 @@ func (r *Runner) run(ctx context.Context, site config.Site, force bool) (result 
 		}
 	}
 
-	if site.BackupMode != "incremental" {
+	if !databaseOnly && site.BackupMode != "incremental" {
 		anchor, err := r.dependencies.Repository.LastSuccessful(ctx, site.Name, now)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "warning: could not load previous backup for change detection: %v\n", err)
@@ -520,9 +552,9 @@ func (r *Runner) run(ctx context.Context, site config.Site, force bool) (result 
 				finished := r.dependencies.Clock.Now().UTC()
 				historyCategory := "no_change"
 				historyMessage := msg
-				if len(retentionWarnings) > 0 {
-					historyCategory = "retention"
-					historyMessage = strings.Join(append([]string{msg}, retentionWarnings...), "; ")
+				if warningCategory, warningMessage := backupWarningHistory(retentionWarnings, databaseWarnings); warningCategory != "" {
+					historyCategory = warningCategory
+					historyMessage = strings.Join([]string{msg, warningMessage}, "; ")
 				}
 				if err := r.dependencies.Repository.FinishRun(context.WithoutCancel(ctx), run.ID, history.StatusNoChange, finished, historyCategory, historyMessage); err != nil {
 					result.Status = StatusFailed
@@ -554,8 +586,8 @@ func (r *Runner) run(ctx context.Context, site config.Site, force bool) (result 
 		finished := r.dependencies.Clock.Now().UTC()
 		message := fmt.Sprintf("%d source entries could not be read; an incomplete snapshot was saved", result.FilesSkipped)
 		historyMessage := message
-		if len(retentionWarnings) > 0 {
-			historyMessage = strings.Join(append([]string{message}, retentionWarnings...), "; ")
+		if _, warningMessage := backupWarningHistory(retentionWarnings, databaseWarnings); warningMessage != "" {
+			historyMessage = strings.Join([]string{message, warningMessage}, "; ")
 		}
 		if err := r.dependencies.Repository.FinishRun(context.WithoutCancel(ctx), run.ID, history.StatusPartial, finished, "source", historyMessage); err != nil {
 			result.Status = StatusFailed
@@ -583,12 +615,7 @@ func (r *Runner) run(ctx context.Context, site config.Site, force bool) (result 
 	}
 
 	finished := r.dependencies.Clock.Now().UTC()
-	errorCategory := ""
-	errorMessage := ""
-	if len(retentionWarnings) > 0 {
-		errorCategory = "retention"
-		errorMessage = strings.Join(retentionWarnings, "; ")
-	}
+	errorCategory, errorMessage := backupWarningHistory(retentionWarnings, databaseWarnings)
 	if err := r.dependencies.Repository.FinishRun(context.WithoutCancel(ctx), run.ID, history.StatusSuccess, finished, errorCategory, errorMessage); err != nil {
 		result.Status = StatusFailed
 		result.FinishedAt = finished
@@ -732,6 +759,19 @@ func hasEnabledDatabaseSources(site config.Site) bool {
 		}
 	}
 	return false
+}
+
+func backupWarningHistory(retentionWarnings, databaseWarnings []string) (string, string) {
+	warnings := make([]string, 0, len(retentionWarnings)+len(databaseWarnings))
+	warnings = append(warnings, retentionWarnings...)
+	warnings = append(warnings, databaseWarnings...)
+	if len(warnings) == 0 {
+		return "", ""
+	}
+	if len(databaseWarnings) == 0 {
+		return "retention", strings.Join(warnings, "; ")
+	}
+	return "maintenance", strings.Join(warnings, "; ")
 }
 
 // notify delivers one terminal notification after the run is recorded in

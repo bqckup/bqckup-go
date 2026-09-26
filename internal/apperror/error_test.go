@@ -43,13 +43,23 @@ func TestNotificationMessageDoesNotExposeHiddenCause(t *testing.T) {
 	assert.NotContains(t, NotificationMessage(err), "supersecret")
 }
 
-func TestNotificationMessageRedactsAbsolutePaths(t *testing.T) {
+func TestNotificationMessagePreservesAbsolutePaths(t *testing.T) {
+	err := Wrap(CategoryExecution, "could not create the file archive",
+		errors.New("inspect archive source /srv/private/customer.sql: permission denied"))
+
+	assert.Equal(t,
+		"could not create the file archive: inspect archive source /srv/private/customer.sql: permission denied",
+		NotificationMessage(err),
+	)
+	assert.Contains(t, NotificationMessage(err), "/srv/private/customer.sql")
+}
+
+func TestDiagnosticMessageRedactsAbsolutePaths(t *testing.T) {
 	err := Wrap(CategoryExecution, "could not create the file archive",
 		errors.New("inspect archive source /srv/private/customer.sql: permission denied"))
 
 	assert.Equal(t,
 		"could not create the file archive: inspect archive source <redacted-path>: permission denied",
-		NotificationMessage(err),
+		DiagnosticMessage(err),
 	)
-	assert.NotContains(t, NotificationMessage(err), "customer.sql")
 }

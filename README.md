@@ -14,6 +14,7 @@ Cloudflare R2, or another S3-compatible service.
 - File and directory backups
 - MySQL/MariaDB and PostgreSQL database exports
 - Full `.tar.gz` archives and compressed SQL dumps
+- Database-only reruns that leave file backups untouched
 - Encrypted, deduplicated incremental file snapshots
 - Local, Amazon S3, Cloudflare R2, and S3-compatible storage
 - Multiple required destinations per site
@@ -91,6 +92,7 @@ Common options:
 | `storage.type` | `local`, `s3`, `r2` |
 | `site.backup_mode` | `full` (default), `incremental` |
 | `database.engine` | `mysql`, `postgres` |
+| `database.auto_repair` | `false` by default; opt-in MyISAM/Aria repair after a corruption error |
 | `notifications.channels.<name>.type` | `smtp`, `webhook`, `discord` |
 | `notifications.routes[].events[]` | `all`, `backup_failed`, `backup_partial`, `backup_cancelled`, `backup_no_change`, `backup_succeeded` |
 
@@ -164,9 +166,11 @@ bqckup init
 bqckup config validate
 bqckup config fix-permissions
 bqckup doctor [--site <name>]
+bqckup database check <site> --source <name>
+bqckup database repair <site> --source <name> --table <table> --force
 bqckup backup list
 bqckup backup summary [--site <name>]
-bqckup backup run <site> [--force]
+bqckup backup run <site> [--force] [--database]
 bqckup backup active [--site <name>]
 bqckup backup stop <site> [--timeout 1m]
 bqckup backup stop --all [--timeout 1m]
@@ -198,6 +202,11 @@ exports.
 
 `backup run --force` ignores only the configured minimum backup interval. It
 does not bypass the per-site lock while another backup of that site is active.
+Use `backup run <site> --database --force` to export enabled databases only;
+the option requires one site, skips full and incremental file backup work, and
+does not reset the interval for the next full backup. Database-only runs do not
+apply set retention, so their SQL dumps are not automatically removed by
+`keep_last`.
 
 For full-mode archives and database dumps with a known estimate, Bqckup checks
 free space in its local temporary directory before writing the artifact. It

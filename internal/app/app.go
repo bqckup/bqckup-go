@@ -34,22 +34,23 @@ type remoteStorageResolver interface {
 }
 
 type App struct {
-	configuration    config.Config
-	runner           *backup.Runner
-	repository       *history.Repository
-	stores           map[string]storage.Store
-	snapshots        backup.SnapshotLister
-	restorer         backup.SnapshotRestorer
-	checker          backup.RepositoryChecker
-	repairer         backup.IndexRepairer
-	reportBuilder    *report.Builder
-	reportDispatcher *report.Dispatcher
-	closeOnce        sync.Once
-	closeErr         error
-	closeDatabase    func() error
-	logger           *appLogger
-	backupProgress   backup.Progress
-	closeLogger      func() error
+	configuration       config.Config
+	runner              *backup.Runner
+	repository          *history.Repository
+	stores              map[string]storage.Store
+	snapshots           backup.SnapshotLister
+	restorer            backup.SnapshotRestorer
+	checker             backup.RepositoryChecker
+	repairer            backup.IndexRepairer
+	databaseMaintainers map[string]databaseMaintainer
+	reportBuilder       *report.Builder
+	reportDispatcher    *report.Dispatcher
+	closeOnce           sync.Once
+	closeErr            error
+	closeDatabase       func() error
+	logger              *appLogger
+	backupProgress      backup.Progress
+	closeLogger         func() error
 }
 
 func Open(ctx context.Context, configDir string) (*App, error) {
@@ -75,11 +76,14 @@ func Open(ctx context.Context, configDir string) (*App, error) {
 		_ = closeDatabase()
 		return nil, err
 	}
-	databaseExporters, err := buildDatabaseExporters(ctx, configuration, process.NewProcessRunner())
+	processRunner := process.NewProcessRunner()
+	databaseMaintainers := buildDatabaseMaintainers(configuration, processRunner)
+	databaseExporters, err := buildDatabaseExporters(ctx, configuration, processRunner)
 	if err != nil {
 		_ = closeDatabase()
 		return nil, err
 	}
+	configureDatabaseAutoRepair(databaseExporters, databaseMaintainers)
 	logger, closeLogger, err := openAppLogger(configuration.App)
 	if err != nil {
 		_ = closeDatabase()
@@ -110,19 +114,20 @@ func Open(ctx context.Context, configDir string) (*App, error) {
 		configuration.BackupNamespace(),
 	)
 	return &App{
-		configuration:    configuration,
-		runner:           runner,
-		repository:       repository,
-		stores:           stores,
-		snapshots:        engine,
-		restorer:         engine,
-		checker:          engine,
-		repairer:         engine,
-		reportBuilder:    reportBuilder,
-		reportDispatcher: reportDispatcher,
-		closeDatabase:    closeDatabase,
-		logger:           logger,
-		closeLogger:      closeLogger,
+		configuration:       configuration,
+		runner:              runner,
+		repository:          repository,
+		stores:              stores,
+		snapshots:           engine,
+		restorer:            engine,
+		checker:             engine,
+		repairer:            engine,
+		databaseMaintainers: databaseMaintainers,
+		reportBuilder:       reportBuilder,
+		reportDispatcher:    reportDispatcher,
+		closeDatabase:       closeDatabase,
+		logger:              logger,
+		closeLogger:         closeLogger,
 	}, nil
 }
 
@@ -202,6 +207,18 @@ func buildDatabaseExporters(ctx context.Context, configuration config.Config, pr
 	return exporters, nil
 }
 
+func configureDatabaseAutoRepair(exporters map[string]backup.Exporter, maintainers map[string]databaseMaintainer) {
+	exporter, ok := exporters["mysql"].(*databaseexporter.ProcessExporter)
+	if !ok || exporter == nil {
+		return
+	}
+	maintainer, ok := maintainers["mysql"].(databaseexporter.AutoRepairer)
+	if !ok || maintainer == nil {
+		return
+	}
+	exporter.SetAutoRepairer(maintainer)
+}
+
 func buildStores(ctx context.Context, configured map[string]config.Storage) (map[string]storage.Store, error) {
 	stores := make(map[string]storage.Store, len(configured))
 	for name, value := range configured {
@@ -241,7 +258,14 @@ func (a *App) SetBackupProgress(progress backup.Progress) {
 
 func (a *App) RunBackup(ctx context.Context, siteName string, force bool) (backup.RunResult, error) {
 	configErr := a.backupSiteConfigs(ctx)
-	result, runErr := a.runBackup(ctx, siteName, force, nil)
+	result, runErr := a.runBackup(ctx, siteName, force, nil, false)
+	return result, errors.Join(configErr, runErr)
+}
+
+// RunDatabaseBackup runs only enabled database sources for one site.
+func (a *App) RunDatabaseBackup(ctx context.Context, siteName string, force bool) (backup.RunResult, error) {
+	configErr := a.backupSiteConfigs(ctx)
+	result, runErr := a.runBackup(ctx, siteName, force, nil, true)
 	return result, errors.Join(configErr, runErr)
 }
 
@@ -256,9 +280,9 @@ func (a *App) backupSiteConfigs(ctx context.Context) error {
 	return nil
 }
 
-func (a *App) runBackup(ctx context.Context, siteName string, force bool, progress backup.Progress) (backup.RunResult, error) {
+func (a *App) runBackup(ctx context.Context, siteName string, force bool, progress backup.Progress, databaseOnly bool) (backup.RunResult, error) {
 	started := time.Now()
-	a.logger.write(logInfo, "backup_start", "site", siteName, "force", force)
+	a.logger.write(logInfo, "backup_start", "site", siteName, "force", force, "database_only", databaseOnly)
 	site, ok := a.configuration.Site(siteName)
 	if !ok {
 		err := apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf("site %q was not found", siteName), nil)
@@ -280,12 +304,19 @@ func (a *App) runBackup(ctx context.Context, siteName string, force bool, progre
 			databaseNames = append(databaseNames, source.Name)
 		}
 	}
+	scope := "full"
+	fileSourceCount := len(site.Sources.Files.Include)
+	if databaseOnly {
+		scope = "database_only"
+		fileSourceCount = 0
+	}
 	a.logger.write(logInfo, "backup_plan",
 		"site", siteName,
 		"mode", site.BackupMode,
 		"namespace", a.configuration.BackupNamespace(),
 		"destinations", destinations,
-		"file_sources", len(site.Sources.Files.Include),
+		"file_sources", fileSourceCount,
+		"scope", scope,
 		"database_sources", len(databaseNames),
 		"keep_last", site.Policy.KeepLast,
 		"minimum_interval", site.Policy.MinimumInterval.String(),
@@ -299,7 +330,14 @@ func (a *App) runBackup(ctx context.Context, siteName string, force bool, progre
 	if progress == nil {
 		progress = a.backupProgress
 	}
-	result, err := a.runner.RunWithProgress(ctx, site, force, newLoggingProgress(a.logger, siteName, progress))
+	var result backup.RunResult
+	var err error
+	loggingProgress := newLoggingProgress(a.logger, siteName, progress)
+	if databaseOnly {
+		result, err = a.runner.RunDatabaseOnlyWithProgress(ctx, site, force, loggingProgress)
+	} else {
+		result, err = a.runner.RunWithProgress(ctx, site, force, loggingProgress)
+	}
 	a.logStoredPackages(ctx, result)
 	a.logBackupFinished(siteName, result, started, err)
 	if err == nil {
@@ -376,7 +414,7 @@ func (a *App) RunEnabledBackups(ctx context.Context, force bool, observer Backup
 	configErr := a.backupSiteConfigs(ctx)
 	results, runErr := runEnabledBackups(ctx, a.configuration.Sites, force, observer,
 		func(ctx context.Context, siteName string, force bool) (backup.RunResult, error) {
-			return a.runBackup(ctx, siteName, force, backup.NoopProgress{})
+			return a.runBackup(ctx, siteName, force, backup.NoopProgress{}, false)
 		})
 	return results, errors.Join(configErr, runErr)
 }
