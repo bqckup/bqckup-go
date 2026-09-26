@@ -46,6 +46,41 @@ func TestLoadDefaultsMissingSchemaVersionsToV2(t *testing.T) {
 	assert.Equal(t, SchemaVersion, cfg.Sites[0].SchemaVersion)
 }
 
+func TestLoadDatabaseAutoRepairDefaultsFalseAndReadsExplicitOptIn(t *testing.T) {
+	site := strings.Replace(validSiteYAML(t), "    databases: []", `    databases:
+      - name: default-db
+        enabled: true
+        engine: mysql
+        host: 127.0.0.1
+        port: 3306
+        database: application
+        username: backup
+        password: secret
+`, 1)
+	dir := writeConfigTree(t, `version: 2
+app:
+  state_database: data/bqckup.db
+  temporary_directory: tmp
+  lock_directory: locks
+`, localStorageYAML, site)
+
+	cfg, err := Load(context.Background(), dir)
+	require.NoError(t, err)
+	require.Len(t, cfg.Sites[0].Sources.Databases, 1)
+	assert.False(t, cfg.Sites[0].Sources.Databases[0].AutoRepair)
+
+	site = strings.Replace(site, "        password: secret\n", "        password: secret\n        auto_repair: true\n", 1)
+	dir = writeConfigTree(t, `version: 2
+app:
+  state_database: data/bqckup.db
+  temporary_directory: tmp
+  lock_directory: locks
+`, localStorageYAML, site)
+	cfg, err = Load(context.Background(), dir)
+	require.NoError(t, err)
+	assert.True(t, cfg.Sites[0].Sources.Databases[0].AutoRepair)
+}
+
 func TestLoadAcceptsStorageYML(t *testing.T) {
 	dir := writeConfigTree(t, `version: 2
 app:

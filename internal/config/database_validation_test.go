@@ -50,6 +50,18 @@ func TestValidateAllowsDisabledIncompleteDatabaseSource(t *testing.T) {
 	require.NoError(t, cfg.Validate())
 }
 
+func TestValidateRejectsAutoRepairForPostgres(t *testing.T) {
+	cfg := validConfig(t)
+	database := validDatabase("postgres")
+	database.AutoRepair = true
+	cfg.Sites[0].Sources.Databases = []DatabaseSource{database}
+
+	err := cfg.Validate()
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "auto_repair")
+}
+
 func TestValidateRejectsDuplicateEnabledDatabaseNames(t *testing.T) {
 	cfg := validConfig(t)
 	first := validDatabase("mysql")

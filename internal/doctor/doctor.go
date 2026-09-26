@@ -35,7 +35,7 @@ type DatabaseProber interface {
 
 // probeTimeout bounds every connectivity probe. Probes run sequentially, so
 // one hung probe costs at most this long before the run continues.
-var probeTimeout = 10 * time.Second
+var probeTimeout = 60 * time.Second
 
 // Checker runs the doctor checks. Fields are populated by app.OpenDoctor.
 type Checker struct {

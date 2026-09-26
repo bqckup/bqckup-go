@@ -585,6 +585,9 @@ func validateDatabaseSource(file, field string, source DatabaseSource) error {
 	if source.Engine != "mysql" && source.Engine != "postgres" {
 		return validationError(file, field+".engine", "must be mysql or postgres")
 	}
+	if source.AutoRepair && source.Engine != "mysql" {
+		return validationError(file, field+".auto_repair", "is supported for mysql sources only")
+	}
 	if strings.TrimSpace(source.Host) == "" {
 		return validationError(file, field+".host", "is required")
 	}

@@ -73,6 +73,7 @@ func DiagnosticMessage(err error) string {
 		if message != "" {
 			message = diagnosticURL.ReplaceAllString(message, "<redacted-url>")
 			message = diagnosticSecret.ReplaceAllString(message, "$1=<redacted>")
+			message = diagnosticPath.ReplaceAllString(message, "$1<redacted-path>")
 			if _, ok := seen[message]; !ok {
 				seen[message] = struct{}{}
 				parts = append(parts, message)
@@ -105,7 +106,6 @@ func NotificationMessage(err error) string {
 		message = strings.TrimSpace(message)
 		message = diagnosticURL.ReplaceAllString(message, "<redacted-url>")
 		message = diagnosticSecret.ReplaceAllString(message, "$1=<redacted>")
-		message = diagnosticPath.ReplaceAllString(message, "$1<redacted-path>")
 		if message == "" || strings.Contains(previous, message) {
 			return
 		}

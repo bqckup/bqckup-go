@@ -228,6 +228,8 @@ site:
         database: application
         username: backup_user
         password: EXAMPLE_DATABASE_PASSWORD
+        # Optional and disabled by default. Only MyISAM/Aria tables are repaired.
+        # auto_repair: true
       - name: application-postgres
         enabled: false
         engine: postgres
@@ -264,7 +266,9 @@ sudo chmod 600 /etc/bqckup/sites/website.yaml
 ```
 
 Bqckup passes database passwords to exporters through `MYSQL_PWD` or
-`PGPASSWORD`, not through command-line arguments.
+`PGPASSWORD`, not through command-line arguments. `auto_repair` is `false`
+when omitted; keep it disabled unless automatic modification of a production
+database is explicitly approved.
 
 ### Incremental backup example
 
@@ -341,6 +345,12 @@ bqckup doctor --site website
 writable application directories, required database tools, and configured
 incremental passwords without printing their values.
 
+For enabled MySQL/MariaDB and PostgreSQL sources, the database probe runs a
+read-only schema dump. The probe allows up to 60 seconds because larger
+EPrints databases can take longer to enumerate. A successful probe confirms
+that the configured exporter can read the schema; it does not validate every
+row in the database.
+
 When Bqckup loads a credential-bearing regular YAML file with a loose mode, it
 automatically sets it to `0600`. If the process lacks permission to change the
 file, repair it explicitly, then validate again:
@@ -352,6 +362,37 @@ sudo bqckup config validate
 
 Automatic and explicit repair never follow symlinks and only set `0600` on
 files that contain inline credentials.
+
+### Source database check and repair
+
+For MySQL/MariaDB sources, Bqckup can inspect every table without changing
+data:
+
+```bash
+bqckup database check website --source application-mysql
+```
+
+The command requires the `mysql` client in `PATH`, uses the password from the
+protected site YAML through `MYSQL_PWD`, and returns exit status 1 when a table
+reports a non-`OK` result. Use `--output json` for a machine-readable report.
+
+Repair is explicit and applies only to one MyISAM or Aria table:
+
+```bash
+bqckup database repair website \
+  --source application-mysql \
+  --table archive \
+  --force
+```
+
+`--force` is required because `REPAIR TABLE` changes database contents. Bqckup
+checks the table engine before running it and refuses InnoDB tables. InnoDB
+problems require database-native recovery or restoring a verified dump into a
+new database. During `backup run`, automatic repair is disabled unless the
+source explicitly sets `auto_repair: true`. When enabled, Bqckup triggers it
+only after a dump reports a table-corruption error, checks all tables, repairs
+only unhealthy MyISAM/Aria tables, and retries the dump. Timeout,
+authentication, permission, and connection errors never trigger repair.
 
 ## Notifications
 
@@ -537,7 +578,7 @@ bqckup backup list
 Run one site:
 
 ```bash
-bqckup backup run website
+bqckup backup run <site> [--force] [--database]
 ```
 
 Ignore `minimum_interval` for one run:
@@ -545,6 +586,19 @@ Ignore `minimum_interval` for one run:
 ```bash
 bqckup backup run website --force
 ```
+
+Retry database exports without rebuilding or uploading the site's file backup:
+
+```bash
+bqckup backup run website --database --force
+```
+
+`--database` requires one site and exports every enabled database source for
+that site. It skips full archive creation and incremental file snapshots. The
+run is recorded with database-only scope and does not reset the interval for a
+scheduled full backup. To avoid pruning complete file recovery points,
+database-only runs do not apply `keep_last`; their SQL dumps remain in storage
+until removed manually or by a storage lifecycle policy.
 
 Before running site jobs, the command synchronizes every file from `sites/`,
 including disabled sites, to
@@ -571,6 +625,13 @@ while incremental sites show file snapshots. If an incremental site has an
 enabled database source, its database exports appear in a separate
 `DATABASE PACKAGES` table. JSON output uses `snapshots` and
 `database_packages` fields for that mixed result.
+
+Database exports retry transient exporter failures sequentially up to two
+times, waiting 15 seconds and then 60 seconds. This covers temporary
+connection loss, server disconnects, lock waits, deadlocks, and connection
+pressure. Authentication, permission, missing-database, corrupt-table, and
+other permanent errors fail immediately. Every failed attempt removes its
+partial SQL artifact before the next attempt; retries never run concurrently.
 
 `--force` does not bypass an active site lock. If the command reports
 `already_running`, confirm whether another process is backing up the same site
@@ -759,6 +820,7 @@ restore directly over production data.
 | `config validation error` | YAML is missing a required field, contains an unknown field, or has an invalid value. | Read the reported file and field, correct it, then run `bqckup config validate`. |
 | `must have mode 0600` | A file contains credentials but has unsafe permissions. | Run `chmod 600 <file>` and ensure it is a regular non-symlink file. |
 | `required database exporter is unavailable` | `mysqldump` or `pg_dump` is missing. | Install the required database client or disable that database source. |
+| `database maintenance client is unavailable` | The `mysql` client is missing. | Install the MySQL/MariaDB client package before using `database check` or `database repair`. |
 | `could not export database` | The exporter failed. | Check connectivity, credentials, grants, and whether the database service is running. |
 | `could not store backup artifact` | A destination rejected or could not receive data. | Check directory permissions, network access, bucket, endpoint, region, and credentials. |
 | `minimum_interval` skip | The previous successful run is too recent. | Wait or run once with `--force`. |

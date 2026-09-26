@@ -69,7 +69,7 @@ func (r *Repository) CreatePackage(ctx context.Context, pkg *Package) error {
 func (r *Repository) LastSuccessful(ctx context.Context, site string, before time.Time) (*BackupRun, error) {
 	var run BackupRun
 	query := r.db.WithContext(ctx).
-		Where("site_name = ? AND status IN (?, ?)", site, StatusSuccess, StatusNoChange)
+		Where("site_name = ? AND scope = ? AND status IN (?, ?)", site, RunScopeFull, StatusSuccess, StatusNoChange)
 	if !before.IsZero() {
 		query = query.Where("started_at < ?", before.UTC())
 	}
@@ -90,7 +90,7 @@ func (r *Repository) LastSuccessful(ctx context.Context, site string, before tim
 func (r *Repository) ConsecutiveWithoutSuccess(ctx context.Context, site string, startedAt time.Time) (int, error) {
 	var runs []BackupRun
 	err := r.db.WithContext(ctx).
-		Where("site_name = ? AND started_at >= ?", site, startedAt.Add(-24*time.Hour)).
+		Where("site_name = ? AND scope = ? AND started_at >= ?", site, RunScopeFull, startedAt.Add(-24*time.Hour)).
 		Order("started_at DESC").
 		Find(&runs).Error
 	if err != nil {

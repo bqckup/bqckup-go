@@ -211,6 +211,23 @@ func TestRunnerExportsEnabledDatabasesToEveryDestination(t *testing.T) {
 	assert.Len(t, deps.repository.packages, 3)
 }
 
+func TestRunnerRecordsDatabaseMaintenanceWarnings(t *testing.T) {
+	deps := successfulDependencies(t)
+	deps.databaseExporters = map[string]Exporter{
+		"mysql": &fakeExporter{sourceKind: "database", warnings: []string{`automatic database repair applied to table "cache" (MyISAM): OK`}},
+	}
+	site := validSite()
+	site.Sources.Databases = []config.DatabaseSource{{Name: "application-mysql", Enabled: true, Engine: "mysql"}}
+
+	result, err := NewRunner(deps.dependencies()).Run(context.Background(), site, false)
+
+	require.NoError(t, err)
+	assert.Equal(t, StatusSuccess, result.Status)
+	assert.Equal(t, []string{`automatic database repair applied to table "cache" (MyISAM): OK`}, result.Warnings)
+	assert.Equal(t, "maintenance", deps.repository.errorCategory)
+	assert.Contains(t, deps.repository.errorMessage, "automatic database repair")
+}
+
 type recordingProgress struct {
 	stages []struct {
 		label string
@@ -499,6 +516,7 @@ type fakeExporter struct {
 	sourceKind     string
 	estimatedSize  int64
 	estimatedKnown bool
+	warnings       []string
 }
 
 func (f *fakeExporter) EstimateSize(context.Context, config.DatabaseSource) (int64, bool, error) {
@@ -517,7 +535,7 @@ func (f *fakeExporter) Export(_ context.Context, source config.DatabaseSource, d
 		return Package{}, err
 	}
 	sum := sha256.Sum256(contents)
-	return Package{Path: destination, Size: int64(len(contents)), SHA256: hex.EncodeToString(sum[:]), SourceKind: f.sourceKind, SourceName: source.Name}, nil
+	return Package{Path: destination, Size: int64(len(contents)), SHA256: hex.EncodeToString(sum[:]), SourceKind: f.sourceKind, SourceName: source.Name, Warnings: f.warnings}, nil
 }
 func (*fakeStore) Delete(context.Context, string) error { return nil }
 func (*fakeStore) ListBackupSets(context.Context, string) ([]storage.BackupSet, error) {

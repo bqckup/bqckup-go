@@ -149,13 +149,17 @@ func newBackupCommand(opts *options) *cobra.Command {
 	command.AddCommand(stop)
 
 	var force bool
+	var databaseOnly bool
 	run := &cobra.Command{
 		Use:     "run [site]",
 		Short:   "Run one backup site or every enabled site",
-		Example: "  bqckup backup run incremental-test --force",
+		Example: "  bqckup backup run talenta.usu.ac.id --database --force\n  bqckup backup run incremental-test --force",
 		Args: func(cmd *cobra.Command, args []string) error {
 			if len(args) > 1 {
 				return usageError(cmd, "backup run accepts at most one site")
+			}
+			if databaseOnly && len(args) != 1 {
+				return usageError(cmd, "--database requires exactly one site")
 			}
 			return nil
 		},
@@ -167,6 +171,9 @@ func newBackupCommand(opts *options) *cobra.Command {
 						site, ok := application.Configuration().Site(args[0])
 						if ok {
 							runProgress := backupProgressForSite(site)
+							if databaseOnly {
+								runProgress.BackupMode = "database-only"
+							}
 							if err := writeBackupStartText(cmd.ErrOrStderr(), runProgress); err != nil {
 								return err
 							}
@@ -174,7 +181,13 @@ func newBackupCommand(opts *options) *cobra.Command {
 							application.SetBackupProgress(progress)
 						}
 					}
-					result, err := application.RunBackup(cmd.Context(), args[0], force)
+					var result backup.RunResult
+					var err error
+					if databaseOnly {
+						result, err = application.RunDatabaseBackup(cmd.Context(), args[0], force)
+					} else {
+						result, err = application.RunBackup(cmd.Context(), args[0], force)
+					}
 					if progress != nil {
 						progress.Done()
 					}
@@ -230,6 +243,7 @@ func newBackupCommand(opts *options) *cobra.Command {
 		},
 	}
 	run.Flags().BoolVar(&force, "force", false, "ignore the minimum backup interval")
+	run.Flags().BoolVar(&databaseOnly, "database", false, "export databases only; requires one site")
 	command.AddCommand(run)
 	command.AddCommand(&cobra.Command{
 		Use:     "unlock <site>",
@@ -426,6 +440,11 @@ func writeRunResultText(out io.Writer, result backup.RunResult) error {
 	}
 	if err != nil {
 		return err
+	}
+	if result.Scope == "database_only" {
+		if _, err := fmt.Fprintf(out, "%s: database-only backup\n", result.SiteName); err != nil {
+			return err
+		}
 	}
 	if result.ReclaimedBytes > 0 {
 		_, err = fmt.Fprintf(out, "%s: reclaimed %s\n", result.SiteName, humanBytes(result.ReclaimedBytes))
