@@ -4,8 +4,8 @@ import "testing"
 
 func TestCurrentUsesDevelopmentDefaults(t *testing.T) {
 	info := Current()
-	if info.Version != "v1.0.12" {
-		t.Fatalf("version = %q, want v1.0.12", info.Version)
+	if info.Version != "v1.0.13" {
+		t.Fatalf("version = %q, want v1.0.13", info.Version)
 	}
 	if info.Commit != "" {
 		t.Fatalf("commit = %q, want empty", info.Commit)
@@ -13,8 +13,8 @@ func TestCurrentUsesDevelopmentDefaults(t *testing.T) {
 }
 
 func TestUserAgent(t *testing.T) {
-	if got := UserAgent(); got != "bqckup/1.0.12" {
-		t.Fatalf("UserAgent() = %q, want %q", got, "bqckup/1.0.12")
+	if got := UserAgent(); got != "bqckup/1.0.13" {
+		t.Fatalf("UserAgent() = %q, want %q", got, "bqckup/1.0.13")
 	}
 }
 

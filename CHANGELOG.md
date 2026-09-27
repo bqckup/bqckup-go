@@ -4,6 +4,10 @@ All notable changes to Bqckup are documented in this file.
 
 ## Unreleased
 
+- Add `sources.databases[].skip_events` for MySQL/MariaDB backups that need to
+  omit scheduled events when the backup account lacks the `EVENT` privilege.
+  The default remains to include events.
+
 ## v1.0.12
 
 - Add opt-in automatic MyISAM/Aria repair during a database backup after a
