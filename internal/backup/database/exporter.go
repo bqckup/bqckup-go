@@ -301,7 +301,7 @@ func isCorruptionDatabaseError(processErr error, stderr string) bool {
 func (e *ProcessExporter) arguments(source config.DatabaseSource) []string {
 	port := strconv.Itoa(source.Port)
 	if e.engine == "mysql" {
-		return []string{
+		args := []string{
 			"--no-defaults",
 			"--host=" + source.Host,
 			"--port=" + port,
@@ -310,9 +310,11 @@ func (e *ProcessExporter) arguments(source config.DatabaseSource) []string {
 			"--quick",
 			"--routines",
 			"--triggers",
-			"--events",
-			source.Database,
 		}
+		if !source.SkipEvents {
+			args = append(args, "--events")
+		}
+		return append(args, source.Database)
 	}
 	return []string{
 		"--host=" + source.Host,

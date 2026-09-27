@@ -155,6 +155,9 @@ type DatabaseSource struct {
 	// AutoRepair opts into destructive MyISAM/Aria repair after a dump
 	// reports a table-corruption error. The zero value is intentionally false.
 	AutoRepair bool   `mapstructure:"auto_repair" yaml:"auto_repair"`
+	// SkipEvents omits MySQL/MariaDB scheduled events from the dump.
+	// The zero value preserves the default behavior of including events.
+	SkipEvents bool   `mapstructure:"skip_events" yaml:"skip_events"`
 	Host       string `mapstructure:"host" yaml:"host"`
 	Port       int    `mapstructure:"port" yaml:"port"`
 	Database   string `mapstructure:"database" yaml:"database"`

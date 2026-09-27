@@ -167,6 +167,9 @@ site:
         database: application
         username: backup_user
         password: <runtime-secret>
+        # Optional: omit scheduled events if this backup account lacks EVENT privilege.
+        # Defaults to false, which includes events.
+        skip_events: false
   destinations:
     - storage: local-primary
   policy:
@@ -179,6 +182,7 @@ site:
 - **File Excludes**: `sources.files.exclude` accepts absolute paths or glob patterns relative to each include root. Basename globs such as `*.tmp` match at any depth; use a trailing `/**`, for example `cache/**`, to exclude a directory recursively. These semantics are shared by full and incremental backups.
 - **Removed field**: `incremental.engine` is no longer accepted. Remove it from existing site files. Restic format-v1 repositories must be migrated to format v2 separately before use.
 - **Database engines**: `mysql` and `postgres`. MySQL/MariaDB uses `mysqldump`; PostgreSQL uses `pg_dump`. Passwords are passed through `MYSQL_PWD` or `PGPASSWORD`. A password-bearing site file must be a regular file with mode `0600`.
+- **MySQL/MariaDB events**: `sources.databases[].skip_events: true` omits scheduled events from that source's dump. The default (`false`) includes events; omitted events cannot be recovered from that backup.
 
 ## Diagnostics (Doctor)
 
