@@ -49,7 +49,8 @@ type RunResult struct {
 	// FilesSkipped is the number of source entries omitted from an incomplete
 	// file backup. With multiple incremental destinations, it is the largest
 	// count reported by any destination rather than a duplicate sum.
-	FilesSkipped int `json:"files_skipped,omitempty"`
+	FilesSkipped   int             `json:"files_skipped,omitempty"`
+	SkippedSources []SkippedSource `json:"skipped_sources,omitempty"`
 	// SocketsIgnored is the number of Unix sockets intentionally omitted from
 	// a full archive. They are live process endpoints, not backup data.
 	SocketsIgnored int `json:"sockets_ignored,omitempty"`
@@ -382,6 +383,7 @@ func (r *Runner) run(ctx context.Context, site config.Site, force, databaseOnly 
 			if summary.FilesSkipped > partialFiles {
 				partialFiles = summary.FilesSkipped
 			}
+			result.SkippedSources = append(result.SkippedSources, summary.SkippedSources...)
 		}
 		result.FilesSkipped = partialFiles
 	} else if !databaseOnly {
@@ -411,6 +413,7 @@ func (r *Runner) run(ctx context.Context, site config.Site, force, databaseOnly 
 			return fail(apperror.Wrap(apperror.CategoryExecution, "could not create the file archive", err))
 		}
 		result.FilesSkipped = archive.FilesSkipped
+		result.SkippedSources = append(result.SkippedSources, archive.SkippedSources...)
 		result.SocketsIgnored = archive.SocketsIgnored
 		r.progress.FinishStage()
 

@@ -86,3 +86,25 @@ func TestLogBackupFinishedRecordsFailureDetails(t *testing.T) {
 	require.Contains(t, text, `"category":"execution"`)
 	require.Contains(t, text, `"error":"could not export database: mysqldump failed"`)
 }
+
+func TestLogSkippedSourcesRecordsPathAndError(t *testing.T) {
+	var output bytes.Buffer
+	application := &App{logger: newAppLogger(&output, logInfo)}
+
+	application.logSkippedSources(backup.RunResult{
+		RunID:    "run-1",
+		SiteName: "example",
+		SkippedSources: []backup.SkippedSource{{
+			Phase: "open",
+			Path:  "/srv/example/cache.db",
+			Error: "permission denied",
+		}},
+	})
+
+	text := output.String()
+	require.Contains(t, text, `"event":"backup_source_skipped"`)
+	require.Contains(t, text, `"run_id":"run-1"`)
+	require.Contains(t, text, `"phase":"open"`)
+	require.Contains(t, text, `"path":"/srv/example/cache.db"`)
+	require.Contains(t, text, `"error":"permission denied"`)
+}

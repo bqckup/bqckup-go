@@ -87,6 +87,7 @@ func (a *Archiver) Create(ctx context.Context, source backup.FileSource, destina
 	return backup.Package{
 		Path: destination, Size: info.Size(), SHA256: hex.EncodeToString(digest.Sum(nil)),
 		SourceKind: "files", SourceName: "files", FilesSkipped: state.filesSkipped, SocketsIgnored: state.socketsIgnored,
+		SkippedSources: state.skippedSources,
 	}, nil
 }
 
@@ -136,7 +137,13 @@ type archiveState struct {
 	writer         *tar.Writer
 	source         backup.FileSource
 	filesSkipped   int
+	skippedSources []backup.SkippedSource
 	socketsIgnored int
+}
+
+func (s *archiveState) skip(phase, path string, err error) {
+	s.filesSkipped++
+	s.skippedSources = append(s.skippedSources, backup.SkippedSource{Phase: phase, Path: path, Error: err.Error()})
 }
 
 func (s *archiveState) add(realPath, archivePath string, active map[string]bool, optional bool) error {
@@ -152,7 +159,7 @@ func (s *archiveState) add(realPath, archivePath string, active map[string]bool,
 	})
 	if err != nil {
 		if optional && errors.Is(err, os.ErrNotExist) {
-			s.filesSkipped++
+			s.skip("lstat", realPath, err)
 			return nil
 		}
 		return fmt.Errorf("inspect archive source %s: %w", realPath, err)
@@ -164,7 +171,7 @@ func (s *archiveState) add(realPath, archivePath string, active map[string]bool,
 		})
 		if err != nil {
 			if optional && errors.Is(err, os.ErrNotExist) {
-				s.filesSkipped++
+				s.skip("readlink", realPath, err)
 				return nil
 			}
 			return fmt.Errorf("read symlink %s: %w", realPath, err)
@@ -177,7 +184,7 @@ func (s *archiveState) add(realPath, archivePath string, active map[string]bool,
 		})
 		if err != nil {
 			if optional && errors.Is(err, os.ErrNotExist) {
-				s.filesSkipped++
+				s.skip("resolve_symlink", realPath, err)
 				return nil
 			}
 			return fmt.Errorf("resolve symlink %s: %w", realPath, err)
@@ -191,7 +198,7 @@ func (s *archiveState) add(realPath, archivePath string, active map[string]bool,
 		})
 		if err != nil {
 			if optional && errors.Is(err, os.ErrNotExist) {
-				s.filesSkipped++
+				s.skip("resolve_directory", realPath, err)
 				return nil
 			}
 			return fmt.Errorf("resolve directory %s: %w", realPath, err)
@@ -206,7 +213,7 @@ func (s *archiveState) add(realPath, archivePath string, active map[string]bool,
 		})
 		if err != nil {
 			if optional && errors.Is(err, os.ErrNotExist) {
-				s.filesSkipped++
+				s.skip("read_directory", realPath, err)
 				return nil
 			}
 			return fmt.Errorf("read archive directory %s: %w", realPath, err)
@@ -237,7 +244,7 @@ func (s *archiveState) add(realPath, archivePath string, active map[string]bool,
 	})
 	if err != nil {
 		if optional && errors.Is(err, os.ErrNotExist) {
-			s.filesSkipped++
+			s.skip("open", realPath, err)
 			return nil
 		}
 		return fmt.Errorf("open archive source %s: %w", realPath, err)

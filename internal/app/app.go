@@ -339,6 +339,7 @@ func (a *App) runBackup(ctx context.Context, siteName string, force bool, progre
 		result, err = a.runner.RunWithProgress(ctx, site, force, loggingProgress)
 	}
 	a.logStoredPackages(ctx, result)
+	a.logSkippedSources(result)
 	a.logBackupFinished(siteName, result, started, err)
 	if err == nil {
 		for _, warning := range result.Warnings {
@@ -346,6 +347,18 @@ func (a *App) runBackup(ctx context.Context, siteName string, force bool, progre
 		}
 	}
 	return result, err
+}
+
+func (a *App) logSkippedSources(result backup.RunResult) {
+	for _, skipped := range result.SkippedSources {
+		a.logger.write(logWarn, "backup_source_skipped",
+			"site", result.SiteName,
+			"run_id", result.RunID,
+			"phase", skipped.Phase,
+			"path", skipped.Path,
+			"error", skipped.Error,
+		)
+	}
 }
 
 func (a *App) logStoredPackages(ctx context.Context, result backup.RunResult) {

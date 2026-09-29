@@ -20,9 +20,12 @@ type Package struct {
 	SourceKind     string
 	SourceName     string
 	FilesSkipped   int
+	SkippedSources []incremental.SkippedSource
 	SocketsIgnored int
 	Warnings       []string
 }
+
+type SkippedSource = incremental.SkippedSource
 
 type Exporter interface {
 	Export(ctx context.Context, source config.DatabaseSource, destination string) (Package, error)

@@ -1,6 +1,9 @@
 package incremental
 
-import "time"
+import (
+	engineincremental "github.com/bqckup/bqckup-go/internal/engine/incremental"
+	"time"
+)
 
 type RepoConfig struct {
 	URL             string
@@ -23,17 +26,23 @@ type BackupSpec struct {
 }
 
 type SnapshotSummary struct {
-	SnapshotID          string  `json:"snapshot_id"`
-	MessageType         string  `json:"message_type"`
-	FilesNew            int     `json:"files_new"`
-	FilesChanged        int     `json:"files_changed"`
-	FilesUnmodified     int     `json:"files_unmodified"`
-	TotalFilesProcessed int     `json:"total_files_processed"`
-	TotalBytesProcessed int64   `json:"total_bytes_processed"`
-	DataAdded           int64   `json:"data_added"`
-	FilesSkipped        int     `json:"files_skipped"`
-	TotalDuration       float64 `json:"total_duration"`
+	SnapshotID          string          `json:"snapshot_id"`
+	MessageType         string          `json:"message_type"`
+	FilesNew            int             `json:"files_new"`
+	FilesChanged        int             `json:"files_changed"`
+	FilesUnmodified     int             `json:"files_unmodified"`
+	TotalFilesProcessed int             `json:"total_files_processed"`
+	TotalBytesProcessed int64           `json:"total_bytes_processed"`
+	DataAdded           int64           `json:"data_added"`
+	FilesSkipped        int             `json:"files_skipped"`
+	SkippedSources      []SkippedSource `json:"skipped_sources,omitempty"`
+	TotalDuration       float64         `json:"total_duration"`
 }
+
+// SkippedSource identifies a source entry omitted from an incomplete backup.
+// Error is the diagnostic from the local filesystem and never contains
+// credentials or provider responses.
+type SkippedSource = engineincremental.SkippedSource
 
 // Snapshot is one snapshot listed for a repository. Size comes from the
 // snapshot summary (TotalBytesProcessed); a snapshot without a summary has

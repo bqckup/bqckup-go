@@ -68,6 +68,7 @@ type Summary struct {
 	TotalBytesProcessed int64
 	DataAdded           int64
 	FilesSkipped        int
+	SkippedSources      []incremental.SkippedSource
 	TotalDuration       float64
 	// Missed reports each blob re-stored because its ID was not in the
 	// repository index (the dedup misses that make up DataAdded).
@@ -187,6 +188,7 @@ func (a *Archiver) Backup(ctx context.Context, spec BackupSpec) (incremental.ID,
 		TotalBytesProcessed: state.bytesProcessed,
 		DataAdded:           state.dataAdded,
 		FilesSkipped:        state.filesSkipped,
+		SkippedSources:      state.skippedSources,
 		Missed:              state.missed,
 		TotalDuration:       duration,
 	}
@@ -204,6 +206,7 @@ type backupState struct {
 	bytesProcessed  int64
 	dataAdded       int64
 	filesSkipped    int
+	skippedSources  []incremental.SkippedSource
 	missed          []MissedBlob
 	parent          *parentState
 }
@@ -490,6 +493,7 @@ func (s *backupState) dirTreeAt(ctx context.Context, dir, key string, old *tree.
 				return nil, false, ctxErr
 			}
 			s.filesSkipped++
+			s.recordSkipped("lstat", path, err)
 			allUnmodified = false
 			continue
 		}
@@ -498,6 +502,7 @@ func (s *backupState) dirTreeAt(ctx context.Context, dir, key string, old *tree.
 			var sourceErr *sourceError
 			if errors.As(err, &sourceErr) {
 				s.filesSkipped++
+				s.recordSkipped(sourceErr.phase, sourceErr.path, sourceErr.err)
 				allUnmodified = false
 				continue
 			}
@@ -534,6 +539,14 @@ func (s *backupState) dirTreeAt(ctx context.Context, dir, key string, old *tree.
 		return nil, false, err
 	}
 	return &id, false, nil
+}
+
+func (s *backupState) recordSkipped(phase, path string, err error) {
+	s.skippedSources = append(s.skippedSources, incremental.SkippedSource{
+		Phase: phase,
+		Path:  path,
+		Error: err.Error(),
+	})
 }
 
 func (s *backupState) parentRoot(key string) *tree.Node {
