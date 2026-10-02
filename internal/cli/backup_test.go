@@ -8,13 +8,41 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/bqckup/bqckup-go/internal/app"
 	"github.com/bqckup/bqckup-go/internal/apperror"
 	"github.com/bqckup/bqckup-go/internal/backup"
 	"github.com/bqckup/bqckup-go/internal/buildinfo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestWriteBackupActiveTextAlignsColumns(t *testing.T) {
+	var output bytes.Buffer
+	err := writeBackupActiveText(&output, []app.BackupActivity{
+		{Site: "short", Mode: "full", PID: 123, RunID: "12345678-abcdef", StartedAt: time.Date(2026, 10, 1, 18, 0, 0, 0, time.UTC), ElapsedSeconds: 65, State: "running"},
+		{Site: "longer-site-name", Mode: "incremental", PID: 4, RunID: "", StartedAt: time.Date(2026, 10, 2, 1, 2, 3, 0, time.UTC), ElapsedSeconds: 3600, State: "stale"},
+	})
+	require.NoError(t, err)
+
+	lines := strings.Split(strings.TrimSuffix(output.String(), "\n"), "\n")
+	require.Len(t, lines, 3)
+	for row, values := range [][]string{
+		{"short", "full", "123", "12345678", "01-October-2026", "1m5s", "running"},
+		{"longer-site-name", "incremental", "4", "-", "02-October-2026", "1h0m0s", "stale"},
+	} {
+		line := lines[row+1]
+		headingOffset, valueOffset := 0, 0
+		for column, heading := range []string{"SITE", "MODE", "PID", "RUN ID", "STARTED", "ELAPSED", "STATE"} {
+			headingOffset += strings.Index(lines[0][headingOffset:], heading)
+			valueOffset += strings.Index(line[valueOffset:], values[column])
+			assert.Equal(t, headingOffset, valueOffset)
+			headingOffset += len(heading)
+			valueOffset += len(values[column])
+		}
+	}
+}
 
 // writeIncrementalSiteConfig adds an incremental site "site-b" on
 // "local-primary" to the config directory created by writeCLIConfig.

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/bqckup/bqckup-go/internal/apperror"
+	"github.com/bqckup/bqckup-go/internal/config"
 	"github.com/bqckup/bqckup-go/internal/storage"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -45,15 +46,33 @@ func TestLinkFullModeReturnsTheLink(t *testing.T) {
 	assert.Equal(t, time.Hour, generator.gotExp)
 }
 
-func TestLinkIncrementalModeIsConfigError(t *testing.T) {
+func TestLinkIncrementalModeAllowsConfiguredDatabasePackage(t *testing.T) {
 	generator := &fakeLinkGenerator{link: storage.DownloadLink{URL: "https://example.test/signed"}}
 	site := fullSite()
 	site.BackupMode = "incremental"
+	site.Sources.Databases = []config.DatabaseSource{{Name: "eprintspare345_new", Enabled: true}}
 
-	_, err := (&Linker{}).Link(context.Background(), "s3-primary", site, generator, "bqckup/site-a/2026-08-05T00-00-00Z/files.tar.gz", time.Hour)
-	require.Error(t, err)
-	assert.Equal(t, apperror.CategoryConfig, apperror.CategoryOf(err))
-	assert.Contains(t, err.Error(), "restore")
+	link, err := (&Linker{}).Link(context.Background(), "s3-primary", site, generator, "bqckup/site-a/01-October-2026/18-00-08-47ab3720-eprintspare345_new.sql.gz", time.Hour)
+	require.NoError(t, err)
+	assert.Equal(t, "https://example.test/signed", link.URL)
+}
+
+func TestLinkIncrementalModeRejectsSnapshotsAndUnconfiguredDatabasePackages(t *testing.T) {
+	generator := &fakeLinkGenerator{link: storage.DownloadLink{URL: "https://example.test/signed"}}
+	site := fullSite()
+	site.BackupMode = "incremental"
+	site.Sources.Databases = []config.DatabaseSource{{Name: "configured-db", Enabled: true}}
+	linker := &Linker{}
+
+	for _, key := range []string{
+		"bqckup/site-a/incremental-backup/snapshot/files.tar.gz",
+		"bqckup/site-a/01-October-2026/18-00-08-unconfigured-db.sql.gz",
+	} {
+		_, err := linker.Link(context.Background(), "s3-primary", site, generator, key, time.Hour)
+		require.Error(t, err)
+		assert.Equal(t, apperror.CategoryConfig, apperror.CategoryOf(err))
+		assert.Contains(t, err.Error(), "restore")
+	}
 }
 
 func TestLinkLocalDestinationShowsLocalPath(t *testing.T) {

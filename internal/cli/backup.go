@@ -7,6 +7,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"text/tabwriter"
 	"time"
 
 	"github.com/bqckup/bqckup-go/internal/app"
@@ -398,7 +399,8 @@ func writeBackupActiveText(output io.Writer, activities []app.BackupActivity) er
 		_, err := fmt.Fprintln(output, "No active or stale backups.")
 		return err
 	}
-	if _, err := fmt.Fprintln(output, "SITE  MODE  PID  RUN ID  STARTED  ELAPSED  STATE"); err != nil {
+	table := tabwriter.NewWriter(output, 0, 4, 2, ' ', 0)
+	if _, err := fmt.Fprintln(table, "SITE\tMODE\tPID\tRUN ID\tSTARTED\tELAPSED\tSTATE"); err != nil {
 		return err
 	}
 	for _, activity := range activities {
@@ -414,11 +416,11 @@ func writeBackupActiveText(output io.Writer, activities []app.BackupActivity) er
 		if mode == "" {
 			mode = "-"
 		}
-		if _, err := fmt.Fprintf(output, "%s  %s  %s  %s  %s  %s  %s\n", activity.Site, mode, pid, runID, formatCLITime(activity.StartedAt), time.Duration(activity.ElapsedSeconds)*time.Second, activity.State); err != nil {
+		if _, err := fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", activity.Site, mode, pid, runID, formatCLITime(activity.StartedAt), time.Duration(activity.ElapsedSeconds)*time.Second, activity.State); err != nil {
 			return err
 		}
 	}
-	return nil
+	return table.Flush()
 }
 
 func writeBackupStoppedText(output io.Writer, activities []app.BackupActivity) error {

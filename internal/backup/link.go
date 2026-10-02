@@ -3,6 +3,8 @@ package backup
 import (
 	"context"
 	"fmt"
+	"path"
+	"strings"
 	"time"
 
 	"github.com/bqckup/bqckup-go/internal/apperror"
@@ -42,9 +44,9 @@ func (l *Linker) Link(ctx context.Context, destination string, site config.Site,
 		return storage.DownloadLink{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf(
 			"destination %q is local; local files have no download link", destination), nil)
 	}
-	if site.BackupMode != "full" {
+	if site.BackupMode != "full" && !isDatabasePackageForSite(key, site) {
 		return storage.DownloadLink{}, apperror.Wrap(apperror.CategoryConfig, fmt.Sprintf(
-			"site %q uses incremental backups; download links only apply to full-mode archive packages, use restore instead",
+			"site %q uses incremental backups; download links are available for its database packages, while file snapshots must be downloaded with restore",
 			site.Name), nil)
 	}
 	link, err := generator.PresignLink(ctx, key, expires)
@@ -52,4 +54,16 @@ func (l *Linker) Link(ctx context.Context, destination string, site config.Site,
 		return storage.DownloadLink{}, apperror.Wrap(apperror.CategoryStorage, "could not create the download link", err)
 	}
 	return link, nil
+}
+
+func isDatabasePackageForSite(key string, site config.Site) bool {
+	if _, _, err := storage.BackupSetForPackage(path.Base(path.Dir(key)), path.Base(key)); err != nil {
+		return false
+	}
+	for _, source := range site.Sources.Databases {
+		if source.Enabled && strings.HasSuffix(key, "-"+source.Name+".sql.gz") {
+			return true
+		}
+	}
+	return false
 }

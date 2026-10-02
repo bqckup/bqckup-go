@@ -7,8 +7,9 @@ Bqckup Go is a CLI-only modular monolith. One process loads immutable configurat
 For operators, the shortest path is: `init` → edit the three YAML files →
 `config validate` → `doctor` → `backup run`. Use `backup snapshots` and
 `backup restore` only for incremental sites; use `storage list` and
-`storage link` for stored full-mode packages. `backup check` validates either
-an incremental repository or the latest successful full-mode packages.
+`storage link` for stored full-mode packages and configured database packages
+from incremental sites. `backup check` validates either an incremental
+repository or the latest successful full-mode packages.
 
 ```text
 cmd/bqckup       process signals and exit
