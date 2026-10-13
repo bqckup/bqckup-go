@@ -30,7 +30,8 @@ Dependencies point toward the use case. `backup.Runner` knows interfaces and dom
 1. Load schema-v2 root/site YAML plus the unversioned storage document.
 2. Resolve the requested site and concrete local, S3, or R2 destinations.
 3. Acquire a non-blocking cross-process lock for the site.
-4. Skip when the last success is inside `minimum_interval`, unless forced.
+4. Skip when the last success is inside `minimum_interval`, unless forced;
+   send a best-effort `backup_skipped` notification without creating a run.
 5. Insert a `running` history record.
 6. `backup_mode: full` creates an owner-only temporary workspace and
    `.tar.gz` file archive; `backup_mode: incremental` runs the built-in
@@ -46,8 +47,8 @@ Dependencies point toward the use case. `backup.Runner` knows interfaces and dom
 11. Mark the run `success` (or `no_change` when full-mode prepared packages match the previous successful run byte-for-byte); source, repository, destination, and database failures and cancellation get a terminal status with a redacted message.
 12. Notify the terminal status through the configured notification routes
     (best effort; a failing channel warns and never changes the run result
-    or history). Only runs recorded in history notify: skipped runs and
-    preflight failures are silent.
+    or history). The `minimum_interval` skip is the only notification without
+    a history run; lock contention and preflight failures are silent.
 13. Remove temporary files and release the lock.
 
 Multiple destinations have all-required semantics. A package destination failure fails the run and prevents retention, while a retention failure is recorded as a warning and does not prevent retention attempts for other destinations. Previously successful backup sets are not removed after a failed current run.
@@ -114,17 +115,19 @@ SQLite runs with WAL, foreign keys, a five-second busy timeout, and one open con
 Package keys use:
 
 ```text
-bqckup/<backup_prefix>/<server_id>/<site>/<DD-Month-YYYY>/<HH-mm-ss>-<package name>
+bqckup/<backup_prefix>/<server_id>/<site>/<DD-Month-YYYY>/<HH.mm.ss>-<package name>
 ```
 
 The optional `backup_prefix` component is omitted when it is empty. The
 legacy `bqckup/<site>/...` layout remains valid when `server_id` is empty.
 
-The date directory and package time prefixes use UTC. Packages from one run
-share an eight-character run ID after the time prefix, so same-second runs
-remain write-once safe without adding a `Z` or long nanosecond suffix. Names
-come from validated configuration, not raw runtime
-input.
+New archive and database packages use the server process timezone for the date
+directory and time prefix. Dots in the time prefix distinguish them from older
+UTC keys for listing and retention.
+Local keys depend on the server process timezone remaining stable.
+Packages from one run share an eight-character run ID after the time prefix,
+so same-second runs remain write-once safe. Existing UTC keys stay readable.
+Names come from validated configuration, not raw runtime input.
 
 ## Security rules
 

@@ -94,7 +94,7 @@ Common options:
 | `database.engine` | `mysql`, `postgres` |
 | `database.auto_repair` | `false` by default; opt-in MyISAM/Aria repair after a corruption error |
 | `notifications.channels.<name>.type` | `smtp`, `webhook`, `discord` |
-| `notifications.routes[].events[]` | `all`, `backup_failed`, `backup_partial`, `backup_cancelled`, `backup_no_change`, `backup_succeeded` |
+| `notifications.routes[].events[]` | `all`, `backup_failed`, `backup_partial`, `backup_cancelled`, `backup_skipped`, `backup_no_change`, `backup_succeeded`, `daily_report`, `monthly_report` |
 
 In examples, replace placeholders such as `<site>`, `<password>`, `<bucket>`,
 and `<webhook-url>` with real values. Do not copy angle-bracket placeholders
@@ -242,15 +242,17 @@ notifications:
       from: <sender-address>
       to: [<recipient-address>]
   routes:
-    # events: all | backup_failed | backup_partial | backup_cancelled | backup_no_change | backup_succeeded
+    # events: all | backup_failed | backup_partial | backup_cancelled | backup_skipped | backup_no_change | backup_succeeded | daily_report | monthly_report
     - events: [backup_failed]
       channels: [email]
 ```
 
 Available channel types are `smtp`, `webhook`, and `discord`. Partial runs use
 the `backup_partial` event. Successful runs emit `backup_succeeded`; route it
-to receive recovery signals after a failure. Skips and preflight failures stay
-silent. Delivery is best effort and never changes the run result or history.
+to receive recovery signals after a failure. A `minimum_interval` skip emits
+`backup_skipped` without creating a history run; route it for an alert. Lock
+contention and preflight failures stay silent. Delivery is best effort and
+never changes the run result or history.
 Keep credential-bearing root YAML at mode `0600`; `config validate` checks URL
 format and permissions.
 

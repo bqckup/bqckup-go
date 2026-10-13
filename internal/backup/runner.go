@@ -260,6 +260,12 @@ func (r *Runner) run(ctx context.Context, site config.Site, force, databaseOnly 
 	if !force && lastSuccessful != nil && now.Sub(lastSuccessful.StartedAt.UTC()) < site.Policy.MinimumInterval {
 		result.Status = StatusSkipped
 		result.SkipReason = SkipMinimumInterval
+		r.notify(context.WithoutCancel(ctx), NotifyInput{
+			Event: config.EventBackupSkipped, SiteName: site.Name, Status: result.Status,
+			StartedAt: now, FinishedAt: now, LastSuccessfulAt: lastSuccessful.StartedAt,
+			ErrorCategory: string(SkipMinimumInterval), ErrorMessage: "minimum_interval has not elapsed since the last successful backup",
+			Destinations: buildNotifyDestinations(site, r.dependencies.Storages),
+		})
 		return result, nil
 	}
 
@@ -777,9 +783,8 @@ func backupWarningHistory(retentionWarnings, databaseWarnings []string) (string,
 	return "maintenance", strings.Join(warnings, "; ")
 }
 
-// notify delivers one terminal notification after the run is recorded in
-// history. Delivery is best effort: errors are warnings on stderr and never
-// alter the run result. Runs without a notifier skip the work entirely.
+// notify delivers one terminal notification. Minimum-interval skips have no
+// history run; delivery remains best effort and never alters the run result.
 func (r *Runner) notify(ctx context.Context, input NotifyInput) {
 	if r.dependencies.Notifier == nil {
 		return
@@ -796,11 +801,13 @@ func (r *Runner) notify(ctx context.Context, input NotifyInput) {
 	} else {
 		input.FailureStreak = streak
 	}
-	packages, err := r.dependencies.Repository.RunPackages(ctx, input.RunID)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not load run packages for notification: %v\n", err)
+	if input.RunID != "" {
+		packages, err := r.dependencies.Repository.RunPackages(ctx, input.RunID)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not load run packages for notification: %v\n", err)
+		}
+		input.Packages = packages
 	}
-	input.Packages = packages
 	if err := r.dependencies.Notifier.Notify(ctx, input); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: notification delivery failed: %v\n", err)
 	}

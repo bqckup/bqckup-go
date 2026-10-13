@@ -84,6 +84,33 @@ func TestDiscordFailureCodeBlockFitsFieldLimit(t *testing.T) {
 	assert.True(t, strings.HasSuffix(value, "…\n```"))
 }
 
+func TestDiscordMinimumIntervalSkipIsSent(t *testing.T) {
+	received := make(chan discordPayload, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body discordPayload
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		received <- body
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(server.Close)
+
+	alert := NewPayload(backup.NotifyInput{
+		Event:            config.EventBackupSkipped,
+		SiteName:         "example.org",
+		Status:           backup.StatusSkipped,
+		StartedAt:        time.Date(2026, 8, 23, 1, 0, 0, 0, time.UTC),
+		FinishedAt:       time.Date(2026, 8, 23, 1, 0, 0, 0, time.UTC),
+		LastSuccessfulAt: time.Date(2026, 8, 22, 1, 20, 0, 0, time.UTC),
+		ErrorCategory:    "minimum_interval",
+	})
+	require.NoError(t, NewDiscord("discord", server.URL).Send(context.Background(), alert))
+	body := <-received
+	require.Len(t, body.Embeds, 1)
+	assert.Equal(t, "Backup skipped for example.org", body.Embeds[0].Title)
+	assert.Contains(t, body.Embeds[0].Description, "minimum_interval")
+	assert.Equal(t, 0xF1C40F, body.Embeds[0].Color)
+}
+
 func TestDiscordSuccessBackupIsNotSent(t *testing.T) {
 	received := make(chan discordPayload, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

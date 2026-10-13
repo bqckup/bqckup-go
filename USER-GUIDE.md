@@ -13,7 +13,7 @@ scheduling, restore, and common failures. It is written for operators of the
 | `backup_mode` | `full` (default), `incremental` |
 | database `engine` | `mysql`, `postgres` |
 | notification channel `type` | `smtp`, `webhook`, `discord` |
-| notification route `events` | `all`, `backup_failed`, `backup_partial`, `backup_cancelled`, `backup_no_change`, `backup_succeeded`, `daily_report`, `monthly_report` |
+| notification route `events` | `all`, `backup_failed`, `backup_partial`, `backup_cancelled`, `backup_skipped`, `backup_no_change`, `backup_succeeded`, `daily_report`, `monthly_report` |
 | `reports.daily.enabled` | `true`, `false` |
 | `reports.monthly.enabled` | `true`, `false` |
 
@@ -189,6 +189,13 @@ R2 requires `region: auto` and an HTTPS endpoint.
 
 Only one storage may have `primary: true`. An enabled site with no explicit
 destinations automatically uses that primary storage.
+
+New backup package folders use the server process timezone. For example, a run
+started at 02:25 WITA on 12 October is stored under `12-October-2026/`, with
+`02.25.00` at the start of its package names. Older folders and package
+names use UTC and remain available without renaming them. Keep the server
+timezone stable so listing and retention interpret the local timestamps
+consistently.
 
 If `storages.yaml` contains credentials, protect it before validation:
 
@@ -410,17 +417,22 @@ notifications:
       from: <sender-address>
       to: [<recipient-address>]
   routes:
-    # events options: all | backup_failed | backup_partial | backup_cancelled | backup_no_change | backup_succeeded
+    # events options: all | backup_failed | backup_partial | backup_cancelled | backup_skipped | backup_no_change | backup_succeeded | daily_report | monthly_report
     - events: [backup_failed]
       channels: [email]
 ```
 
 Channel `type` options are `smtp`, `webhook`, and `discord`. Route `events`
 options are `all`, `backup_failed`, `backup_partial`, `backup_cancelled`,
-`backup_no_change`, `backup_succeeded`, `daily_report`, and `monthly_report`.
+`backup_skipped`, `backup_no_change`, `backup_succeeded`, `daily_report`, and `monthly_report`.
 Partial snapshots send `backup_partial`; successful runs emit
-`backup_succeeded`. Skipped runs and preflight failures send no notification.
-Delivery is best effort and never changes backup history or the run result.
+`backup_succeeded`. A `minimum_interval` skip sends `backup_skipped` with an
+empty `run_id`, status `skipped`, reason `minimum_interval`, and the last
+successful backup time. It does not create a history run. Every such skip
+notifies a matching route, including `all`; this includes expected skips for
+weekly or monthly sites checked by a daily cron. Lock contention and preflight
+failures send no notification. Delivery is best effort and never changes
+backup history or the run result.
 Keep the root file at mode `0600` when it contains credentials or URLs.
 
 ### Webhook payload

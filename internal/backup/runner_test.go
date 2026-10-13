@@ -30,11 +30,11 @@ func TestRunnerCompletesBackupLifecycle(t *testing.T) {
 	assert.Equal(t, StatusSuccess, result.Status)
 	assert.Equal(t, history.StatusSuccess, deps.repository.finishedStatus)
 	require.Len(t, deps.repository.packages, 1)
-	assert.Equal(t, "bqckup/example/23-July-2026/03-45-00-run1-files.tar.gz", deps.repository.packages[0].ObjectKey)
+	assert.Equal(t, "bqckup/example/"+storage.FormatPackageKey(deps.clock.now, "files.tar.gz", "run1"), deps.repository.packages[0].ObjectKey)
 	assert.Equal(t, 1, deps.retainer.calls)
 	store := deps.stores["local-primary"].(*fakeStore)
 	require.Len(t, store.keys, 2)
-	assert.Equal(t, "bqckup/example/23-July-2026/03-45-00-run1-.bqckup-complete", store.keys[1])
+	assert.Equal(t, "bqckup/example/"+storage.FormatPackageKey(deps.clock.now, storage.CompletionMarkerName, "run1"), store.keys[1])
 	assert.Equal(t, 1, deps.lock.unlockCalls)
 	_, statErr := os.Stat(deps.archiver.workspace)
 	assert.ErrorIs(t, statErr, os.ErrNotExist)
@@ -70,6 +70,7 @@ func TestRunnerMarksFullArchiveWithSkippedFilesPartial(t *testing.T) {
 func TestRunnerSkipsInsideMinimumInterval(t *testing.T) {
 	deps := successfulDependencies(t)
 	deps.repository.lastSuccessful = &history.BackupRun{StartedAt: deps.clock.now.Add(-30 * time.Minute)}
+	deps.notifier = &fakeNotifier{}
 
 	result, err := NewRunner(deps.dependencies()).Run(context.Background(), validSite(), false)
 	require.NoError(t, err)
@@ -77,6 +78,28 @@ func TestRunnerSkipsInsideMinimumInterval(t *testing.T) {
 	assert.Equal(t, SkipMinimumInterval, result.SkipReason)
 	assert.Empty(t, deps.repository.createdRuns)
 	assert.Equal(t, 0, deps.archiver.calls)
+	require.Len(t, deps.notifier.calls, 1)
+	alert := deps.notifier.calls[0]
+	assert.Equal(t, config.EventBackupSkipped, alert.Event)
+	assert.Equal(t, StatusSkipped, alert.Status)
+	assert.Equal(t, "minimum_interval", alert.ErrorCategory)
+	assert.Equal(t, deps.repository.lastSuccessful.StartedAt, alert.LastSuccessfulAt)
+	assert.Equal(t, deps.clock.now, alert.StartedAt)
+	assert.Equal(t, alert.StartedAt, alert.FinishedAt)
+	assert.Empty(t, alert.RunID)
+	assert.Empty(t, alert.Packages)
+}
+
+func TestRunnerMinimumIntervalNotificationFailureDoesNotFailSkip(t *testing.T) {
+	deps := successfulDependencies(t)
+	deps.repository.lastSuccessful = &history.BackupRun{StartedAt: deps.clock.now.Add(-30 * time.Minute)}
+	deps.notifier = &fakeNotifier{err: errors.New("notification unavailable")}
+
+	result, err := NewRunner(deps.dependencies()).Run(context.Background(), validSite(), false)
+	require.NoError(t, err)
+	assert.Equal(t, StatusSkipped, result.Status)
+	assert.Equal(t, SkipMinimumInterval, result.SkipReason)
+	assert.Empty(t, deps.repository.createdRuns)
 }
 
 func TestRunnerForceOverridesMinimumInterval(t *testing.T) {
@@ -93,12 +116,14 @@ func TestRunnerForceOverridesMinimumInterval(t *testing.T) {
 func TestRunnerSkipsWhenSiteLockIsHeld(t *testing.T) {
 	deps := successfulDependencies(t)
 	deps.lock.acquired = false
+	deps.notifier = &fakeNotifier{}
 
 	result, err := NewRunner(deps.dependencies()).Run(context.Background(), validSite(), false)
 	require.NoError(t, err)
 	assert.Equal(t, StatusSkipped, result.Status)
 	assert.Equal(t, SkipAlreadyRunning, result.SkipReason)
 	assert.Empty(t, deps.repository.createdRuns)
+	assert.Empty(t, deps.notifier.calls)
 }
 
 func TestRunnerForceDoesNotBypassHeldSiteLock(t *testing.T) {
@@ -205,9 +230,9 @@ func TestRunnerExportsEnabledDatabasesToEveryDestination(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, StatusSuccess, result.Status)
 	assert.Len(t, store.keys, 4)
-	assert.Contains(t, store.keys, "bqckup/example/23-July-2026/03-45-00-run1-application-mysql.sql.gz")
-	assert.Contains(t, store.keys, "bqckup/example/23-July-2026/03-45-00-run1-application-postgres.sql.gz")
-	assert.Contains(t, store.keys, "bqckup/example/23-July-2026/03-45-00-run1-.bqckup-complete")
+	assert.Contains(t, store.keys, "bqckup/example/"+storage.FormatPackageKey(deps.clock.now, "application-mysql.sql.gz", "run1"))
+	assert.Contains(t, store.keys, "bqckup/example/"+storage.FormatPackageKey(deps.clock.now, "application-postgres.sql.gz", "run1"))
+	assert.Contains(t, store.keys, "bqckup/example/"+storage.FormatPackageKey(deps.clock.now, storage.CompletionMarkerName, "run1"))
 	assert.Len(t, deps.repository.packages, 3)
 }
 
@@ -628,7 +653,7 @@ func TestRunnerIncrementalBackupRetainsDatabasePackages(t *testing.T) {
 	result, err := NewRunner(deps.dependencies()).Run(context.Background(), site, false)
 	require.NoError(t, err)
 	assert.Equal(t, StatusSuccess, result.Status)
-	assert.Contains(t, store.keys, "bqckup/example/23-July-2026/03-45-00-run1-application-mysql.sql.gz")
+	assert.Contains(t, store.keys, "bqckup/example/"+storage.FormatPackageKey(deps.clock.now, "application-mysql.sql.gz", "run1"))
 	assert.Equal(t, 1, deps.retainer.calls, "incremental runs must retain the bqckup/<site> database package sets")
 	assert.Equal(t, "bqckup/example", deps.retainer.lastSitePrefix)
 }
@@ -1039,22 +1064,6 @@ func TestRunnerNotifiesPersistenceWhenSuccessFinishRunFails(t *testing.T) {
 	assert.Equal(t, config.EventBackupFailed, call.Event)
 	assert.Equal(t, "persistence", call.ErrorCategory)
 	assert.Equal(t, "could not finalize backup history", call.ErrorMessage)
-}
-
-func TestRunnerDoesNotNotifyForSkippedRuns(t *testing.T) {
-	deps := successfulDependencies(t)
-	deps.notifier = &fakeNotifier{}
-	deps.repository.lastSuccessful = &history.BackupRun{StartedAt: deps.clock.now.Add(-30 * time.Minute)}
-
-	_, err := NewRunner(deps.dependencies()).Run(context.Background(), validSite(), false)
-	require.NoError(t, err)
-	assert.Empty(t, deps.notifier.calls)
-
-	deps.repository.lastSuccessful = nil
-	deps.lock.acquired = false
-	_, err = NewRunner(deps.dependencies()).Run(context.Background(), validSite(), false)
-	require.NoError(t, err)
-	assert.Empty(t, deps.notifier.calls)
 }
 
 func TestRunnerDoesNotNotifyWhenRunIsNeverCreated(t *testing.T) {

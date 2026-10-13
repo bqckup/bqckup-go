@@ -11,10 +11,12 @@ import (
 const (
 	// BackupDateLayout is the legacy sortable UTC date directory.
 	BackupDateLayout = "2006-01-02"
-	// BackupObjectDateLayout is the UTC date directory for new full packages.
+	// BackupObjectDateLayout is the date directory for full packages.
 	BackupObjectDateLayout = "02-January-2006"
-	// BackupRunLayout is the compact UTC time prefix used in package names.
+	// BackupRunLayout is the compact UTC time prefix used by legacy packages.
 	BackupRunLayout = "15-04-05"
+	// BackupLocalRunLayout distinguishes local-time keys from legacy UTC keys.
+	BackupLocalRunLayout = "15.04.05"
 	// TimestampLayout is the logical run prefix used by retention.
 	TimestampLayout = BackupDateLayout + "/" + BackupRunLayout
 	// CompletionMarkerName is stored last for a flat backup set. Retention only
@@ -30,7 +32,8 @@ func IsCompletionMarker(key string) bool {
 // FormatPackageKey returns the date-relative object name for a full backup
 // package. All packages from one run share the same time prefix.
 func FormatPackageKey(createdAt time.Time, packageName string, runID ...string) string {
-	name := createdAt.UTC().Format(BackupRunLayout)
+	local := createdAt.In(time.Local)
+	name := local.Format(BackupLocalRunLayout)
 	if len(runID) > 0 && runID[0] != "" {
 		compact := strings.ReplaceAll(runID[0], "-", "")
 		if len(compact) > 8 {
@@ -38,7 +41,7 @@ func FormatPackageKey(createdAt time.Time, packageName string, runID ...string) 
 		}
 		name += "-" + compact
 	}
-	return createdAt.UTC().Format(BackupObjectDateLayout) + "/" + name + "-" + packageName
+	return local.Format(BackupObjectDateLayout) + "/" + name + "-" + packageName
 }
 
 // ParseBackupSet parses the logical date/time run prefix.
@@ -48,8 +51,13 @@ func ParseBackupSet(value string) (time.Time, error) {
 		if _, createdAt, err := BackupSetForPackage(parts[0], parts[1]); err == nil {
 			return createdAt, nil
 		}
+		if len(parts[1]) >= len(BackupLocalRunLayout) && (len(parts[1]) == len(BackupLocalRunLayout) || parts[1][len(BackupLocalRunLayout)] == '-') {
+			if createdAt, err := time.ParseInLocation(BackupObjectDateLayout+"/"+BackupLocalRunLayout, parts[0]+"/"+parts[1][:len(BackupLocalRunLayout)], time.Local); err == nil {
+				return createdAt, nil
+			}
+		}
 	}
-	if len(parts) == 2 && len(parts[1]) >= 8 {
+	if len(parts) == 2 && len(parts[1]) >= len(BackupRunLayout) {
 		if createdAt, err := time.Parse(TimestampLayout, parts[0]+"/"+parts[1][:8]); err == nil && (len(parts[1]) == 8 || parts[1][8] == '-') {
 			return createdAt, nil
 		}
@@ -76,11 +84,14 @@ func IsFlatBackupSet(value string) bool {
 // timestamp. The package suffix is intentionally not restricted so database
 // names remain configurable.
 func ParseBackupPackage(value string) (time.Time, error) {
-	// The time prefix is exactly HH-mm-ss, followed by a separating dash.
-	if len(value) <= len("00-00-00-") || value[8] != '-' {
-		return time.Time{}, errors.New("invalid backup package name")
+	for _, layout := range []string{BackupLocalRunLayout, BackupRunLayout} {
+		if len(value) > len(layout) && value[len(layout)] == '-' {
+			if parsed, err := time.Parse(layout, value[:len(layout)]); err == nil {
+				return parsed, nil
+			}
+		}
 	}
-	return time.Parse(BackupRunLayout, value[:8])
+	return time.Time{}, errors.New("invalid backup package name")
 }
 
 // BackupSetForPackage returns the logical set prefix for a new package.
@@ -92,17 +103,24 @@ func BackupSetForPackage(date, packageName string) (string, time.Time, error) {
 	if err != nil {
 		return "", time.Time{}, fmt.Errorf("invalid backup date: %w", err)
 	}
-	dateTime = time.Date(dateTime.Year(), dateTime.Month(), dateTime.Day(), 0, 0, 0, 0, time.UTC)
-	timeOfDay, err := time.Parse(BackupRunLayout, packageName[:8])
-	if err != nil {
-		return "", time.Time{}, fmt.Errorf("invalid backup time: %w", err)
-	}
-	dateTime = dateTime.Add(time.Duration(timeOfDay.Hour())*time.Hour + time.Duration(timeOfDay.Minute())*time.Minute + time.Duration(timeOfDay.Second())*time.Second)
-	setTime := packageName[:8]
-	if len(packageName) > 9 && packageName[8] == '-' {
-		if separator := strings.IndexByte(packageName[9:], '-'); separator >= 0 {
-			setTime = packageName[:9+separator]
+	runPrefix := packageName[:len(BackupRunLayout)]
+	if packageName[2] == '.' {
+		runPrefix = packageName[:len(BackupLocalRunLayout)]
+		dateTime, err = time.ParseInLocation(BackupObjectDateLayout+"/"+BackupLocalRunLayout, date+"/"+runPrefix, time.Local)
+		if err != nil {
+			return "", time.Time{}, fmt.Errorf("invalid backup time: %w", err)
 		}
+	} else {
+		dateTime = time.Date(dateTime.Year(), dateTime.Month(), dateTime.Day(), 0, 0, 0, 0, time.UTC)
+		timeOfDay, err := time.Parse(BackupRunLayout, runPrefix)
+		if err != nil {
+			return "", time.Time{}, fmt.Errorf("invalid backup time: %w", err)
+		}
+		dateTime = dateTime.Add(time.Duration(timeOfDay.Hour())*time.Hour + time.Duration(timeOfDay.Minute())*time.Minute + time.Duration(timeOfDay.Second())*time.Second)
+	}
+	setTime := runPrefix
+	if separator := strings.IndexByte(packageName[len(runPrefix)+1:], '-'); separator >= 0 {
+		setTime = packageName[:len(runPrefix)+1+separator]
 	}
 	return date + "/" + setTime, dateTime, nil
 }

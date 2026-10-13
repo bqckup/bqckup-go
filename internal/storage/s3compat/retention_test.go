@@ -54,6 +54,24 @@ func TestListBackupSetsMarksOnlyCompletedFlatRuns(t *testing.T) {
 	assert.False(t, sets[1].Complete)
 }
 
+func TestListBackupSetsOrdersLocalAndLegacyUTCRuns(t *testing.T) {
+	client := &fakeClient{listOutputs: []*s3.ListObjectsV2Output{{Contents: []types.Object{
+		{Key: aws.String("company/bqckup/site/11-October-2026/18-25-26-aaaaaaaa-files.tar.gz")},
+		{Key: aws.String("company/bqckup/site/11-October-2026/18-25-26-aaaaaaaa-.bqckup-complete")},
+		{Key: aws.String("company/bqckup/site/12-October-2026/03.25.26-bbbbbbbb-files.tar.gz")},
+		{Key: aws.String("company/bqckup/site/12-October-2026/03.25.26-bbbbbbbb-.bqckup-complete")},
+	}}}}
+	store := newWithClients(Options{Bucket: "backups", Prefix: "company"}, &fakeUploader{}, client, nil)
+
+	sets, err := store.ListBackupSets(context.Background(), "bqckup/site")
+	require.NoError(t, err)
+	require.Len(t, sets, 2)
+	assert.Equal(t, "bqckup/site/11-October-2026/18-25-26-aaaaaaaa", sets[0].Key)
+	assert.Equal(t, "bqckup/site/12-October-2026/03.25.26-bbbbbbbb", sets[1].Key)
+	assert.True(t, sets[0].Complete)
+	assert.True(t, sets[1].Complete)
+}
+
 func TestListBackupSetsAcceptsConfiguredBackupNamespace(t *testing.T) {
 	client := &fakeClient{listOutputs: []*s3.ListObjectsV2Output{
 		{Contents: []types.Object{

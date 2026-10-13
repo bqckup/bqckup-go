@@ -20,7 +20,7 @@ Use these exact values; configuration decoding is strict.
 | `site.backup_mode` | `full` (default), `incremental` |
 | database `engine` | `mysql`, `postgres` |
 | notification channel `type` | `smtp`, `webhook`, `discord` |
-| notification route `events` | `all`, `backup_failed`, `backup_partial`, `backup_cancelled`, `backup_no_change` |
+| notification route `events` | `all`, `backup_failed`, `backup_partial`, `backup_cancelled`, `backup_skipped`, `backup_no_change`, `backup_succeeded`, `daily_report`, `monthly_report` |
 
 Values shown as `<placeholder>` are documentation placeholders. Replace them
 with real values before use.
@@ -232,7 +232,7 @@ notifications:
       webhook_url: <discord-webhook-url>
 
   routes:
-    # events options: all | backup_failed | backup_partial | backup_cancelled | backup_no_change
+    # events options: all | backup_failed | backup_partial | backup_cancelled | backup_skipped | backup_no_change | backup_succeeded | daily_report | monthly_report
     - events: [backup_failed]
       channels: [email, discord]
 ```
@@ -247,9 +247,10 @@ notifications:
   containing any of them must be a regular, non-symlink file with exact mode
   `0600`. Webhook URLs must be absolute HTTP(S) URLs; non-loopback endpoints
   require HTTPS.
-- **Routes** map events to channels. Events are `backup_failed`,
-  `backup_partial`, `backup_cancelled`, and `backup_no_change` (successful runs
-  stay silent); a route needs at least one event and may fan out to several
+- **Routes** map events to channels. A `minimum_interval` skip emits
+  `backup_skipped`; other backup event names are `backup_failed`,
+  `backup_partial`, `backup_cancelled`, `backup_no_change`, and
+  `backup_succeeded`. A route needs at least one event and may fan out to several
   channels. A channel matched through several routes is sent once per event.
   Duplicate channel names in the YAML map are not detected: the last definition
   wins (yaml map semantics).
@@ -260,10 +261,11 @@ notifications:
 - **Delivery**: after a run is recorded terminal in history, every channel of
   every matching route is attempted, sequentially, with the same sanitized
   payload (machine hostname and IP, run id, site, status, timestamps,
-  duration, package count, size, destinations, and for failed, cancelled, or
-  unchanged runs a redacted error category and message).
+  duration, package count, size, destinations, and for failed, cancelled,
+  skipped, or unchanged runs a safe category and message).
   A failing channel never stops the others and never changes the run status
-  or history. Skipped runs and preflight failures send nothing. Webhook and
+  or history. A `minimum_interval` skip notifies without a history run or run
+  ID; lock contention and preflight failures send nothing. Webhook and
   Discord use a 10-second HTTP timeout; SMTP uses a 30-second session
   deadline. SMTP port 465 is implicit TLS; other ports use STARTTLS, and
   PLAIN authentication is only attempted when the session is encrypted.

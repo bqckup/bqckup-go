@@ -35,8 +35,13 @@ func TestParseBackupSetRejectsNonCanonicalNames(t *testing.T) {
 }
 
 func TestFormatPackageKeyUsesLongMonthDateDirectory(t *testing.T) {
+	previous := time.Local
+	time.Local = time.FixedZone("WITA", 8*60*60)
+	t.Cleanup(func() { time.Local = previous })
 	createdAt := time.Date(2026, time.September, 16, 3, 4, 5, 0, time.UTC)
-	assert.Equal(t, "16-September-2026/03-04-05-files.tar.gz", FormatPackageKey(createdAt, "files.tar.gz"))
+	assert.Equal(t, "16-September-2026/11.04.05-files.tar.gz", FormatPackageKey(createdAt, "files.tar.gz"))
+	createdAt = time.Date(2026, time.October, 11, 18, 25, 26, 0, time.UTC)
+	assert.Equal(t, "12-October-2026/02.25.26-12345678-files.tar.gz", FormatPackageKey(createdAt, "files.tar.gz", "12345678-1234"))
 }
 
 func TestBackupSetForPackageAcceptsOldAndNewDateDirectories(t *testing.T) {
@@ -46,4 +51,23 @@ func TestBackupSetForPackageAcceptsOldAndNewDateDirectories(t *testing.T) {
 		assert.Equal(t, date+"/03-04-05", set)
 		assert.Equal(t, time.Date(2026, time.September, 16, 3, 4, 5, 0, time.UTC), createdAt)
 	}
+}
+
+func TestBackupSetForPackageReadsLocalAndLegacyUTCKeys(t *testing.T) {
+	previous := time.Local
+	time.Local = time.FixedZone("WITA", 8*60*60)
+	t.Cleanup(func() { time.Local = previous })
+	set, createdAt, err := BackupSetForPackage("12-October-2026", "02.25.26-12345678-files.tar.gz")
+	require.NoError(t, err)
+	assert.Equal(t, "12-October-2026/02.25.26-12345678", set)
+	assert.True(t, createdAt.Equal(time.Date(2026, time.October, 11, 18, 25, 26, 0, time.UTC)))
+
+	parsed, err := ParseBackupSet(set)
+	require.NoError(t, err)
+	assert.True(t, parsed.Equal(createdAt))
+
+	legacySet, legacyAt, err := BackupSetForPackage("11-October-2026", "18-25-26-12345678-files.tar.gz")
+	require.NoError(t, err)
+	assert.Equal(t, "11-October-2026/18-25-26-12345678", legacySet)
+	assert.True(t, legacyAt.Equal(createdAt))
 }

@@ -4,6 +4,14 @@ All notable changes to Bqckup are documented in this file.
 
 ## Unreleased
 
+## v1.0.14
+
+- Name new full backup folders and package time prefixes in the server process
+  timezone, with dots in the local time prefix. Existing UTC keys remain
+  readable by listing, retention, and download links.
+- Send a `backup_skipped` notification when `minimum_interval` prevents a run,
+  so matching routes can alert without changing backup history or skip status.
+
 ## v1.0.13
 
 - Log the phase, path, and filesystem error for every source entry omitted from

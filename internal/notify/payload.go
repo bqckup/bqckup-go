@@ -24,6 +24,7 @@ const (
 	EventBackupFailed    Event = config.EventBackupFailed
 	EventBackupPartial   Event = config.EventBackupPartial
 	EventBackupCancelled Event = config.EventBackupCancelled
+	EventBackupSkipped   Event = config.EventBackupSkipped
 	EventBackupNoChange  Event = config.EventBackupNoChange
 )
 
@@ -219,7 +220,7 @@ func statusColor(status string) int {
 	switch status {
 	case string(backup.StatusSuccess):
 		return 0x2ECC71
-	case string(backup.StatusPartial), string(backup.StatusCancelled), string(backup.StatusNoChange):
+	case string(backup.StatusPartial), string(backup.StatusCancelled), string(backup.StatusSkipped), string(backup.StatusNoChange):
 		return 0xF1C40F
 	default:
 		return 0xE74C3C
@@ -251,6 +252,8 @@ func humanStatus(status string) string {
 		return "Backup incomplete"
 	case backup.StatusCancelled:
 		return "Backup cancelled"
+	case backup.StatusSkipped:
+		return "Backup skipped"
 	case backup.StatusNoChange:
 		return "No changes detected"
 	default:
@@ -350,6 +353,9 @@ func description(payload Payload) string {
 	}
 	if payload.Status == string(backup.StatusPartial) {
 		return fmt.Sprintf("The snapshot was saved, but %d source entries could not be read. Run the backup again to complete it.", payload.FilesSkipped)
+	}
+	if payload.Status == string(backup.StatusSkipped) && payload.ErrorCategory == string(backup.SkipMinimumInterval) {
+		return "No backup was created because minimum_interval has not elapsed since the last successful backup."
 	}
 	if payload.Status == string(backup.StatusNoChange) {
 		var anchorPart string
