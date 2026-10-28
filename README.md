@@ -112,7 +112,7 @@ must have mode `0600`. Never commit real passwords or storage keys.
 
 Each `backup run` also copies every site YAML, including disabled sites, to
 `bqckup/<backup_prefix>/<server_id>/config/<filename>.yaml` in every storage
-referenced by a site. These are plaintext recovery copies and are replaced
+referenced by an enabled site. These are plaintext recovery copies and are replaced
 atomically; keep every destination private.
 
 To convert a legacy configuration tree, install PyYAML and run:
@@ -278,3 +278,27 @@ features through this repository's GitHub issues and pull requests.
 
 See [CHANGELOG.md](CHANGELOG.md) for release notes. Bqckup is released under
 the [MIT License](LICENSE).
+
+### Quiet incident notifications
+
+Files that disappear after directory enumeration remain recorded as `partial`
+with category `source_disappeared`. They appear in history and scheduled reports,
+but do not trigger immediate notifications. Missing configured roots, permission
+errors, and mixed failures still alert. Partial backups never prune complete
+recovery sets. No cache list or application profile is required.
+
+For failed, partial, and cancelled runs, each channel sends the first incident
+and at most one reminder per 24 hours for the same event/category/message.
+Changed errors alert immediately. Delivery state survives CLI restarts in SQLite;
+failed deliveries remain eligible for retry on a subsequent run. A complete
+successful or no-change run sends one recovery to channels with an open incident,
+even when their route only selects failures. Database-only runs have separate
+incident state and cannot close a full-backup incident. Routine success messages
+and minimum-interval skip messages are suppressed. Per-run facts and failure counts remain in local history;
+external webhook consumers only receive delivered alerts and recoveries, not
+an update for every suppressed run.
+
+Database connection-limit, lock, and access errors use fixed diagnostic messages
+without exposing exporter stderr. This does not remove MyISAM table locks or
+repair network routing. Persistent upload queues and chunked database exports
+are not implemented by this change.

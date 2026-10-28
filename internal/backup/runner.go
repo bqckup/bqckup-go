@@ -39,13 +39,14 @@ const (
 )
 
 type RunResult struct {
-	RunID      string     `json:"run_id,omitempty"`
-	SiteName   string     `json:"site_name"`
-	Scope      string     `json:"scope"`
-	Status     Status     `json:"status"`
-	SkipReason SkipReason `json:"skip_reason,omitempty"`
-	StartedAt  time.Time  `json:"started_at,omitempty"`
-	FinishedAt time.Time  `json:"finished_at,omitempty"`
+	unclassifiedSkips bool
+	RunID             string     `json:"run_id,omitempty"`
+	SiteName          string     `json:"site_name"`
+	Scope             string     `json:"scope"`
+	Status            Status     `json:"status"`
+	SkipReason        SkipReason `json:"skip_reason,omitempty"`
+	StartedAt         time.Time  `json:"started_at,omitempty"`
+	FinishedAt        time.Time  `json:"finished_at,omitempty"`
 	// FilesSkipped is the number of source entries omitted from an incomplete
 	// file backup. With multiple incremental destinations, it is the largest
 	// count reported by any destination rather than a duplicate sum.
@@ -86,6 +87,7 @@ type NotifyDestination struct {
 // name is one of the config notification events; payload stats are computed
 // from Packages by the notifier, so RunResult stays untouched.
 type NotifyInput struct {
+	Scope              string
 	Event              string
 	RunID              string
 	SiteName           string
@@ -260,7 +262,7 @@ func (r *Runner) run(ctx context.Context, site config.Site, force, databaseOnly 
 	if !force && lastSuccessful != nil && now.Sub(lastSuccessful.StartedAt.UTC()) < site.Policy.MinimumInterval {
 		result.Status = StatusSkipped
 		result.SkipReason = SkipMinimumInterval
-		r.notify(context.WithoutCancel(ctx), NotifyInput{
+		r.notify(context.WithoutCancel(ctx), NotifyInput{Scope: result.Scope,
 			Event: config.EventBackupSkipped, SiteName: site.Name, Status: result.Status,
 			StartedAt: now, FinishedAt: now, LastSuccessfulAt: lastSuccessful.StartedAt,
 			ErrorCategory: string(SkipMinimumInterval), ErrorMessage: "minimum_interval has not elapsed since the last successful backup",
@@ -312,7 +314,7 @@ func (r *Runner) run(ctx context.Context, site config.Site, force, databaseOnly 
 		if event == config.EventBackupFailed {
 			notificationMessage = apperror.NotificationMessage(operationErr)
 		}
-		r.notify(context.WithoutCancel(ctx), NotifyInput{
+		r.notify(context.WithoutCancel(ctx), NotifyInput{Scope: result.Scope,
 			Event: event, RunID: run.ID, SiteName: site.Name, Status: result.Status,
 			StartedAt: now, FinishedAt: finished,
 			ErrorCategory: string(category), ErrorMessage: notificationMessage,
@@ -390,6 +392,9 @@ func (r *Runner) run(ctx context.Context, site config.Site, force, databaseOnly 
 				partialFiles = summary.FilesSkipped
 			}
 			result.SkippedSources = append(result.SkippedSources, summary.SkippedSources...)
+			if len(summary.SkippedSources) < summary.FilesSkipped {
+				result.unclassifiedSkips = true
+			}
 		}
 		result.FilesSkipped = partialFiles
 	} else if !databaseOnly {
@@ -529,7 +534,7 @@ func (r *Runner) run(ctx context.Context, site config.Site, force, databaseOnly 
 		}
 	}
 
-	if !databaseOnly && site.BackupMode != "incremental" {
+	if !databaseOnly && result.FilesSkipped == 0 && site.BackupMode != "incremental" {
 		anchor, err := r.dependencies.Repository.LastSuccessful(ctx, site.Name, now)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "warning: could not load previous backup for change detection: %v\n", err)
@@ -568,7 +573,7 @@ func (r *Runner) run(ctx context.Context, site config.Site, force, databaseOnly 
 				if err := r.dependencies.Repository.FinishRun(context.WithoutCancel(ctx), run.ID, history.StatusNoChange, finished, historyCategory, historyMessage); err != nil {
 					result.Status = StatusFailed
 					result.FinishedAt = finished
-					r.notify(context.WithoutCancel(ctx), NotifyInput{
+					r.notify(context.WithoutCancel(ctx), NotifyInput{Scope: result.Scope,
 						Event: config.EventBackupFailed, RunID: run.ID, SiteName: site.Name, Status: result.Status,
 						StartedAt: now, FinishedAt: finished,
 						ErrorCategory: string(apperror.CategoryPersistence), ErrorMessage: "could not finalize backup history",
@@ -579,7 +584,7 @@ func (r *Runner) run(ctx context.Context, site config.Site, force, databaseOnly 
 				}
 				result.Status = StatusNoChange
 				result.FinishedAt = finished
-				r.notify(context.WithoutCancel(ctx), NotifyInput{
+				r.notify(context.WithoutCancel(ctx), NotifyInput{Scope: result.Scope,
 					Event: config.EventBackupNoChange, RunID: run.ID, SiteName: site.Name, Status: result.Status,
 					StartedAt: now, FinishedAt: finished,
 					ErrorCategory: "no_change", ErrorMessage: msg,
@@ -595,13 +600,17 @@ func (r *Runner) run(ctx context.Context, site config.Site, force, databaseOnly 
 		finished := r.dependencies.Clock.Now().UTC()
 		message := fmt.Sprintf("%d source entries could not be read; an incomplete snapshot was saved", result.FilesSkipped)
 		historyMessage := message
+		category := "source"
+		if onlyDisappearedSources(result) {
+			category = "source_disappeared"
+		}
 		if _, warningMessage := backupWarningHistory(retentionWarnings, databaseWarnings); warningMessage != "" {
 			historyMessage = strings.Join([]string{message, warningMessage}, "; ")
 		}
-		if err := r.dependencies.Repository.FinishRun(context.WithoutCancel(ctx), run.ID, history.StatusPartial, finished, "source", historyMessage); err != nil {
+		if err := r.dependencies.Repository.FinishRun(context.WithoutCancel(ctx), run.ID, history.StatusPartial, finished, category, historyMessage); err != nil {
 			result.Status = StatusFailed
 			result.FinishedAt = finished
-			r.notify(context.WithoutCancel(ctx), NotifyInput{
+			r.notify(context.WithoutCancel(ctx), NotifyInput{Scope: result.Scope,
 				Event: config.EventBackupFailed, RunID: run.ID, SiteName: site.Name, Status: result.Status,
 				StartedAt: now, FinishedAt: finished,
 				ErrorCategory: string(apperror.CategoryPersistence), ErrorMessage: "could not finalize backup history",
@@ -612,7 +621,10 @@ func (r *Runner) run(ctx context.Context, site config.Site, force, databaseOnly 
 		}
 		result.Status = StatusPartial
 		result.FinishedAt = finished
-		r.notify(context.WithoutCancel(ctx), NotifyInput{
+		if category == "source_disappeared" {
+			return result, nil
+		}
+		r.notify(context.WithoutCancel(ctx), NotifyInput{Scope: result.Scope,
 			Event: config.EventBackupPartial, RunID: run.ID, SiteName: site.Name, Status: result.Status,
 			StartedAt: now, FinishedAt: finished,
 			ErrorCategory: "source", ErrorMessage: historyMessage,
@@ -628,7 +640,7 @@ func (r *Runner) run(ctx context.Context, site config.Site, force, databaseOnly 
 	if err := r.dependencies.Repository.FinishRun(context.WithoutCancel(ctx), run.ID, history.StatusSuccess, finished, errorCategory, errorMessage); err != nil {
 		result.Status = StatusFailed
 		result.FinishedAt = finished
-		r.notify(context.WithoutCancel(ctx), NotifyInput{
+		r.notify(context.WithoutCancel(ctx), NotifyInput{Scope: result.Scope,
 			Event: config.EventBackupFailed, RunID: run.ID, SiteName: site.Name, Status: result.Status,
 			StartedAt: now, FinishedAt: finished,
 			ErrorCategory: string(apperror.CategoryPersistence), ErrorMessage: "could not finalize backup history",
@@ -640,7 +652,7 @@ func (r *Runner) run(ctx context.Context, site config.Site, force, databaseOnly 
 	result.Status = StatusSuccess
 	result.FinishedAt = finished
 
-	r.notify(context.WithoutCancel(ctx), NotifyInput{
+	r.notify(context.WithoutCancel(ctx), NotifyInput{Scope: result.Scope,
 		Event: config.EventBackupSucceeded, RunID: run.ID, SiteName: site.Name, Status: result.Status,
 		StartedAt: now, FinishedAt: finished,
 		Destinations:       buildNotifyDestinations(site, r.dependencies.Storages),
@@ -945,4 +957,17 @@ func (r *Runner) validateDependencies() error {
 		return apperror.Wrap(apperror.CategoryPreflight, "could not prepare the temporary directory", fmt.Errorf("create temporary directory: %w", err))
 	}
 	return nil
+}
+
+// Missing descendants remain partial and cannot prune a complete recovery set.
+func onlyDisappearedSources(result RunResult) bool {
+	if result.unclassifiedSkips || result.FilesSkipped == 0 || len(result.SkippedSources) < result.FilesSkipped {
+		return false
+	}
+	for _, source := range result.SkippedSources {
+		if !source.Missing {
+			return false
+		}
+	}
+	return true
 }

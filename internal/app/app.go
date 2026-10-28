@@ -102,7 +102,7 @@ func Open(ctx context.Context, configDir string) (*App, error) {
 		Storages:           configuration.Storages,
 		Retainer:           retentionAdapter{},
 		Locker:             lock.New(configuration.App.LockDirectory),
-		Notifier:           buildNotifier(configuration.Notifications, configuration.BackupNamespace()),
+		Notifier:           buildNotifier(configuration.Notifications, configuration.BackupNamespace(), repository),
 		Clock:              clock.System{},
 		TemporaryDirectory: configuration.App.TemporaryDirectory,
 	})
@@ -134,11 +134,13 @@ func Open(ctx context.Context, configDir string) (*App, error) {
 // buildNotifier constructs the notification dispatcher from the configured
 // channels and routes. A config without a notifications section yields nil,
 // which the runner treats as a no-op.
-func buildNotifier(notifications config.Notifications, serverID string) backup.Notifier {
+func buildNotifier(notifications config.Notifications, serverID string, state notify.DeliveryState) backup.Notifier {
 	if len(notifications.Channels) == 0 {
 		return nil
 	}
-	return notify.NewDispatcher(buildNotificationChannels(notifications.Channels), notifications.Routes, serverID)
+	dispatcher := notify.NewDispatcher(buildNotificationChannels(notifications.Channels), notifications.Routes, serverID)
+	dispatcher.WithDeliveryState(state)
+	return dispatcher
 }
 
 func buildNotificationChannels(configured map[string]config.Channel) map[string]notify.Channel {

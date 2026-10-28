@@ -143,7 +143,7 @@ type archiveState struct {
 
 func (s *archiveState) skip(phase, path string, err error) {
 	s.filesSkipped++
-	s.skippedSources = append(s.skippedSources, backup.SkippedSource{Phase: phase, Path: path, Error: err.Error()})
+	s.skippedSources = append(s.skippedSources, backup.SkippedSource{Missing: errors.Is(err, os.ErrNotExist), Phase: phase, Path: path, Error: err.Error()})
 }
 
 func (s *archiveState) add(realPath, archivePath string, active map[string]bool, optional bool) error {

@@ -212,3 +212,12 @@ func archiveEntries(t *testing.T, filename string) map[string]byte {
 	}
 	return entries
 }
+
+func TestSkippedEntryClassificationUsesErrorIdentity(t *testing.T) {
+	state := archiveState{}
+	state.skip("lstat", "gone", &os.PathError{Op: "lstat", Path: "gone", Err: os.ErrNotExist})
+	state.skip("open", "private", os.ErrPermission)
+	require.Len(t, state.skippedSources, 2)
+	assert.True(t, state.skippedSources[0].Missing)
+	assert.False(t, state.skippedSources[1].Missing)
+}

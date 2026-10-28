@@ -11,9 +11,10 @@ import (
 // Error is the diagnostic from the local filesystem and never contains
 // credentials or provider responses.
 type SkippedSource struct {
-	Phase string `json:"phase"`
-	Path  string `json:"path"`
-	Error string `json:"error"`
+	Missing bool   `json:"missing,omitempty"`
+	Phase   string `json:"phase"`
+	Path    string `json:"path"`
+	Error   string `json:"error"`
 }
 
 // ID identifies content by the SHA-256 of its plaintext bytes.

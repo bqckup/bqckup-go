@@ -200,7 +200,7 @@ func (e *ProcessExporter) exportOnce(ctx context.Context, source config.Database
 			return backup.Package{}, ctxErr, false, false
 		}
 		transient := isTransientDatabaseError(processErr, stderr.String())
-		return backup.Package{}, apperror.Hide("could not export database", processErr), transient, !transient && isCorruptionDatabaseError(processErr, stderr.String())
+		return backup.Package{}, apperror.Hide(databaseFailureSummary(stderr.String()), processErr), transient, !transient && isCorruptionDatabaseError(processErr, stderr.String())
 	}
 	if gzipErr != nil {
 		return backup.Package{}, apperror.Hide("could not finish database export", gzipErr), false, false
@@ -411,3 +411,18 @@ func firstStderrLine(output string) string {
 }
 
 var _ backup.Exporter = (*ProcessExporter)(nil)
+
+// Emit fixed descriptions, never raw exporter stderr containing credentials or SQL.
+func databaseFailureSummary(stderr string) string {
+	text := strings.ToLower(stderr)
+	switch {
+	case strings.Contains(text, "too many connections"):
+		return "database connection limit reached; reduce concurrent work and inspect blocked queries"
+	case strings.Contains(text, "lock wait"), strings.Contains(text, "deadlock"):
+		return "database export blocked by locks; inspect active queries before retrying"
+	case strings.Contains(text, "access denied"):
+		return "database export access denied; verify the configured account and grants"
+	default:
+		return "could not export database"
+	}
+}

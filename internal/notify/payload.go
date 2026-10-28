@@ -104,6 +104,7 @@ type ReportData struct {
 // partial, cancelled, and no-change runs. Hostname and ServerIP identify the
 // machine that ran the backup and are filled by the dispatcher when it is built.
 type Payload struct {
+	Recovery           bool              `json:"recovery,omitempty"`
 	Event              Event             `json:"event"`
 	RunID              string            `json:"run_id"`
 	ServerID           string            `json:"server_id"`
@@ -263,6 +264,9 @@ func humanStatus(status string) string {
 
 // headline renders the lead sentence shared by every human channel.
 func headline(payload Payload) string {
+	if payload.Recovery {
+		return "Backup recovered for " + payload.Site
+	}
 	if payload.ReportData != nil {
 		return reportHeadline(payload.ReportData)
 	}
@@ -339,6 +343,9 @@ func itemsSizeLine(count int, size int64) string {
 
 // description returns the human explanation paragraph for the run.
 func description(payload Payload) string {
+	if payload.Recovery {
+		return "A complete backup is available again. The previous backup incident has recovered."
+	}
 	if payload.Status == string(backup.StatusSuccess) {
 		base := "The backup completed successfully."
 		if payload.PackageCount > 0 {

@@ -20,6 +20,9 @@ import (
 func syncSiteConfigs(ctx context.Context, configuration config.Config, stores map[string]storage.Store) error {
 	destinationSet := make(map[string]struct{})
 	for _, site := range configuration.Sites {
+		if !site.Enabled {
+			continue
+		}
 		for _, destination := range site.Destinations {
 			destinationSet[destination.Storage] = struct{}{}
 		}

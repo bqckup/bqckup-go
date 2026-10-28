@@ -36,7 +36,7 @@ func TestSyncSiteConfigsUploadsAllSitesToUsedDestinations(t *testing.T) {
 		BackupPrefix: "hosting_client",
 		Sites: []config.Site{
 			{Name: "enabled", Enabled: true, SourceFile: enabledPath, Destinations: []config.Destination{{Storage: "sgbucket"}}},
-			{Name: "disabled", Enabled: false, SourceFile: disabledPath, Destinations: []config.Destination{{Storage: "archive"}}},
+			{Name: "disabled", Enabled: false, SourceFile: disabledPath, Destinations: []config.Destination{{Storage: "missing-disabled-storage"}}},
 		},
 	}
 
@@ -56,7 +56,7 @@ func TestSyncSiteConfigsUploadsAllSitesToUsedDestinations(t *testing.T) {
 	assert.Contains(t, string(disabled), "disabled-secret")
 	for _, name := range []string{"enabled.yaml", "disabled.yaml"} {
 		_, err = os.Stat(filepath.Join(archiveRoot, "bqckup", "hosting_client", "194.233.66.13_all", "config", name))
-		require.NoError(t, err)
+		require.ErrorIs(t, err, os.ErrNotExist)
 	}
 	_, err = os.Stat(filepath.Join(unusedRoot, "bqckup"))
 	assert.ErrorIs(t, err, os.ErrNotExist)
