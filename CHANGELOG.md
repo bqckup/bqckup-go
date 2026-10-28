@@ -4,6 +4,17 @@ All notable changes to Bqckup are documented in this file.
 
 ## Unreleased
 
+- Keep disappearing descendants as partial backups without immediate alerts;
+  retain skipped paths, daily report visibility, and complete recovery sets.
+- Persist per-channel incident delivery state: first alert, reminders at most
+  every 24 hours for unchanged errors, and one recovery for the same backup
+  scope. Silence routine success and minimum-interval skip messages.
+- Sync site configuration copies only to destinations used by enabled sites,
+  while retaining disabled site YAML in the recovery copies.
+- Explain database connection limits, locks, and access errors using fixed,
+  credential-safe messages.
+
+
 ## v1.0.14
 
 - Name new full backup folders and package time prefixes in the server process

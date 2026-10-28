@@ -543,9 +543,10 @@ func (s *backupState) dirTreeAt(ctx context.Context, dir, key string, old *tree.
 
 func (s *backupState) recordSkipped(phase, path string, err error) {
 	s.skippedSources = append(s.skippedSources, incremental.SkippedSource{
-		Phase: phase,
-		Path:  path,
-		Error: err.Error(),
+		Missing: errors.Is(err, os.ErrNotExist),
+		Phase:   phase,
+		Path:    path,
+		Error:   err.Error(),
 	})
 }
 

@@ -285,7 +285,7 @@ func TestBackupSavesPartialSnapshotAndRetriesSkippedFileOnNextRun(t *testing.T) 
 	if partial.FilesSkipped != 1 || partial.TotalFilesProcessed != 1 {
 		t.Fatalf("partial summary = %#v, want one processed and one skipped file", partial)
 	}
-	if len(partial.SkippedSources) != 1 || partial.SkippedSources[0].Path != skippedPath || partial.SkippedSources[0].Phase != "lstat" || partial.SkippedSources[0].Error != "file does not exist" {
+	if len(partial.SkippedSources) != 1 || partial.SkippedSources[0].Path != skippedPath || partial.SkippedSources[0].Phase != "lstat" || partial.SkippedSources[0].Error != "file does not exist" || !partial.SkippedSources[0].Missing {
 		t.Fatalf("skipped sources = %#v, want the missing path and error", partial.SkippedSources)
 	}
 

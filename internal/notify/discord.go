@@ -60,7 +60,7 @@ func (d *Discord) Send(ctx context.Context, payload Payload) error {
 	if payload.ReportData != nil {
 		return d.sendReport(ctx, payload)
 	}
-	if payload.Status == string(backup.StatusSuccess) || payload.Status == string(backup.StatusNoChange) {
+	if !payload.Recovery && (payload.Status == string(backup.StatusSuccess) || payload.Status == string(backup.StatusNoChange)) {
 		return nil
 	}
 
@@ -79,7 +79,7 @@ func (d *Discord) Send(ctx context.Context, payload Payload) error {
 		{Name: "Duration", Value: durationHuman(payload.DurationSeconds), Inline: true},
 	}
 
-	if payload.Status == string(backup.StatusFailed) || payload.Status == string(backup.StatusPartial) || payload.Status == string(backup.StatusNoChange) {
+	if !payload.Recovery && (payload.Status == string(backup.StatusFailed) || payload.Status == string(backup.StatusPartial) || payload.Status == string(backup.StatusNoChange)) {
 		fields = append(fields, discordField{Name: "Consecutive Failures", Value: fmt.Sprintf("%d", payload.FailureStreak), Inline: true})
 		if message := failureMessage(payload); message != "" {
 			if payload.Status == string(backup.StatusFailed) || payload.Status == string(backup.StatusPartial) {

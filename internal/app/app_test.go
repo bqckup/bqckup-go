@@ -407,13 +407,13 @@ func TestBuildNotifierConstructsChannelsFromConfiguration(t *testing.T) {
 		},
 	}
 
-	notifier := buildNotifier(configuration.Notifications, "test-server")
+	notifier := buildNotifier(configuration.Notifications, "test-server", nil)
 	require.NotNil(t, notifier)
 	assert.IsType(t, &notify.Dispatcher{}, notifier)
 }
 
 func TestBuildNotifierReturnsNilWithoutNotifications(t *testing.T) {
-	assert.Nil(t, buildNotifier(config.Notifications{}, ""))
+	assert.Nil(t, buildNotifier(config.Notifications{}, "", nil))
 }
 
 func TestOpenDeliversBackupFailedThroughConfiguredWebhook(t *testing.T) {

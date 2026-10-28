@@ -221,7 +221,7 @@ func (s *SMTP) renderHTML(subject string, payload Payload, logoSrc ...string) st
 		{"Duration", durationHuman(payload.DurationSeconds)},
 	}
 
-	if payload.Status == string(backup.StatusFailed) || payload.Status == string(backup.StatusPartial) || payload.Status == string(backup.StatusNoChange) {
+	if !payload.Recovery && (payload.Status == string(backup.StatusFailed) || payload.Status == string(backup.StatusPartial) || payload.Status == string(backup.StatusNoChange)) {
 		rows = append(rows, struct{ name, value string }{"Consecutive Failures", fmt.Sprintf("%d", payload.FailureStreak)})
 		if message := failureMessage(payload); message != "" {
 			rows = append(rows, struct{ name, value string }{"Failure", message})

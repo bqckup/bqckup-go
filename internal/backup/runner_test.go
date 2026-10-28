@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1352,4 +1353,51 @@ type fakeNotifier struct {
 func (f *fakeNotifier) Notify(_ context.Context, input NotifyInput) error {
 	f.calls = append(f.calls, input)
 	return f.err
+}
+
+func TestDisappearedSourcesStayPartialWithoutImmediateAlert(t *testing.T) {
+	for _, mixed := range []bool{false, true} {
+		t.Run(fmt.Sprint(mixed), func(t *testing.T) {
+			deps := successfulDependencies(t)
+			deps.notifier = &fakeNotifier{}
+			sources := []incremental.SkippedSource{{Missing: true, Phase: "lstat", Path: "cache/file"}}
+			if mixed {
+				sources = append(sources, incremental.SkippedSource{Phase: "open", Error: "permission denied"})
+			}
+			deps.incremental.summary = incremental.SnapshotSummary{SnapshotID: "partial", FilesSkipped: len(sources), SkippedSources: sources}
+			site := validSite()
+			site.BackupMode = "incremental"
+			site.Incremental = config.Incremental{Password: "test-password"}
+			result, err := NewRunner(deps.dependencies()).Run(context.Background(), site, false)
+			require.NoError(t, err)
+			assert.Equal(t, StatusPartial, result.Status)
+			assert.Zero(t, deps.incremental.retentionCalls)
+			assert.Zero(t, deps.retainer.calls)
+			if mixed {
+				require.Len(t, deps.notifier.calls, 1)
+			} else {
+				require.Empty(t, deps.notifier.calls)
+			}
+		})
+	}
+}
+
+func TestPartialArchiveWithEqualSizeCannotRecoverAsNoChange(t *testing.T) {
+	deps := successfulDependencies(t)
+	deps.notifier = &fakeNotifier{}
+	deps.archiver.filesSkipped = 1
+	deps.repository.lastSuccessful = &history.BackupRun{ID: "anchor", StartedAt: deps.clock.now.Add(-2 * time.Hour), Status: history.StatusSuccess}
+	deps.repository.packages = []history.Package{{RunID: "anchor", SourceKind: "files", SourceName: "files", Destination: "local-primary", Size: 7, Status: history.PackageStored}}
+	result, err := NewRunner(deps.dependencies()).Run(context.Background(), validSite(), true)
+	require.NoError(t, err)
+	require.Equal(t, StatusPartial, result.Status)
+	require.Equal(t, history.StatusPartial, deps.repository.finishedStatus)
+	require.Zero(t, deps.retainer.calls)
+	require.Len(t, deps.notifier.calls, 1)
+	require.Equal(t, config.EventBackupPartial, deps.notifier.calls[0].Event)
+}
+
+func TestUnknownDestinationSkipsAreNotQuiet(t *testing.T) {
+	result := RunResult{FilesSkipped: 1, SkippedSources: []SkippedSource{{Missing: true}}, unclassifiedSkips: true}
+	require.False(t, onlyDisappearedSources(result))
 }

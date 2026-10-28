@@ -425,12 +425,22 @@ notifications:
 Channel `type` options are `smtp`, `webhook`, and `discord`. Route `events`
 options are `all`, `backup_failed`, `backup_partial`, `backup_cancelled`,
 `backup_skipped`, `backup_no_change`, `backup_succeeded`, `daily_report`, and `monthly_report`.
-Partial snapshots send `backup_partial`; successful runs emit
-`backup_succeeded`. A `minimum_interval` skip sends `backup_skipped` with an
-empty `run_id`, status `skipped`, reason `minimum_interval`, and the last
-successful backup time. It does not create a history run. Every such skip
-notifies a matching route, including `all`; this includes expected skips for
-weekly or monthly sites checked by a daily cron. Lock contention and preflight
+Partial snapshots with unreadable entries send `backup_partial`. If every
+skipped descendant disappeared during traversal, history remains `partial`
+with category `source_disappeared`, but no immediate alert is sent. Configured
+roots must still exist. Partial backups never prune complete recovery sets.
+
+The first failed/partial/cancelled incident is delivered per channel, site,
+server namespace, and backup scope. Identical event/category/message reminders
+are limited to once per 24 hours, persisted in SQLite. Changed errors alert
+immediately. Failed deliveries remain eligible at the next run. A successful
+or no-change run sends one `backup_succeeded` recovery to a channel with an
+open incident, including failure-only routes. Recovery payloads include
+`recovery: true`; their status still describes the actual run. Routine successes are silent;
+database-only success cannot resolve a full-backup incident. Local history and
+scheduled reports retain all runs; suppressed webhook deliveries do not update
+external incident counters. A `minimum_interval` skip remains visible in CLI output without creating
+a history run or sending an immediate notification. Lock contention and preflight
 failures send no notification. Delivery is best effort and never changes
 backup history or the run result.
 Keep the root file at mode `0600` when it contains credentials or URLs.
@@ -615,7 +625,8 @@ until removed manually or by a storage lifecycle policy.
 Before running site jobs, the command synchronizes every file from `sites/`,
 including disabled sites, to
 `bqckup/<backup_prefix>/<server_id>/config/<filename>.yaml` in each storage
-referenced by a site. The fixed config objects are replaced atomically on later
+referenced by an enabled site. Disabled site YAML is still included in those
+recovery copies, but disabled-only destinations are not contacted. The fixed config objects are replaced atomically on later
 runs; normal backup artifacts remain write-once. A config-copy failure is
 reported after the data backups are still attempted.
 
@@ -644,6 +655,9 @@ connection loss, server disconnects, lock waits, deadlocks, and connection
 pressure. Authentication, permission, missing-database, corrupt-table, and
 other permanent errors fail immediately. Every failed attempt removes its
 partial SQL artifact before the next attempt; retries never run concurrently.
+Connection-limit, lock, and access errors now include fixed diagnostic messages;
+raw exporter stderr is never exposed. MyISAM locking still needs a suitable
+export strategy or maintenance window; these retries do not remove table locks.
 
 `--force` does not bypass an active site lock. If the command reports
 `already_running`, confirm whether another process is backing up the same site

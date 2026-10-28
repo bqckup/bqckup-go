@@ -365,3 +365,12 @@ func checksum(value string) string {
 }
 
 var _ backup.Exporter = (*ProcessExporter)(nil)
+
+func TestDatabaseFailureSummaryDoesNotExposeStderr(t *testing.T) {
+	for _, stderr := range []string{"Too many connections password=secret", "Lock wait timeout token=secret", "Access denied for user secret"} {
+		summary := databaseFailureSummary(stderr)
+		if strings.Contains(summary, "secret") || summary == "could not export database" {
+			t.Fatalf("unsafe or unclassified summary: %q", summary)
+		}
+	}
+}
