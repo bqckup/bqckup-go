@@ -119,3 +119,42 @@ func TestDiscordRecoveryActuallyDeliversAndRetries(t *testing.T) {
 		})
 	}
 }
+
+func TestWebhookReceivesEveryBackupResultAlongsideQuietIncidents(t *testing.T) {
+	ctx := context.Background()
+	db, closeDB, err := history.Open(filepath.Join(t.TempDir(), "state.db"))
+	require.NoError(t, err)
+	defer closeDB()
+	require.NoError(t, history.Migrate(ctx, db))
+	received := make(chan Payload, 6)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload Payload
+		if json.NewDecoder(r.Body).Decode(&payload) != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		received <- payload
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer server.Close()
+	discord := &recordingChannel{name: "discord"}
+	d := NewDispatcher(map[string]Channel{
+		"discord": discord,
+		"webhook": NewWebhook("webhook", server.URL),
+	}, []config.Route{{Events: []string{config.EventAll}, Channels: []string{"discord", "webhook"}}}, "server").WithDeliveryState(history.NewRepository(db))
+	for _, event := range []string{
+		config.EventBackupSucceeded, config.EventBackupSkipped, config.EventBackupFailed,
+		config.EventBackupFailed, config.EventBackupSucceeded, config.EventBackupSucceeded,
+	} {
+		input := notifyInput(event)
+		if event == config.EventBackupSucceeded {
+			input.Status = backup.StatusSuccess
+		}
+		require.NoError(t, d.Notify(ctx, input))
+		payload := <-received
+		require.Equal(t, Event(event), payload.Event)
+		require.False(t, payload.Recovery)
+	}
+	require.Len(t, discord.payloads, 2)
+	require.True(t, discord.payloads[1].Recovery)
+}

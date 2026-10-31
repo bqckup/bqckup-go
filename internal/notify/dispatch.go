@@ -48,9 +48,6 @@ func NewDispatcher(channels map[string]Channel, routes []config.Route, serverID 
 func (d *Dispatcher) WithDeliveryState(state DeliveryState) *Dispatcher { d.state = state; return d }
 
 func (d *Dispatcher) Notify(ctx context.Context, input backup.NotifyInput) error {
-	if d.state != nil && input.Event == config.EventBackupSkipped {
-		return nil
-	}
 	payload := NewPayload(input)
 	payload.ServerID = d.serverID
 	payload.Hostname = d.hostname
@@ -61,10 +58,15 @@ func (d *Dispatcher) Notify(ctx context.Context, input backup.NotifyInput) error
 	healthy := input.Event == config.EventBackupSucceeded || input.Event == config.EventBackupNoChange
 	problem := input.Event == config.EventBackupFailed || input.Event == config.EventBackupPartial || input.Event == config.EventBackupCancelled
 	if d.state != nil && healthy {
-		channels = nil
 		seen := map[string]bool{}
-		for _, event := range []string{input.Event, config.EventBackupFailed, config.EventBackupPartial, config.EventBackupCancelled} {
+		for _, channel := range channels {
+			seen[channel.Name()] = true
+		}
+		for _, event := range []string{config.EventBackupFailed, config.EventBackupPartial, config.EventBackupCancelled} {
 			for _, channel := range d.channelsFor(event) {
+				if _, webhook := channel.(*Webhook); webhook {
+					continue
+				}
 				if !seen[channel.Name()] {
 					channels = append(channels, channel)
 					seen[channel.Name()] = true
@@ -73,8 +75,13 @@ func (d *Dispatcher) Notify(ctx context.Context, input backup.NotifyInput) error
 		}
 	}
 	for _, channel := range channels {
+		_, webhook := channel.(*Webhook)
+		if d.state != nil && input.Event == config.EventBackupSkipped && !webhook {
+			continue
+		}
+		delivery := payload
 		var state history.NotificationState
-		if d.state != nil && (healthy || problem) {
+		if d.state != nil && !webhook && (healthy || problem) {
 			scope := input.Scope
 			if scope == "" {
 				scope = string(history.RunScopeFull)
@@ -90,11 +97,11 @@ func (d *Dispatcher) Notify(ctx context.Context, input backup.NotifyInput) error
 				if state.Fingerprint == "" {
 					continue
 				}
-				payload.Event = Event(config.EventBackupSucceeded)
-				payload.Recovery = true
-				payload.ErrorMessage = "Backup recovered"
-				payload.ErrorCategory = ""
-				payload.FailureStreak = 0
+				delivery.Event = Event(config.EventBackupSucceeded)
+				delivery.Recovery = true
+				delivery.ErrorMessage = "Backup recovered"
+				delivery.ErrorCategory = ""
+				delivery.FailureStreak = 0
 				state.Fingerprint = ""
 			} else {
 				fingerprint := fmt.Sprintf("%x", sha256.Sum256([]byte(input.Event+"\x00"+input.ErrorCategory+"\x00"+input.ErrorMessage)))
@@ -104,11 +111,11 @@ func (d *Dispatcher) Notify(ctx context.Context, input backup.NotifyInput) error
 				state.Fingerprint = fingerprint
 			}
 		}
-		if err := channel.Send(ctx, payload); err != nil {
+		if err := channel.Send(ctx, delivery); err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", channel.Name(), err))
 			continue
 		}
-		if d.state != nil && (healthy || problem) {
+		if d.state != nil && !webhook && (healthy || problem) {
 			state.LastSent = d.now()
 			if err := d.state.SaveNotification(ctx, state); err != nil {
 				errs = append(errs, fmt.Errorf("%s: save delivery state: %w", channel.Name(), err))

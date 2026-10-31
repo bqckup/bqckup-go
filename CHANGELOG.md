@@ -4,6 +4,9 @@ All notable changes to Bqckup are documented in this file.
 
 ## Unreleased
 
+- Deliver each routed backup result to webhook channels, including routine
+  successes and skips; keep incident deduplication and recovery alerts for
+  Discord and email channels.
 - Keep disappearing descendants as partial backups without immediate alerts;
   retain skipped paths, daily report visibility, and complete recovery sets.
 - Persist per-channel incident delivery state: first alert, reminders at most
