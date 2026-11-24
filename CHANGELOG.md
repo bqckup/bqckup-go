@@ -2,6 +2,11 @@
 
 All notable changes to Bqckup are documented in this file.
 
+## v1.0.15
+
+- Allow `bqckup storage link --expires` up to 168h (7 days, the SigV4
+  presigned-URL maximum). The default stays 24h.
+
 ## Unreleased
 
 - Deliver each routed backup result to webhook channels, including routine
