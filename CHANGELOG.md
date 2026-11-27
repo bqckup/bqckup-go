@@ -2,6 +2,15 @@
 
 All notable changes to Bqckup are documented in this file.
 
+## v1.0.15
+
+- Allow `bqckup storage link --expires` up to 168h (7 days, the SigV4
+  presigned-URL maximum). The default stays 24h.
+- Add `bqckup backup rekey <site> --destination <dest> --new-password-file <file>`
+  to replace an incremental repository password. The new key is verified
+  before the old key file is removed; data stays readable. Update
+  `incremental.password` in the site YAML right after a successful rekey.
+
 ## Unreleased
 
 - Deliver each routed backup result to webhook channels, including routine

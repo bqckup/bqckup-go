@@ -271,7 +271,7 @@ func TestStorageLinkRejectsMissingDestination(t *testing.T) {
 }
 
 func TestStorageLinkRejectsInvalidExpiryValues(t *testing.T) {
-	for _, expiry := range []string{"15m", "0h", "25h", "6", "2h30m"} {
+	for _, expiry := range []string{"15m", "0h", "169h", "6", "2h30m"} {
 		root, _, _ := commandForTest(t, "storage", "link", "s3-primary", "--key", "bqckup/site-a/2026-08-05T00-00-00Z/files.tar.gz", "--expires", expiry)
 		err := root.Execute()
 		require.Error(t, err, expiry)

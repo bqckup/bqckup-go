@@ -98,7 +98,7 @@ func newStorageCommand(opts *options) *cobra.Command {
 			}
 			hours, err := parseExpiryHours(expiry)
 			if err != nil {
-				return usageError(cmd, "--expires must be a whole number of hours between 1 and 24, like 6h")
+				return usageError(cmd, "--expires must be a whole number of hours between 1 and 168 (7 days), like 72h")
 			}
 			expiryDuration = time.Duration(hours) * time.Hour
 			return nil
@@ -117,18 +117,21 @@ func newStorageCommand(opts *options) *cobra.Command {
 		},
 	}
 	link.Flags().StringVar(&key, "key", "", "object key to link, as printed by storage list (required)")
-	link.Flags().StringVar(&expiry, "expires", "24h", "link validity in whole hours, 1-24")
+	link.Flags().StringVar(&expiry, "expires", "24h", "link validity in whole hours, 1-168 (7 days; default 24h)")
 	command.AddCommand(link)
 	return command
 }
 
-// parseExpiryHours accepts only whole-hour values between 1 and 24.
+// parseExpiryHours accepts only whole-hour values from 1 up to maxExpiryHours.
+// maxExpiryHours is the longest validity SigV4 presigned URLs support (7 days).
+const maxExpiryHours = 168
+
 func parseExpiryHours(value string) (int, error) {
 	if !strings.HasSuffix(value, "h") {
 		return 0, fmt.Errorf("invalid expiry")
 	}
 	hours, err := strconv.Atoi(strings.TrimSuffix(value, "h"))
-	if err != nil || hours < 1 || hours > 24 {
+	if err != nil || hours < 1 || hours > maxExpiryHours {
 		return 0, fmt.Errorf("invalid expiry")
 	}
 	return hours, nil
