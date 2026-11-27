@@ -42,6 +42,7 @@ type App struct {
 	restorer            backup.SnapshotRestorer
 	checker             backup.RepositoryChecker
 	repairer            backup.IndexRepairer
+	rekeyer             backup.PasswordRekeyer
 	databaseMaintainers map[string]databaseMaintainer
 	reportBuilder       *report.Builder
 	reportDispatcher    *report.Dispatcher
@@ -122,6 +123,7 @@ func Open(ctx context.Context, configDir string) (*App, error) {
 		restorer:            engine,
 		checker:             engine,
 		repairer:            engine,
+		rekeyer:             engine,
 		databaseMaintainers: databaseMaintainers,
 		reportBuilder:       reportBuilder,
 		reportDispatcher:    reportDispatcher,
@@ -627,6 +629,17 @@ func (a *App) RepairIndex(ctx context.Context, siteName, destinationName string)
 		return backup.RepairOutcome{}, err
 	}
 	return (&backup.Repairer{ServerID: a.configuration.BackupNamespace(), Engine: a.repairer}).RepairSite(ctx, destinationName, site, storageConfig)
+}
+
+// RekeySite replaces the password of one incremental site's repository on one
+// of its destinations. Validation mirrors RepairIndex. newPassword is only
+// used for the new key file; the old password comes from the site YAML.
+func (a *App) RekeySite(ctx context.Context, siteName, destinationName, newPassword string) (backup.RekeyOutcome, error) {
+	site, storageConfig, err := a.incrementalSiteDestination(siteName, destinationName)
+	if err != nil {
+		return backup.RekeyOutcome{}, err
+	}
+	return (&backup.Rekeyer{ServerID: a.configuration.BackupNamespace(), Engine: a.rekeyer}).RekeySite(ctx, destinationName, site, storageConfig, newPassword)
 }
 
 // RestoreSnapshot restores one snapshot of one incremental site into the

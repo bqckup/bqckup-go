@@ -384,6 +384,40 @@ func (e *Engine) RepairIndex(ctx context.Context, repo backupincremental.RepoCon
 	}, nil
 }
 
+// RekeyRepository replaces the repository password. repo.Password must be
+// the current password; the new one is verified before the old key files
+// are removed (see repository.Rekey).
+func (e *Engine) RekeyRepository(ctx context.Context, repo backupincremental.RepoConfig, newPassword string) (backupincremental.RekeyResult, error) {
+	if err := ctx.Err(); err != nil {
+		return backupincremental.RekeyResult{}, err
+	}
+	if err := e.rejectUnsupportedURL(repo.URL); err != nil {
+		return backupincremental.RekeyResult{}, err
+	}
+	b, err := e.openBackend(ctx, repo)
+	if err != nil {
+		return backupincremental.RekeyResult{}, err
+	}
+	r, err := repository.OpenForRepair(ctx, b, repo.Password)
+	if err != nil {
+		return backupincremental.RekeyResult{}, &incremental.RedactedError{Category: "repository", Message: "could not open the repository with the current password", Err: err}
+	}
+	_, release, err := acquireExclusiveLock(ctx, b, r.MasterKey())
+	if err != nil {
+		return backupincremental.RekeyResult{}, err
+	}
+	defer release()
+
+	result, err := repository.Rekey(ctx, b, repo.Password, newPassword)
+	if err != nil {
+		return backupincremental.RekeyResult{}, &incremental.RedactedError{Category: "repository", Message: "could not replace the repository password", Err: err}
+	}
+	return backupincremental.RekeyResult{
+		KeyFileAdded:    result.KeyFileAdded,
+		KeyFilesRemoved: result.KeyFilesRemoved,
+	}, nil
+}
+
 // acquireExclusiveLock takes a restic-compatible exclusive lock and keeps
 // it fresh while the operation runs (restic renews its locks every ~5
 // minutes too), so a long backup never turns into a stale exclusive lock

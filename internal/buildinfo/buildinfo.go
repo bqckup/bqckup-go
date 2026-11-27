@@ -4,7 +4,7 @@ import "strings"
 
 // Values are replaced by release builds through -ldflags.
 var (
-	version = "v1.0.14"
+	version = "v1.0.15"
 	commit  = ""
 )
 

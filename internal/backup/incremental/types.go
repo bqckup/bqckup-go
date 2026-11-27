@@ -108,3 +108,9 @@ type RepairResult struct {
 	OldIndexesRemoved int     `json:"old_indexes_removed"`
 	NewIndexesWritten int     `json:"new_indexes_written"`
 }
+
+// RekeyResult is the outcome of replacing a repository's password.
+type RekeyResult struct {
+	KeyFileAdded    int `json:"key_file_added"`
+	KeyFilesRemoved int `json:"key_files_removed"`
+}

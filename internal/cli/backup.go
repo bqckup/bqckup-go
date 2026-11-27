@@ -342,6 +342,7 @@ func newBackupCommand(opts *options) *cobra.Command {
 	command.AddCommand(restore)
 	command.AddCommand(newCheckCommand(opts))
 	command.AddCommand(newRepairIndexCommand(opts))
+	command.AddCommand(newRekeyCommand(opts))
 	return command
 }
 
